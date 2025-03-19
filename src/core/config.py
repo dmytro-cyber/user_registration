@@ -1,12 +1,32 @@
-from pydantic_settings import BaseSettings
+import os
+from pathlib import Path
 
-class Settings(BaseSettings):
-    SECRET_KEY: str
-    ALGORITHM: str
-    ACCESS_TOKEN_EXPIRE_MINUTES: int
-    DATABASE_URL: str
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
 
-    class Config:
-        env_file = ".env"
+load_dotenv()
+
+
+class BaseAppSettings(BaseModel):
+    BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
+
+    PATH_TO_DB: str = Field(
+        default_factory=lambda: str(Path(__file__).parent.parent / "database" / "source" / "restaurants.db")
+    )
+
+    LOGIN_TIME_DAYS: int = 7
+
+
+class Settings(BaseAppSettings):
+    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "test_user")
+    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "test_password")
+    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "test_host")
+    POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT", "5432"))
+    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "test_db")
+
+    SECRET_KEY_ACCESS: str = os.getenv("SECRET_KEY_ACCESS", os.urandom(32).hex())
+    SECRET_KEY_REFRESH: str = os.getenv("SECRET_KEY_REFRESH", os.urandom(32).hex())
+    JWT_SIGNING_ALGORITHM: str = os.getenv("JWT_SIGNING_ALGORITHM", "HS256")
+
 
 settings = Settings()

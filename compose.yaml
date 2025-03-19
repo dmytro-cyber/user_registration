@@ -1,0 +1,82 @@
+services:
+  db:
+    image: 'postgres:latest'
+    container_name: postgres_restaurants
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - postgres_restaurants_data:/var/lib/postgresql/data/
+    networks:
+      - restaurants_network
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB -h 127.0.0.1 || exit 1" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: pgadmin_restaurants
+    ports:
+      - "3333:80"
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - pgadmin_restaurants_data:/var/lib/pgadmin
+    networks:
+      - restaurants_network
+
+  web:
+    restart: always
+    build: .
+    container_name: backend_restaurants
+    command: [ "/bin/bash", "/commands/run_web_server_dev.sh" ]
+    env_file:
+      - .env
+    environment:
+      - LOG_LEVEL=debug
+      - PYTHONPATH=/usr/src/fastapi
+      - WATCHFILES_FORCE_POLLING=true
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/usr/src/fastapi
+    networks:
+      - restaurants_network
+
+  migrator:
+    build: .
+    container_name: alembic_migrator_restaurants
+    command: ["/bin/bash", "/commands/run_migration.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./src:/usr/src/fastapi
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/usr/src/fastapi
+    networks:
+      - restaurants_network
+
+
+volumes:
+  postgres_restaurants_data:
+    driver: local
+  pgadmin_restaurants_data:
+    driver: local
+
+networks:
+  restaurants_network:
+    driver: bridge

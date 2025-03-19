@@ -37,12 +37,6 @@ class UserLoginRequestSchema(BaseEmailPasswordSchema):
     pass
 
 
-class UserLoginResponseSchema(BaseModel):
-    access_token: str
-    refresh_token: str
-    token_type: str = "bearer"
-
-
 class UserRegistrationResponseSchema(BaseModel):
     id: int
     email: EmailStr
@@ -50,10 +44,22 @@ class UserRegistrationResponseSchema(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class TokenRefreshRequestSchema(BaseModel):
-    refresh_token: str
+class UserInvitationResponseSchema(BaseModel):
+    invite_code: str
 
 
-class TokenRefreshResponseSchema(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
+class UserInvitationRequestSchema(BaseModel):
+    email: EmailStr
+    expire_days_delta: int | None
+    role_id: int
+
+
+class UserRoleResponseSchema(BaseModel):
+    id: int
+    name: str
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserRoleListResponseSchema(BaseModel):
+    roles: list[UserRoleResponseSchema]

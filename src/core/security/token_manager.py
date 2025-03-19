@@ -32,6 +32,15 @@ class JWTAuthManager(JWTAuthManagerInterface):
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, secret_key, algorithm=self._algorithm)
 
+    def _create_invitation(self, data: dict, secret_key: str, expires_delta: timedelta) -> str:
+        """
+        Create a JWT token with provided data, secret key, and expiration time.
+        """
+        to_encode = data.copy()
+        expire = datetime.now(timezone.utc) + expires_delta
+        to_encode.update({"exp": expire})
+        return jwt.encode(to_encode, secret_key, algorithm=self._algorithm)
+
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """
         Create a new access token with a default or specified expiration time.
@@ -52,6 +61,16 @@ class JWTAuthManager(JWTAuthManagerInterface):
             expires_delta or timedelta(minutes=self._REFRESH_KEY_TIMEDELTA_MINUTES),
         )
 
+    def create_invitation_code(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+        """
+        Create a new refresh token with a default or specified expiration time.
+        """
+        return self._create_invitation(
+            data,
+            self._secret_key_refresh,
+            expires_delta or timedelta(days=7),
+        )
+
     def decode_access_token(self, token: str) -> dict:
         """
         Decode and validate an access token, returning the token's data.
@@ -69,6 +88,17 @@ class JWTAuthManager(JWTAuthManagerInterface):
         """
         try:
             return jwt.decode(token, self._secret_key_refresh, algorithms=[self._algorithm])
+        except ExpiredSignatureError:
+            raise TokenExpiredError
+        except JWTError:
+            raise InvalidTokenError
+
+    def decode_invite_code(self, code: str) -> dict:
+        """
+        Decode and validate a invitation code, returning the invitation's data.
+        """
+        try:
+            return jwt.decode(code, self._secret_key_refresh, algorithms=[self._algorithm])
         except ExpiredSignatureError:
             raise TokenExpiredError
         except JWTError:

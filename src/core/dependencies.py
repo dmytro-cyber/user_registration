@@ -5,7 +5,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from core.config import Settings
-from core.security.http import get_token
 from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
 
@@ -28,8 +27,8 @@ def get_jwt_auth_manager(
 
 
 async def get_current_user(request: Request, settings: Settings = Depends(get_settings)):
-    from db import get_db
-    from models.user import UserModel
+    from db.session import get_db
+    from models.user import UserModel, UserRoleModel
     
     token = request.cookies.get("access_token")
     
@@ -45,7 +44,7 @@ async def get_current_user(request: Request, settings: Settings = Depends(get_se
         if user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
-        result = await db.execute(select(UserModel).filter(UserModel.id == user_id))
+        result = await db.execute(select(UserModel).join(UserRoleModel).filter(UserModel.id == user_id))
         user = result.scalars().first()
 
         if user is None:

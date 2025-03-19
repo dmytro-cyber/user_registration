@@ -17,6 +17,7 @@ from core.security.passwords import hash_password, verify_password
 from core.security.utils import generate_secure_token
 
 
+
 class UserRoleEnum(str, enum.Enum):
     USER = "user"
     MODERATOR = "staff"
@@ -24,15 +25,15 @@ class UserRoleEnum(str, enum.Enum):
 
 
 class UserRoleModel(Base):
-    __tablename__ = "user_groups"
+    __tablename__ = "user_roles"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[UserRoleEnum] = mapped_column(Enum(UserRoleEnum), nullable=False, unique=True)
 
-    users: Mapped[List["UserModel"]] = relationship("UserModel", back_populates="group")
+    users: Mapped[List["UserModel"]] = relationship("UserModel", back_populates="role")
 
     def __repr__(self):
-        return f"<UserGroupModel(id={self.id}, name={self.name})>"
+        return f"<UserRoleModel(id={self.id}, name={self.name})>"
 
 
 class UserModel(Base):
@@ -48,10 +49,6 @@ class UserModel(Base):
     
     role_id: Mapped[int] = mapped_column(ForeignKey("user_roles.id", ondelete="CASCADE"), nullable=False)
     role: Mapped["UserRoleModel"] = relationship("UserRoleModel", back_populates="users")
-
-    refresh_tokens: Mapped[List["RefreshTokenModel"]] = relationship(
-        "RefreshTokenModel", back_populates="user", cascade="all, delete-orphan"
-    )
 
     def __repr__(self):
         return f"<UserModel(id={self.id}, email={self.email})>"
@@ -87,46 +84,3 @@ class UserModel(Base):
     def validate_email(self, key, value):
         return validators.validate_email(value.lower())
 
-
-class TokenBaseModel(Base):
-    __abstract__ = True
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    token: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, default=generate_secure_token)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc) + timedelta(days=1),
-    )
-
-    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-
-
-class RefreshTokenModel(TokenBaseModel):
-    __tablename__ = "refresh_tokens"
-
-    user: Mapped["UserModel"] = relationship("UserModel", back_populates="refresh_tokens")
-    token: Mapped[str] = mapped_column(String(512), unique=True, nullable=False, default=generate_secure_token)
-
-    @classmethod
-    def create(cls, user_id: int, days_valid: int, token: str) -> "RefreshTokenModel":
-        """
-        Factory method to create a new RefreshTokenModel instance.
-        """
-        expires_at = datetime.now(timezone.utc) + timedelta(days=days_valid)
-        return cls(user_id=user_id, expires_at=expires_at, token=token)
-
-    def __repr__(self):
-        return f"<RefreshTokenModel(id={self.id}, token={self.token}, expires_at={self.expires_at})>"
-
-
-class InviteModel(Base):
-    __tablename__ = "invites"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    code: Mapped[str] = mapped_column(String, unique=True)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        nullable=False,
-        default=lambda: datetime.now(timezone.utc) + timedelta(days=1),
-    )
