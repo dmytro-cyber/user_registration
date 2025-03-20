@@ -52,6 +52,9 @@ class UserModel(Base):
 
     def __repr__(self):
         return f"<UserModel(id={self.id}, email={self.email})>"
+    
+    def has_role(self, role_name: UserRoleEnum) -> bool:
+        return self.role.name == role_name
 
     @classmethod
     def create(cls, email: str, raw_password: str) -> "UserModel":

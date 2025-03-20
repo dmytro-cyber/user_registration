@@ -63,3 +63,21 @@ class UserRoleResponseSchema(BaseModel):
 
 class UserRoleListResponseSchema(BaseModel):
     roles: list[UserRoleResponseSchema]
+
+
+class UserResponseSchema(BaseModel):
+    email: EmailStr
+    first_name: str
+    last_name: str
+    phone_number: str
+    date_of_birth: datetime.date
+    role: str
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+class UserUpdateRequestSchema(BaseModel):
+    first_name: str | None
+    last_name: str | None
+    phone_number: str | None
+    date_of_birth: datetime.date | None
