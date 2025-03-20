@@ -13,7 +13,8 @@ from schemas.user import (
 )
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
-from core.security.passwords import pwd_context, validate_password_strength
+from core.security.passwords import pwd_context
+from models.validators.user import validate_password_strength
 from models.user import UserModel, UserRoleModel, UserRoleEnum
 from core.security.interfaces import JWTAuthManagerInterface
 from core.dependencies import get_current_user
@@ -34,9 +35,7 @@ router = APIRouter()
     responses={
         409: {
             "description": "Conflict - User with this email already exists.",
-            "content": {
-                "application/json": {"example": {"detail": "A user with this email already exists."}}
-            },
+            "content": {"application/json": {"example": {"detail": "A user with this email already exists."}}},
         },
         500: {
             "description": "Internal Server Error - An error occurred during user creation.",
@@ -48,7 +47,7 @@ async def invite_user(
     user_data: UserInvitationRequestSchema,
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager)
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
 ) -> UserInvitationResponseSchema:
     """
     Endpoint for user invitation.
@@ -57,19 +56,18 @@ async def invite_user(
     If a user with the same email already exists, an HTTP 409 error is raised.
     In case of any unexpected issues during the creation process, an HTTP 500 error is returned.
     """
-    
+
     if not current_user.has_role(UserRoleEnum.ADMIN):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be an ADMIN to perform this action.",
         )
-    
+
     existing_user = await db.execute(select(UserModel).where(UserModel.email == user_data.email))
     existing_user = existing_user.scalars().first()
     if existing_user is not None:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"A user with this email {user_data.email} already exists."
+            status_code=status.HTTP_409_CONFLICT, detail=f"A user with this email {user_data.email} already exists."
         )
 
     invite_data = {
@@ -85,9 +83,7 @@ async def invite_user(
     response_model=UserRoleListResponseSchema,
     summary="Get User Roles",
 )
-async def get_user_roles(
-    db: AsyncSession = Depends(get_db)
-) -> UserRoleListResponseSchema:
+async def get_user_roles(db: AsyncSession = Depends(get_db)) -> UserRoleListResponseSchema:
     """
     Endpoint for getting user roles.
 
@@ -105,10 +101,7 @@ async def get_user_roles(
         return UserRoleListResponseSchema(roles=response)
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail=f"An error occurred during user roles fetching: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"An error occurred during user roles fetching: {str(e)}")
 
 
 @router.post(

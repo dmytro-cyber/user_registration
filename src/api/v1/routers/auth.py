@@ -44,7 +44,7 @@ router = APIRouter()
 async def register_user(
     user_data: UserRegistrationRequestSchema,
     db: AsyncSession = Depends(get_db),
-    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager)
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
 ) -> UserRegistrationResponseSchema:
     """
     Endpoint for user registration.
@@ -54,11 +54,10 @@ async def register_user(
     In case of any unexpected issues during the creation process, an HTTP 500 error is returned.
     """
 
-    decoded_code = verefy_invite(user_data, db, jwt_manager)
-    
-    result = await db.execute(select(UserModel).where(UserModel.email == user_data.user_email))
+    decoded_code = verefy_invite(user_data, jwt_manager)
+
+    result = await db.execute(select(UserModel).where(UserModel.email == user_data.email))
     existing_user = result.scalars().first()
-    role_id = decoded_code.get("role_id")
 
     if existing_user:
         raise HTTPException(
@@ -70,12 +69,12 @@ async def register_user(
         new_user = UserModel.create(
             email=str(user_data.email),
             raw_password=user_data.password,
-            role_id=role_id,
-            first_name=user_data.first_name,
-            last_name=user_data.last_name,
-            phone_number=user_data.phone_number,
-            date_of_birth=user_data.date_of_birth,
         )
+        new_user.role_id = decoded_code.get("role_id")
+        new_user.first_name = user_data.first_name
+        new_user.last_name = user_data.last_name
+        new_user.phone_number = user_data.phone_number
+        new_user.date_of_birth = user_data.date_of_birth
         db.add(new_user)
         await db.commit()
         await db.refresh(new_user)
@@ -132,22 +131,8 @@ async def login_user(
         )
 
     jwt_refresh_token = jwt_manager.create_refresh_token({"user_id": user.id})
-
-    # try:
-    #     refresh_token = RefreshTokenModel.create(
-    #         user_id=user.id,
-    #         days_valid=settings.LOGIN_TIME_DAYS,
-    #         token=jwt_refresh_token,
-    #     )
-    #     db.add(refresh_token)
-    #     await db.commit()
-    # except SQLAlchemyError:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-    #         detail="An error occurred while processing the request.",
-    #     )
-
     jwt_access_token = jwt_manager.create_access_token({"user_id": user.id})
+
     response.set_cookie("access_token", jwt_access_token, httponly=True, samesite="lax")
     response.set_cookie("refresh_token", jwt_refresh_token, httponly=True, samesite="lax")
     return {"message": "Login successful."}
@@ -195,15 +180,6 @@ async def refresh_access_token(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(error),
         )
-
-    # result = await db.execute(select(RefreshTokenModel).filter_by(token=refresh_token))
-    # refresh_token_record = result.scalar_one_or_none()
-
-    # if not refresh_token_record:
-    #     raise HTTPException(
-    #         status_code=status.HTTP_401_UNAUTHORIZED,
-    #         detail="Refresh token not found.",
-    #     )
 
     result = await db.execute(select(UserModel).filter_by(id=user_id))
     user = result.scalar_one_or_none()

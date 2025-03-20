@@ -30,9 +30,9 @@ def get_jwt_auth_manager(
 async def get_current_user(request: Request, settings: Settings = Depends(get_settings)):
     from db.session import get_db
     from models.user import UserModel, UserRoleModel
-    
+
     token = request.cookies.get("access_token")
-    
+
     db: AsyncSession = await anext(get_db())
     try:
         payload = JWTAuthManager(
@@ -45,7 +45,9 @@ async def get_current_user(request: Request, settings: Settings = Depends(get_se
         if user_id is None:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
 
-        result = await db.execute(select(UserModel).options(selectinload(UserModel.role)).filter(UserModel.id == user_id))
+        result = await db.execute(
+            select(UserModel).options(selectinload(UserModel.role)).filter(UserModel.id == user_id)
+        )
         user = result.scalars().first()
 
         if user is None:

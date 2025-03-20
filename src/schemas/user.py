@@ -4,6 +4,7 @@ from models.validators import user as validators
 
 import datetime
 
+
 class BaseEmailPasswordSchema(BaseModel):
     email: EmailStr
     password: str
@@ -57,7 +58,7 @@ class UserInvitationRequestSchema(BaseModel):
 class UserRoleResponseSchema(BaseModel):
     id: int
     name: str
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -72,7 +73,7 @@ class UserResponseSchema(BaseModel):
     phone_number: str
     date_of_birth: datetime.date
     role: str
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 

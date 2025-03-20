@@ -15,14 +15,14 @@ class JWTAuthManagerInterface(ABC):
         Create a new access token.
         """
         pass
-    
+
     @abstractmethod
     def create_invitation_code(self, data: dict) -> str:
         """
         Create a new invitation code.
         """
         pass
-    
+
     @abstractmethod
     def create_invitation_code(self, data: dict) -> str:
         """
@@ -44,14 +44,12 @@ class JWTAuthManagerInterface(ABC):
         """
         pass
 
-
     @abstractmethod
     def decode_refresh_token(self, code: str) -> dict:
         """
         Decode and validate a invitation code.
         """
         pass
-
 
     @abstractmethod
     def verify_refresh_token_or_raise(self, token: str) -> None:

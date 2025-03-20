@@ -23,6 +23,7 @@ target_metadata = Base.metadata
 
 settings = Settings()
 
+
 def get_url():
     return POSTGRESQL_DATABASE_URL
 
