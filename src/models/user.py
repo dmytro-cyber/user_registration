@@ -38,6 +38,7 @@ class UserModel(Base):
     phone_number: Mapped[str] = mapped_column(String, nullable=True)
     date_of_birth: Mapped[date] = mapped_column(Date, nullable=True)
     email: Mapped[str] = mapped_column(String, unique=True, nullable=False)
+    temp_email: Mapped[str] = mapped_column(String, nullable=True)
     _hashed_password: Mapped[str] = mapped_column(String, nullable=False)
 
     role_id: Mapped[int] = mapped_column(ForeignKey("user_roles.id", ondelete="CASCADE"), nullable=False)

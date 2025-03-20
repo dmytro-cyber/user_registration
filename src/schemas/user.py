@@ -82,3 +82,7 @@ class UserUpdateRequestSchema(BaseModel):
     last_name: str | None
     phone_number: str | None
     date_of_birth: datetime.date | None
+
+
+class UpdateEmailSchema(BaseModel):
+    new_email: EmailStr

@@ -32,15 +32,6 @@ class JWTAuthManager(JWTAuthManagerInterface):
         to_encode.update({"exp": expire})
         return jwt.encode(to_encode, secret_key, algorithm=self._algorithm)
 
-    def _create_invitation(self, data: dict, secret_key: str, expires_delta: timedelta) -> str:
-        """
-        Create a JWT token with provided data, secret key, and expiration time.
-        """
-        to_encode = data.copy()
-        expire = datetime.now(timezone.utc) + expires_delta
-        to_encode.update({"exp": expire})
-        return jwt.encode(to_encode, secret_key, algorithm=self._algorithm)
-
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """
         Create a new access token with a default or specified expiration time.
@@ -65,7 +56,7 @@ class JWTAuthManager(JWTAuthManagerInterface):
         """
         Create a new refresh token with a default or specified expiration time.
         """
-        return self._create_invitation(
+        return self._create_token(
             data,
             self._secret_key_refresh,
             expires_delta or timedelta(days=7),

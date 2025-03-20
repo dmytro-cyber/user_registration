@@ -10,17 +10,20 @@ from schemas.user import (
     UserResponseSchema,
     UserUpdateRequestSchema,
     ChangePasswordRequestSchema,
+    UpdateEmailSchema,
 )
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
 from core.security.passwords import pwd_context
-from models.validators.user import validate_password_strength
+from services.email import send_email
+from models.validators.user import validate_password_strength, validate_email
 from models.user import UserModel, UserRoleModel, UserRoleEnum
 from core.security.interfaces import JWTAuthManagerInterface
 from core.dependencies import get_current_user
 from db.session import get_db
+from jose import jwt
 
-import datetime
+from datetime import timedelta
 
 
 router = APIRouter()
@@ -276,3 +279,58 @@ async def update_current_user_info(
         date_of_birth=current_user.date_of_birth,
         role=current_user.role.name,
     )
+
+
+@router.post("/users/change-email")
+async def request_email_change(
+    data: UpdateEmailSchema,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+):
+    new_email = validate_email(data.new_email)
+    existing_user = await db.execute(select(UserModel).filter(UserModel.email == new_email))
+    if existing_user.scalar():
+        raise HTTPException(status_code=400, detail="This email is already in use")
+
+    token_data = {"user_id": current_user.id, "new_email": new_email}
+    token = jwt_manager.create_invitation_code(token_data, expires_delta=timedelta(hours=1))
+
+    result = await db.execute(select(UserModel).filter(UserModel.id == current_user.id))
+    current_user = result.scalars().first()
+    current_user.temp_email = new_email
+    await db.commit()
+
+    confirm_url = f"127.0.0.1:8000/api/v1/users/confirm-email?token={token}"
+    await send_email(
+        current_user.email, "Confirm Email Change", f"To change your email, follow the link: {confirm_url}"
+    )
+
+    return {"message": "email change request sent"}
+
+
+@router.get("/users/confirm-email")
+async def confirm_email_change(
+    token: str,
+    db: AsyncSession = Depends(get_db),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+):
+    try:
+        payload = jwt_manager.decode_refresh_token(token)
+        user_id = payload["user_id"]
+        new_email = payload["new_email"]
+
+        result = await db.execute(select(UserModel).filter(UserModel.id == user_id))
+        user = result.scalars().first()
+        if not user or user.temp_email != new_email:
+            print(user.temp_email, new_email, user)
+            raise HTTPException(status_code=400, detail="Bad request")
+
+        user.email = new_email
+        user.temp_email = None
+        await db.commit()
+
+        return {"message": "Email successfully changed"}
+
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

@@ -28,5 +28,11 @@ class Settings(BaseAppSettings):
     SECRET_KEY_REFRESH: str = os.getenv("SECRET_KEY_REFRESH", os.urandom(32).hex())
     JWT_SIGNING_ALGORITHM: str = os.getenv("JWT_SIGNING_ALGORITHM", "HS256")
 
+    SMTP_SERVER: str = os.getenv("SMTP_SERVER")
+    SMTP_PORT: int = os.getenv("SMTP_PORT")
+    SMTP_USER: str = os.getenv("SMTP_USER")
+    SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
+    EMAIL_FROM: str = os.getenv("EMAIL_FROM")
+
 
 settings = Settings()
