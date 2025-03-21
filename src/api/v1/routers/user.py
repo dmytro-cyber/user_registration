@@ -28,7 +28,7 @@ from jose import jwt
 from datetime import timedelta
 
 
-router = APIRouter()
+router = APIRouter(prefix="/users")
 
 
 @router.post(
@@ -283,7 +283,7 @@ async def update_current_user_info(
     )
 
 
-@router.post("/users/change-email")
+@router.post("/change-email")
 async def request_email_change(
     data: UpdateEmailSchema,
     db: AsyncSession = Depends(get_db),
@@ -311,7 +311,7 @@ async def request_email_change(
     return {"message": "email change request sent"}
 
 
-@router.get("/users/confirm-email")
+@router.get("/confirm-email")
 async def confirm_email_change(
     token: str,
     db: AsyncSession = Depends(get_db),
