@@ -11,6 +11,8 @@ from schemas.user import (
     UserUpdateRequestSchema,
     ChangePasswordRequestSchema,
     UpdateEmailSchema,
+    PasswordResetRequestSchema,
+    PasswordResetConfirmSchema,
 )
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
@@ -334,3 +336,41 @@ async def confirm_email_change(
 
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/password-reset/request/")
+async def request_password_reset(
+    data: PasswordResetRequestSchema,
+    db: AsyncSession = Depends(get_db),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+):
+    result = await db.execute(select(UserModel).filter(UserModel.email == data.email))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    token = jwt_manager.create_invitation_code({"sub": user.email}, expires_delta=timedelta(minutes=15))
+    reset_link = f"127.0.0.1:8000/api/v1/password-reset/confirm?token={token}"
+
+    await send_email(user.email, "Password Reset", f"Click the link to reset your password: {reset_link}")
+    return {"message": "Password reset link sent"}
+
+
+@router.post("/password-reset/confirm/")
+async def confirm_password_reset(
+    data: PasswordResetConfirmSchema,
+    db: AsyncSession = Depends(get_db),
+    jwt_manager: JWTAuthManagerInterface = Depends(get_jwt_auth_manager),
+):
+    payload = jwt_manager.decode_refresh_token(data.token)
+    if not payload:
+        raise HTTPException(status_code=400, detail="Invalid or expired token")
+
+    result = await db.execute(select(UserModel).filter(UserModel.email == payload["sub"]))
+    user = result.scalars().first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    user.password = data.new_password
+    await db.commit()
+    return {"message": "Password successfully reset"}

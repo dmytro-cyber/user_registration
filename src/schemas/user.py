@@ -26,6 +26,15 @@ class ChangePasswordRequestSchema(BaseModel):
     new_password: str
 
 
+class PasswordResetRequestSchema(BaseModel):
+    email: EmailStr
+
+
+class PasswordResetConfirmSchema(BaseModel):
+    token: str
+    new_password: str
+
+
 class UserRegistrationRequestSchema(BaseEmailPasswordSchema):
     invite_code: str
     first_name: str
