@@ -266,7 +266,9 @@ async def update_current_user_info(
     """
     Endpoint to update current user's information.
     """
-    for field, value in user_data.model_dump.items():
+    result = await db.execute(select(UserModel).where(UserModel.id == current_user.id))
+    current_user = result.scalars().first()
+    for field, value in user_data.model_dump().items():
         if value:
             setattr(current_user, field, value)
 

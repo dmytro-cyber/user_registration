@@ -13,7 +13,8 @@ from core.security.utils import generate_secure_token
 
 class UserRoleEnum(str, enum.Enum):
     USER = "user"
-    MODERATOR = "staff"
+    VEHICLE_MANAGER = "vehicle_manager"
+    PART_MANAGER = "part_manager"
     ADMIN = "admin"
 
 
