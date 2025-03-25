@@ -133,8 +133,8 @@ async def login_user(
     jwt_refresh_token = jwt_manager.create_refresh_token({"user_id": user.id})
     jwt_access_token = jwt_manager.create_access_token({"user_id": user.id})
 
-    response.set_cookie("access_token", jwt_access_token, httponly=True, samesite="lax")
-    response.set_cookie("refresh_token", jwt_refresh_token, httponly=True, samesite="lax")
+    response.set_cookie("access_token", jwt_access_token, httponly=True, samesite="None", secure=True)
+    response.set_cookie("refresh_token", jwt_refresh_token, httponly=True, samesite="None", secure=True)
     return {"message": "Login successful."}
 
 
@@ -192,8 +192,8 @@ async def refresh_access_token(
 
     new_access_token = jwt_manager.create_access_token({"user_id": user_id})
     new_refresh_token = jwt_manager.create_refresh_token({"user_id": user_id})
-    response.set_cookie("access_token", new_access_token, httponly=True, samesite="lax")
-    response.set_cookie("refresh_token", new_refresh_token, httponly=True, samesite="lax")
+    response.set_cookie("access_token", new_access_token, httponly=True, samesite="None", secure=True)
+    response.set_cookie("refresh_token", new_refresh_token, httponly=True, samesite="None", secure=True)
 
     return {"message": "Access token refreshed"}
 

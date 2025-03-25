@@ -17,23 +17,23 @@ async def get_cars(db: AsyncSession = Depends(get_db)) -> CarListResponseSchema:
     result = [
         CarBase(
             vin=car.vin,
-            vehicle=car.vehicle,
-            year=car.year,
-            mileage=car.mileage,
-            auction=car.auction,
-            auction_name=car.auction_name,
-            date=car.date,
-            lot=car.lot,
-            seller=car.seller,
-            owners=car.owners,
-            accident_count=car.accident_count,
-            engine=car.engine,
-            has_keys=car.has_keys,
-            predicted_roi=car.predicted_roi,
-            predicted_profit_margin=car.predicted_profit_margin,
-            bid=car.bid,
-            suggested_bid=car.suggested_bid,
-            photos=car.photos
+            vehicle=car.vehicle or None,
+            year=car.year or None,
+            mileage=car.mileage or None,
+            auction=car.auction or None,
+            auction_name=car.auction_name or None,
+            date=car.date or None,
+            lot=car.lot or None,
+            seller=car.seller or None,
+            owners=car.owners or None,
+            accident_count=car.accident_count or None,
+            engine=car.engine or None,
+            has_keys=car.has_keys or None,
+            predicted_roi=car.predicted_roi or None,
+            predicted_profit_margin=car.predicted_profit_margin or None,
+            bid=car.bid or None,
+            suggested_bid=car.suggested_bid or None,
+            photos=car.photos or []
         )
         for car in cars
     ]

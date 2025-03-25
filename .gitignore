@@ -175,3 +175,5 @@ cython_debug/
 
 # Additional
 car_data.csv
+cert.pem
+key.pem
