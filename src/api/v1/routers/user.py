@@ -266,6 +266,7 @@ async def update_current_user_info(
     """
     Endpoint to update current user's information.
     """
+    role = current_user.role.name
     result = await db.execute(select(UserModel).where(UserModel.id == current_user.id))
     current_user = result.scalars().first()
     for field, value in user_data.model_dump().items():
@@ -281,7 +282,7 @@ async def update_current_user_info(
         last_name=current_user.last_name,
         phone_number=current_user.phone_number,
         date_of_birth=current_user.date_of_birth,
-        role=current_user.role.name,
+        role=role,
     )
 
 
