@@ -3,12 +3,11 @@ from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 
 
-class Photo(BaseModel):
-    id: int
+class PhotoSchema(BaseModel):
     url: str
 
 
-class CarBase(BaseModel):
+class CarBaseSchema(BaseModel):
     vin: str | None
     vehicle: str | None
     year: int | None
@@ -27,29 +26,29 @@ class CarBase(BaseModel):
     bid: float | None
     suggested_bid: float | None
     location: str | None
-    photos: List[Photo]
+    photos: List[PhotoSchema]
 
     model_config = ConfigDict(from_attributes=True)
 
 
-class CarCreate(CarBase):
+class CarCreate(CarBaseSchema):
     pass
 
 
-class CarUpdate(CarBase):
+class CarUpdate(CarBaseSchema):
     pass
 
 
-class CarInDBBase(CarBase):
-    id: int
+# class CarInDBBase(CarBaseSchema):
+#     id: int
 
-    class Config:
-        orm_mode = True
+#     class Config:
+#         orm_mode = True
 
 
-class Car(CarInDBBase):
-    pass
+# class Car(CarInDBBase):
+#     pass
 
 
 class CarListResponseSchema(BaseModel):
-    cars: List[CarBase]
+    cars: List[CarBaseSchema]

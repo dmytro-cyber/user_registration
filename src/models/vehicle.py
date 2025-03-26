@@ -17,7 +17,7 @@ class CarStatus(enum.Enum):
     SOLD = "sold"
 
 
-class Car(Base):
+class CarModel(Base):
     __tablename__ = "cars"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -80,7 +80,7 @@ class Car(Base):
     photos = relationship("Photo", back_populates="car", cascade="all, delete-orphan")
 
 
-class Part(Base):
+class PartModel(Base):
     __tablename__ = "parts"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -91,7 +91,7 @@ class Part(Base):
     car = relationship("Car", back_populates="parts")
 
 
-class Photo(Base):
+class PhotoModel(Base):
     __tablename__ = "photos"
 
     id = Column(Integer, primary_key=True, index=True)
