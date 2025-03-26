@@ -40,6 +40,5 @@ async def get_cars(
     
     return CarListResponseSchema(
         cars=[CarBaseSchema.model_validate(car) for car in cars],
-        total_pages=total_pages,
         page_links=page_links
     )
