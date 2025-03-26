@@ -26,7 +26,7 @@ class CarBase(BaseModel):
     predicted_profit_margin: float | None
     bid: float | None
     suggested_bid: float | None
-    # location: str | None
+    location: str | None
     photos: List[Photo]
 
     model_config = ConfigDict(from_attributes=True)

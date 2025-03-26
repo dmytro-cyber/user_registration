@@ -31,6 +31,7 @@ class Car(Base):
     lot = Column(Integer, nullable=True)
     seller = Column(String, nullable=True)
     owners = Column(Integer, nullable=True)
+    location = Column(String, nullable=True)
 
     accident_count = Column(Integer, nullable=True)
 
