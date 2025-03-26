@@ -9,8 +9,8 @@ class Photo(BaseModel):
 
 
 class CarBase(BaseModel):
-    vin: str
-    vehicle: str
+    vin: str | None
+    vehicle: str | None
     year: int | None
     mileage: int | None
     auction: str | None
@@ -26,8 +26,8 @@ class CarBase(BaseModel):
     predicted_profit_margin: float | None
     bid: float | None
     suggested_bid: float | None
-    location: str | None
-    photos: List[Photo] | None
+    # location: str | None
+    photos: List[Photo]
 
     model_config = ConfigDict(from_attributes=True)
 
