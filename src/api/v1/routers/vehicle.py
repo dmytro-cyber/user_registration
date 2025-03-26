@@ -33,7 +33,7 @@ async def get_cars(db: AsyncSession = Depends(get_db)) -> CarListResponseSchema:
             predicted_profit_margin=car.predicted_profit_margin or None,
             bid=car.bid or None,
             suggested_bid=car.suggested_bid or None,
-            photos=car.photos or []
+            photos=car.photos or [],
         )
         for car in cars
     ]

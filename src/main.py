@@ -18,11 +18,11 @@ async def on_startup():
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_origins=["https://localhost:5173"],
+    allow_origins=["https://localhost:5173", "https://127.0.0.1:5173"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["set-cookie"]
+    expose_headers=["set-cookie"],
 )
 
 app.include_router(auth_router, prefix="/api/v1", tags=["Auth"])

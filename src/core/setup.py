@@ -51,7 +51,9 @@ def safe_int(value):
 
 def safe_float(value):
     try:
-        return float(value.replace("$", "").replace(",", ".").replace(" ", "")) if value and value != '#DIV/0!' else None
+        return (
+            float(value.replace("$", "").replace(",", ".").replace(" ", "")) if value and value != "#DIV/0!" else None
+        )
     except ValueError:
         return None
 
