@@ -53,5 +53,4 @@ class CarUpdate(CarBaseSchema):
 class CarListResponseSchema(BaseModel):
     cars: List[CarBaseSchema]
     total_pages: int
-    next_page: str | None
-    prev_page: str | None
+    page_links: dict
