@@ -8,7 +8,7 @@ from models import UserModel, UserRoleModel, UserRoleEnum
 from sqlalchemy.exc import IntegrityError
 import csv
 from datetime import datetime
-from models.vehicle import Car, Part
+from models.vehicle import CarModel, PartModel
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -60,7 +60,7 @@ def safe_float(value):
 
 async def import_cars_from_csv(csv_file):
     async with SessionLocal() as session:
-        result = await session.execute(select(Car))
+        result = await session.execute(select(CarModel))
         cars = result.scalars().all()
         if not cars:
             with open(csv_file, newline="", encoding="utf-8") as file:
@@ -101,7 +101,7 @@ async def import_cars_from_csv(csv_file):
                         part_name = row.get(f"Part {i}", "").strip()
                         part_value = row.get(f"Value {i}", "").strip()
                         if part_name and part_value:
-                            part = Part(
+                            part = PartModel(
                                 name=part_name,
                                 value=float(part_value.replace(",", ".")) if part_value else None,
                                 car_id=car.id,

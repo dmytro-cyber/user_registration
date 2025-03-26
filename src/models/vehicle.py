@@ -76,8 +76,8 @@ class CarModel(Base):
     bid = Column(Float, nullable=True)
 
     # Relationships
-    parts = relationship("Part", back_populates="car", cascade="all, delete-orphan")
-    photos = relationship("Photo", back_populates="car", cascade="all, delete-orphan")
+    parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
+    photos = relationship("PhotoModel", back_populates="car", cascade="all, delete-orphan")
 
 
 class PartModel(Base):
@@ -88,7 +88,7 @@ class PartModel(Base):
     value = Column(Float, nullable=True)
 
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
-    car = relationship("Car", back_populates="parts")
+    car = relationship("CarModel", back_populates="parts")
 
 
 class PhotoModel(Base):
@@ -98,4 +98,4 @@ class PhotoModel(Base):
     url = Column(String, nullable=False)
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
 
-    car = relationship("Car", back_populates="photos")
+    car = relationship("CarModel", back_populates="photos")
