@@ -55,7 +55,7 @@ class UserRegistrationResponseSchema(BaseModel):
 
 
 class UserInvitationResponseSchema(BaseModel):
-    invite_code: str
+    invite_link: str
 
 
 class UserInvitationRequestSchema(BaseModel):
@@ -95,3 +95,8 @@ class UserUpdateRequestSchema(BaseModel):
 
 class UpdateEmailSchema(BaseModel):
     new_email: EmailStr
+
+
+class SendInvieteRequestSchema(BaseModel):
+    email: str
+    invite: str

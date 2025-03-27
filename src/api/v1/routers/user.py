@@ -13,6 +13,7 @@ from schemas.user import (
     UpdateEmailSchema,
     PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
+    SendInvieteRequestSchema
 )
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
@@ -80,7 +81,8 @@ async def invite_user(
         "role_id": user_data.role_id,
     }
     invite_code = jwt_manager.create_invitation_code(invite_data, expires_delta=user_data.expire_days_delta)
-    return UserInvitationResponseSchema(invite_code=invite_code)
+    invite_link = f"https://link-to-front?invite={invite_code}"
+    return UserInvitationResponseSchema(invite_link=invite_link)
 
 
 @router.get(
@@ -377,3 +379,15 @@ async def confirm_password_reset(
     user.password = data.new_password
     await db.commit()
     return {"message": "Password successfully reset"}
+
+
+@router.post(
+    "/send-invite/",
+    response_model=MessageResponseSchema
+)
+async def send_invite(
+    data: SendInvieteRequestSchema,
+    current_user: UserModel = Depends(get_current_user),
+) -> MessageResponseSchema:
+    await send_email(data.email, "Invitation", f"Click the link to complete registration: {data.invite}")
+    return MessageResponseSchema(message="Invitation was succesfuly delivered")
