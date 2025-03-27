@@ -1,4 +1,5 @@
 from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from typing import List
 
 from models.validators import user as validators
 
@@ -102,3 +103,8 @@ class UpdateEmailSchema(BaseModel):
 class SendInvieteRequestSchema(BaseModel):
     email: str
     invite: str
+
+
+class UserAdminListResponseSchema(BaseModel):
+    users: List[UserResponseSchema]
+    page_links: dict

@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+from typing import Optional
+from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Query
+from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.exc import SQLAlchemyError
@@ -14,7 +16,9 @@ from schemas.user import (
     PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
     SendInvieteRequestSchema,
+    UserAdminListResponseSchema,
 )
+from sqlalchemy.orm import selectinload
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
 from core.security.passwords import pwd_context
@@ -388,3 +392,91 @@ async def send_invite(
 ) -> MessageResponseSchema:
     await send_email(data.email, "Invitation", f"Click the link to complete registration: {data.invite}")
     return MessageResponseSchema(message="Invitation was succesfuly delivered")
+
+
+@router.get("/", response_model=UserAdminListResponseSchema)
+async def get_all_users(
+    request: Request,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=100),
+    role: Optional[int] = Query(None, description="Filter by role id"),
+    first_name: Optional[str] = Query(None, description="Filter by first name"),
+    last_name: Optional[str] = Query(None, description="Filter by last name"),
+    email: Optional[str] = Query(None, description="Filter by email"),
+    phone: Optional[str] = Query(None, description="Filter by phone number"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserAdminListResponseSchema:
+    if not current_user.has_role(UserRoleEnum.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be an ADMIN to perform this action.",
+        )
+
+    query = select(UserModel).options(selectinload(UserModel.role))
+
+    if role:
+        query = query.filter(UserModel.role_id == role)
+    if first_name:
+        query = query.filter(UserModel.first_name.ilike(f"%{first_name}%"))
+    if last_name:
+        query = query.filter(UserModel.last_name.ilike(f"%{last_name}%"))
+    if email:
+        query = query.filter(UserModel.email.ilike(f"%{email}%"))
+    if phone:
+        query = query.filter(UserModel.phone.ilike(f"%{phone}%"))
+
+    total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+    total_pages = (total_count + page_size - 1) // page_size
+
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
+    users = result.scalars().all()
+
+    base_url = str(request.url.remove_query_params("page"))
+
+    page_links = {
+        i: f"{base_url}&page={i}"
+        for i in range(1, total_pages + 1) if i != page
+    }
+
+    return UserAdminListResponseSchema(
+        users=[UserResponseSchema(
+            email=user.email,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            phone_number=user.phone_number,
+            date_of_birth=user.date_of_birth,
+            role=user.role.name,
+        ) for user in users],
+            page_links=page_links
+    )
+
+@router.get("/{email}", response_model=UserResponseSchema)
+async def get_user_by_email(
+    email: str,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> UserResponseSchema:
+    if not current_user.has_role(UserRoleEnum.ADMIN):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You must be an ADMIN to perform this action.",
+        )
+
+    result = await db.execute(select(UserModel).options(selectinload(UserModel.role)).where(UserModel.email == email))
+    user = result.scalars().first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with email {email} not found",
+        )
+
+    return UserResponseSchema(
+        email=user.email,
+        first_name=user.first_name,
+        last_name=user.last_name,
+        phone_number=user.phone_number,
+        date_of_birth=user.date_of_birth,
+        role=user.role.name,
+    )
