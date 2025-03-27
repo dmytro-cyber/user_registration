@@ -24,7 +24,7 @@ def verefy_invite(user_data: UserRegistrationRequestSchema, jwt_manager: JWTAuth
             status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invite code {user_data.invite_code} has expired."
         )
 
-    if decoded_code.get("user_email") != user_data.email:
+    if user_data.email and decoded_code.get("user_email") != user_data.email:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invite code {user_data.invite_code} does not match the provided email.",

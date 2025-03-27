@@ -56,7 +56,7 @@ async def register_user(
 
     decoded_code = verefy_invite(user_data, jwt_manager)
 
-    result = await db.execute(select(UserModel).where(UserModel.email == user_data.email))
+    result = await db.execute(select(UserModel).where(UserModel.email == decoded_code.get("user_email")))
     existing_user = result.scalars().first()
 
     if existing_user:
@@ -67,7 +67,7 @@ async def register_user(
 
     try:
         new_user = UserModel.create(
-            email=str(user_data.email),
+            email=str(decoded_code.get("user_email")),
             raw_password=user_data.password,
         )
         new_user.role_id = decoded_code.get("role_id")

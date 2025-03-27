@@ -35,7 +35,9 @@ class PasswordResetConfirmSchema(BaseModel):
     new_password: str
 
 
-class UserRegistrationRequestSchema(BaseEmailPasswordSchema):
+class UserRegistrationRequestSchema(BaseModel):
+    email: EmailStr | None
+    password: str
     invite_code: str
     first_name: str
     last_name: str
