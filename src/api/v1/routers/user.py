@@ -13,7 +13,7 @@ from schemas.user import (
     UpdateEmailSchema,
     PasswordResetRequestSchema,
     PasswordResetConfirmSchema,
-    SendInvieteRequestSchema
+    SendInvieteRequestSchema,
 )
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
@@ -381,10 +381,7 @@ async def confirm_password_reset(
     return {"message": "Password successfully reset"}
 
 
-@router.post(
-    "/send-invite/",
-    response_model=MessageResponseSchema
-)
+@router.post("/send-invite/", response_model=MessageResponseSchema)
 async def send_invite(
     data: SendInvieteRequestSchema,
     current_user: UserModel = Depends(get_current_user),
