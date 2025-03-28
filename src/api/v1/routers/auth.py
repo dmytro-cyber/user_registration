@@ -15,9 +15,13 @@ from core.security.interfaces import JWTAuthManagerInterface
 from exceptions.security import BaseSecurityError
 from db.session import get_db
 from services.auth import verefy_invite
+from services.cookie import set_token_cookie, delete_token_cookie
+from dotenv import load_dotenv
+import os
 
 import datetime
 
+load_dotenv()
 
 router = APIRouter()
 
@@ -133,8 +137,18 @@ async def login_user(
     jwt_refresh_token = jwt_manager.create_refresh_token({"user_id": user.id})
     jwt_access_token = jwt_manager.create_access_token({"user_id": user.id})
 
-    response.set_cookie("access_token", jwt_access_token, httponly=True, samesite="None", secure=True)
-    response.set_cookie("refresh_token", jwt_refresh_token, httponly=True, samesite="None", secure=True)
+    set_token_cookie(
+        response=response,
+        key="access_token",
+        value=jwt_access_token,
+        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60
+    )
+    set_token_cookie(
+        response=response,
+        key="refresh_token",
+        value=jwt_refresh_token,
+        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60
+    )
     return {"message": "Login successful."}
 
 
@@ -172,6 +186,11 @@ async def refresh_access_token(
     a new access token. If the token is invalid or expired, an error is returned.
     """
     refresh_token = request.cookies.get("refresh_token")
+    if not refresh_token:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Refresh token not found"
+        )
     try:
         decoded_token = jwt_manager.decode_refresh_token(refresh_token)
         user_id = decoded_token.get("user_id")
@@ -192,8 +211,18 @@ async def refresh_access_token(
 
     new_access_token = jwt_manager.create_access_token({"user_id": user_id})
     new_refresh_token = jwt_manager.create_refresh_token({"user_id": user_id})
-    response.set_cookie("access_token", new_access_token, httponly=True, samesite="None", secure=True)
-    response.set_cookie("refresh_token", new_refresh_token, httponly=True, samesite="None", secure=True)
+    set_token_cookie(
+        response=response,
+        key="access_token",
+        value=new_access_token,
+        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60
+    )
+    set_token_cookie(
+        response=response,
+        key="refresh_token",
+        value=new_refresh_token,
+        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60
+    )
 
     return {"message": "Access token refreshed"}
 
@@ -206,6 +235,6 @@ async def refresh_access_token(
     status_code=status.HTTP_200_OK,
 )
 async def logout(response: Response):
-    response.delete_cookie("access_token")
-    response.delete_cookie("refresh_token")
+    delete_token_cookie(response, "access_token")
+    delete_token_cookie(response, "refresh_token")
     return {"message": "Logged out"}

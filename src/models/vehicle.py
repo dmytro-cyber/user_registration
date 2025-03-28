@@ -78,6 +78,8 @@ class CarModel(Base):
     # Relationships
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
     photos = relationship("PhotoModel", back_populates="car", cascade="all, delete-orphan")
+    condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
+    sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
 
 
 class PartModel(Base):
@@ -99,3 +101,29 @@ class PhotoModel(Base):
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
 
     car = relationship("CarModel", back_populates="photos")
+
+
+class CarSaleHistoryModel(Base):
+    __tablename__ = "car_sale_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    date = Column(DateTime, nullable=False)
+    source = Column(String, nullable=False)
+    lot_number = Column(Integer, nullable=False)
+    final_bid = Column(Float, nullable=True)
+    status = Column(String, nullable=True)  # "Sold" or "No Sale"
+
+    car = relationship("CarModel", back_populates="sales_history")
+
+
+class ConditionAssessmentModel(Base):
+    __tablename__ = "condition_assessments"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    part_name = Column(String, nullable=False)
+    issue_description = Column(String, nullable=True)
+
+    car = relationship("CarModel", back_populates="condition_assessment")
+

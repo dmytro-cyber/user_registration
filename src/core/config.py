@@ -34,5 +34,10 @@ class Settings(BaseAppSettings):
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
     EMAIL_FROM: str = os.getenv("EMAIL_FROM")
 
+    COOKIE_PATH: str = os.getenv("COOKIE_PATH")
+    COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE")
+    COOKIE_HTTPONLY: bool = os.getenv("COOKIE_HTTPONLY")
+    COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE")
+
 
 settings = Settings()

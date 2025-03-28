@@ -6,14 +6,19 @@ from jose import ExpiredSignatureError, JWTError, jwt
 from exceptions import InvalidTokenError, TokenExpiredError
 from core.security.interfaces import JWTAuthManagerInterface
 
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
 
 class JWTAuthManager(JWTAuthManagerInterface):
     """
     A manager for creating, decoding, and verifying JWT access and refresh tokens.
     """
 
-    _ACCESS_KEY_TIMEDELTA_MINUTES = 60
-    _REFRESH_KEY_TIMEDELTA_MINUTES = 60 * 24 * 7
+    _ACCESS_KEY_TIMEDELTA_MINUTES = int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES"))
+    _REFRESH_KEY_TIMEDELTA_MINUTES = int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES"))
 
     def __init__(self, secret_key_access: str, secret_key_refresh: str, algorithm: str):
         """
