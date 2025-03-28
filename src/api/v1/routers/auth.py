@@ -188,7 +188,7 @@ async def refresh_access_token(
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
+            status_code=status.HTTP_403_FORBIDDEN,
             detail="Refresh token not found"
         )
     try:

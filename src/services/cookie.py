@@ -18,4 +18,5 @@ def delete_token_cookie(response: Response, key: str):
     response.delete_cookie(
         key=key,
         path=settings.COOKIE_PATH,
+        samesite=settings.COOKIE_SAMESITE
     )
