@@ -74,6 +74,14 @@ class CarModel(Base):
     predicted_roi = Column(Float, nullable=True)
     predicted_profit_margin = Column(Float, nullable=True)
     bid = Column(Float, nullable=True)
+    
+    # Detail page info
+    engine_cylinder = Column(Integer, nullable=True)
+    drive_type = Column(String, nullable=True)
+    interior_color = Column(String, nullable=True)
+    exterior_color = Column(String, nullable=True)
+    body_style = Column(String, nullable=True)
+    style_id = Column(Integer, nullable=True)
 
     # Relationships
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
