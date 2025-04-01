@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
@@ -9,17 +9,21 @@ from sqlalchemy.orm.attributes import InstrumentedAttribute
 
 from db.session import get_db
 from models.vehicle import CarModel
-from schemas.vehicle import CarBaseSchema, CarListResponseSchema
-
-from models.vehicle import CarModel
-from schemas.vehicle import CarListResponseSchema, CarBaseSchema
-
-router = APIRouter()
-
+from schemas.vehicle import (
+    CarBaseSchema,
+    CarListResponseSchema,
+    CarDeteilResponseSchema,
+    UpdateCarStatusSchema,
+    PartRequestScheme,
+    PartResponseScheme,
+)
 
 from typing import Optional, Dict, Any
 from fastapi import Query, Depends
 from sqlalchemy.orm.attributes import InstrumentedAttribute
+
+
+router = APIRouter()
 
 
 def get_filters(
@@ -33,7 +37,9 @@ def get_filters(
     location: Optional[str] = Query(None, description="Location"),
     accident_count: Optional[int] = Query(None, description="Accident count"),
     price_sold: Optional[float] = Query(None, description="Price Sold"),
-    recommendation_status: Optional[str] = Query(None, description="Recommendation status (recommended/not_recommended)"),
+    recommendation_status: Optional[str] = Query(
+        None, description="Recommendation status (recommended/not_recommended)"
+    ),
     car_status: Optional[str] = Query(None, description="Inner status"),
 ) -> Dict[str, Any]:
     return {
@@ -87,3 +93,79 @@ async def get_cars(
     page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
 
     return CarListResponseSchema(cars=[CarBaseSchema.model_validate(car) for car in cars], page_links=page_links)
+
+
+@router.get("/vehicles/{car_id}/", response_model=CarDeteilResponseSchema)
+async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDeteilResponseSchema:
+    result = await db.execute(
+        select(CarModel)
+        .options(
+            selectinload(CarModel.photos),
+            selectinload(CarModel.condition_assessment),
+            selectinload(CarModel.sales_history),
+        )
+        .filter(CarModel.id == car_id)
+    )
+    car = result.scalars().first()
+
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    return car
+
+
+@router.put("/cars/{car_id}/status", response_model=UpdateCarStatusSchema)
+async def update_car_status(car_id: int, status_data: UpdateCarStatusSchema, db: AsyncSession = Depends(get_db)):
+    async with db.begin():
+        result = await db.execute(select(CarModel).where(CarModel.id == car_id))
+        car = result.scalars().first()
+
+        if not car:
+            raise HTTPException(status_code=404, detail="Car not found")
+
+        car.car_status = status_data.car_status
+        await db.commit()
+        await db.refresh(car)
+
+    return status_data
+
+
+@router.post("/cars/{car_id}/parts", response_model=PartResponseScheme)
+async def add_part(car_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    car = result.scalars().first()
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    new_part = PartModel(**part.dict(), car_id=car_id)
+    db.add(new_part)
+    await db.commit()
+    await db.refresh(new_part)
+    return new_part
+
+
+@router.put("/cars/{car_id}/parts/{part_id}", response_model=PartResponseScheme)
+async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
+    existing_part = result.scalars().first()
+    if not existing_part:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    for key, value in part.dict().items():
+        setattr(existing_part, key, value)
+
+    await db.commit()
+    await db.refresh(existing_part)
+    return existing_part
+
+
+@router.delete("/cars/{car_id}/parts/{part_id}", status_code=204)
+async def delete_part(car_id: int, part_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
+    part = result.scalars().first()
+    if not part:
+        raise HTTPException(status_code=404, detail="Part not found")
+
+    await db.delete(part)
+    await db.commit()
+    return {"message": "Part deleted successfully"}

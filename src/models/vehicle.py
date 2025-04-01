@@ -74,7 +74,7 @@ class CarModel(Base):
     predicted_roi = Column(Float, nullable=True)
     predicted_profit_margin = Column(Float, nullable=True)
     bid = Column(Float, nullable=True)
-    
+
     # Detail page info
     engine_cylinder = Column(Integer, nullable=True)
     drive_type = Column(String, nullable=True)
@@ -82,12 +82,18 @@ class CarModel(Base):
     exterior_color = Column(String, nullable=True)
     body_style = Column(String, nullable=True)
     style_id = Column(Integer, nullable=True)
+    transmision = Column(String, nullable=True)
+    vehicle_type = Column(String, nullable=True)
 
     # Relationships
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
     photos = relationship("PhotoModel", back_populates="car", cascade="all, delete-orphan")
     condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
+
+    @property
+    def engine_and_cylinder(self) -> str:
+        return f"{self.engine} / {self.engine_cylinder}"
 
 
 class PartModel(Base):
@@ -119,7 +125,7 @@ class CarSaleHistoryModel(Base):
     date = Column(DateTime, nullable=False)
     source = Column(String, nullable=False)
     lot_number = Column(Integer, nullable=False)
-    final_bid = Column(Float, nullable=True)
+    final_bid = Column(Integer, nullable=True)
     status = Column(String, nullable=True)  # "Sold" or "No Sale"
 
     car = relationship("CarModel", back_populates="sales_history")
@@ -134,4 +140,3 @@ class ConditionAssessmentModel(Base):
     issue_description = Column(String, nullable=True)
 
     car = relationship("CarModel", back_populates="condition_assessment")
-

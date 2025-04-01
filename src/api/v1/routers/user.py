@@ -23,7 +23,7 @@ from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
 from core.security.passwords import pwd_context
 from services.email import send_email
-from models.validators.user import validate_password_strength, validate_email
+from models.validators.user import validate_password_strength, validate_email, validate_phone_number
 from models.user import UserModel, UserRoleModel, UserRoleEnum
 from core.security.interfaces import JWTAuthManagerInterface
 from core.dependencies import get_current_user
@@ -275,6 +275,11 @@ async def update_current_user_info(
     role = current_user.role.name
     result = await db.execute(select(UserModel).where(UserModel.id == current_user.id))
     current_user = result.scalars().first()
+    if user_data.phone_number:
+        try:
+            validate_phone_number(user_data.phone_number)
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     for field, value in user_data.model_dump().items():
         if value:
             setattr(current_user, field, value)
@@ -434,22 +439,23 @@ async def get_all_users(
 
     base_url = str(request.url.remove_query_params("page"))
 
-    page_links = {
-        i: f"{base_url}&page={i}"
-        for i in range(1, total_pages + 1) if i != page
-    }
+    page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
 
     return UserAdminListResponseSchema(
-        users=[UserResponseSchema(
-            email=user.email,
-            first_name=user.first_name,
-            last_name=user.last_name,
-            phone_number=user.phone_number,
-            date_of_birth=user.date_of_birth,
-            role=user.role.name,
-        ) for user in users],
-            page_links=page_links
+        users=[
+            UserResponseSchema(
+                email=user.email,
+                first_name=user.first_name,
+                last_name=user.last_name,
+                phone_number=user.phone_number,
+                date_of_birth=user.date_of_birth,
+                role=user.role.name,
+            )
+            for user in users
+        ],
+        page_links=page_links,
     )
+
 
 @router.get("/{email}", response_model=UserResponseSchema)
 async def get_user_by_email(

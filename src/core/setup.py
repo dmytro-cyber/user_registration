@@ -36,10 +36,10 @@ async def create_roles():
                 email="admin@gmail.com",
                 raw_password="ZXCzxc!@#123",
             )
-            new_user.first_name="admin"
-            new_user.last_name="admin"
-            new_user.phone_number="admin"
-            new_user.date_of_birth=date.today()
+            new_user.first_name = "admin"
+            new_user.last_name = "admin"
+            new_user.phone_number = "admin"
+            new_user.date_of_birth = date.today()
             new_user.role_id = admin_role.id
             session.add(new_user)
 

@@ -10,6 +10,7 @@ from schemas.user import (
 from schemas.message import MessageResponseSchema
 from core.security import get_jwt_auth_manager
 from models.user import UserModel
+from models.validators.user import validate_phone_number
 from core.dependencies import Settings, get_settings
 from core.security.interfaces import JWTAuthManagerInterface
 from exceptions.security import BaseSecurityError
@@ -20,6 +21,7 @@ from dotenv import load_dotenv
 import os
 
 import datetime
+from models.validators.user import validate_phone_number
 
 load_dotenv()
 
@@ -68,6 +70,11 @@ async def register_user(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"A user with this email {user_data.email} already exists.",
         )
+
+    try:
+        validate_phone_number(user_data.phone_number)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
     try:
         new_user = UserModel.create(
@@ -141,13 +148,13 @@ async def login_user(
         response=response,
         key="access_token",
         value=jwt_access_token,
-        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60
+        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60,
     )
     set_token_cookie(
         response=response,
         key="refresh_token",
         value=jwt_refresh_token,
-        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60
+        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60,
     )
     return {"message": "Login successful."}
 
@@ -187,10 +194,7 @@ async def refresh_access_token(
     """
     refresh_token = request.cookies.get("refresh_token")
     if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Refresh token not found"
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Refresh token not found")
     try:
         decoded_token = jwt_manager.decode_refresh_token(refresh_token)
         user_id = decoded_token.get("user_id")
@@ -215,13 +219,13 @@ async def refresh_access_token(
         response=response,
         key="access_token",
         value=new_access_token,
-        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60
+        max_age=int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES")) * 60,
     )
     set_token_cookie(
         response=response,
         key="refresh_token",
         value=new_refresh_token,
-        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60
+        max_age=int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES")) * 60,
     )
 
     return {"message": "Access token refreshed"}

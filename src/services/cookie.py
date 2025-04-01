@@ -10,7 +10,7 @@ def set_token_cookie(response: Response, key: str, value: str, max_age: int):
         httponly=settings.COOKIE_HTTPONLY,
         secure=settings.COOKIE_SECURE,
         samesite=settings.COOKIE_SAMESITE,
-        max_age=max_age
+        max_age=max_age,
     )
 
 

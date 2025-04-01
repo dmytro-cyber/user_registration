@@ -17,7 +17,6 @@ def verefy_invite(user_data: UserRegistrationRequestSchema, jwt_manager: JWTAuth
         decoded_code = jwt_manager.decode_refresh_token(invite_code)
     except BaseSecurityError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid invite code {invite_code}.")
-    print(decoded_code)
 
     if decoded_code.get("exp") < datetime.datetime.now(datetime.timezone.utc).timestamp():
         raise HTTPException(

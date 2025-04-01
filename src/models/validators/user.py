@@ -1,5 +1,7 @@
 import re
-
+import phonenumbers
+import phonenumbers.carrier
+from phonenumbers.phonenumberutil import NumberParseException
 import email_validator
 
 
@@ -25,3 +27,17 @@ def validate_email(user_email: str) -> str:
         raise ValueError(str(error))
     else:
         return email
+
+
+def validate_phone_number(value):
+    try:
+        parsed_number = phonenumbers.parse(value, "US")
+        if not phonenumbers.is_valid_number(parsed_number):
+            raise ValueError("Invalid US phone number.")
+        if not phonenumbers.is_possible_number(parsed_number):
+            raise ValueError("Impossible US phone number.")
+
+    except NumberParseException:
+        raise ValueError("Invalid phone number format. Expected format: +1XXXXXXXXXX")
+
+    return value
