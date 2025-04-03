@@ -91,11 +91,11 @@ class PartBaseScheme(BaseModel):
     value: float
 
 
-class RequestPartScheme(PartBaseScheme):
+class PartRequestScheme(PartBaseScheme):
     pass
 
 
-class ResponsePartScheme(PartBaseScheme):
+class PartResponseScheme(PartBaseScheme):
     id: int
     car_id: int
 

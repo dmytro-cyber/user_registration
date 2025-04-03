@@ -177,3 +177,5 @@ cython_debug/
 car_data.csv
 cert.pem
 key.pem
+cookies.txt
+test.db

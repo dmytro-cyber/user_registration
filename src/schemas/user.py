@@ -22,9 +22,9 @@ class BaseEmailPasswordSchema(BaseModel):
 
 
 class ChangePasswordRequestSchema(BaseModel):
-    email: str
     old_password: str
-    new_password: str
+    new_password_1: str
+    new_password_2: str
 
 
 class PasswordResetRequestSchema(BaseModel):

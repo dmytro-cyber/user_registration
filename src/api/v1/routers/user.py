@@ -201,11 +201,12 @@ async def assign_role(
 async def change_password(
     change_password_data: ChangePasswordRequestSchema,
     db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
 ) -> MessageResponseSchema:
     """
     Endpoint to change password for a user's account.
     """
-    result = await db.execute(select(UserModel).where(UserModel.email == change_password_data.email))
+    result = await db.execute(select(UserModel).where(UserModel.email == current_user.email))
     user = result.scalars().first()
 
     if not user:
@@ -219,16 +220,28 @@ async def change_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Old password is incorrect.",
         )
+    
+    if change_password_data.new_password_1 == change_password_data.old_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password cannot be the same as the old password.",
+        )
+    
+    if change_password_data.new_password_1 != change_password_data.new_password_2:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New passwords do not match.",
+        )
 
     try:
-        validate_password_strength(change_password_data.new_password)
+        validate_password_strength(change_password_data.new_password_1)
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
 
-    hashed_new_password = pwd_context.hash(change_password_data.new_password)
+    hashed_new_password = pwd_context.hash(change_password_data.new_password_1)
 
     user._hashed_password = hashed_new_password
     await db.commit()
