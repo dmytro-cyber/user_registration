@@ -64,6 +64,16 @@ async def register_user(
 
     result = await db.execute(select(UserModel).where(UserModel.email == decoded_code.get("user_email")))
     existing_user = result.scalars().first()
+    print(f"""
+          
+          
+          
+          user_email: {decoded_code.get("user_email")}
+          
+          
+          
+          
+          """)
 
     if existing_user:
         raise HTTPException(

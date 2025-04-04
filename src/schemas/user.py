@@ -1,4 +1,4 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
 from typing import List
 
 from models.validators import user as validators
@@ -37,7 +37,7 @@ class PasswordResetConfirmSchema(BaseModel):
 
 
 class UserRegistrationRequestSchema(BaseModel):
-    email: EmailStr | None
+    email: EmailStr | None = Field(default=None, exclude=True)
     password: str
     invite_code: str
     first_name: str
