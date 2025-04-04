@@ -84,7 +84,7 @@ async def invite_user(
         "user_email": user_data.email,
         "role_id": user_data.role_id,
     }
-    invite_code = jwt_manager.create_invitation_code(invite_data, expires_delta=user_data.expire_days_delta)
+    invite_code = jwt_manager.create_invitation_code(invite_data, expires_delta=timedelta(user_data.expire_days_delta))
     invite_link = f"https://link-to-front?invite={invite_code}"
     return UserInvitationResponseSchema(invite_link=invite_link)
 
