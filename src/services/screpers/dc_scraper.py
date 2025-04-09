@@ -77,7 +77,7 @@ class DealerCenterScraper:
         self.proxy_port = os.getenv("PROXY_PORT")
         self.cookies_file = "cookies.json"
         self.driver = self._init_driver()
-        self.wait = WebDriverWait(self.driver, 10)  # Reduced default timeout to 10 seconds
+        self.wait = WebDriverWait(self.driver, 30)  # Reduced default timeout to 10 seconds
         self.driver_closed = False  # Flag to track if the driver has been closed
 
     def _init_driver(self):

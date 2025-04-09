@@ -79,7 +79,15 @@ async def get_cars(
         else:
             scraper = DealerCenterScraper(vin)
             result = await asyncio.to_thread(scraper.scrape)
-            scraped_car = CarBaseSchema(
+            # scraped_car = CarModel(vehicle=result.get("vehicle"), vin=vin)
+            # scraped_car.year = result.get("year")
+            # scraped_car.mileage = result.get("mileage")
+            # scraped_car.owners = result.get("owners")
+            # scraped_car.accident_count = result.get("accident_count")
+            # db.add(scraped_car)
+            # await db.commit()
+            # await db.refresh(scraped_car)
+            response_scraped_car = CarBaseSchema(
                 vin=vin,
                 vehicle=result.get("vehicle"),
                 year=result.get("year"),
@@ -100,7 +108,7 @@ async def get_cars(
                 location=None,
                 photos=[]
             )
-            return CarListResponseSchema(cars=[scraped_car], page_links={})
+            return CarListResponseSchema(cars=[response_scraped_car], page_links={})
             
 
     for field, value in filters.items():
