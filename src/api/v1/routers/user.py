@@ -377,7 +377,7 @@ async def request_password_reset(
         raise HTTPException(status_code=404, detail="User not found")
 
     token = jwt_manager.create_invitation_code({"sub": user.email}, expires_delta=timedelta(minutes=15))
-    reset_link = f"127.0.0.1:8000/api/v1/password-reset/confirm?token={token}"
+    reset_link = f"https://localhost:5173/set-new-password?token={token}"
 
     await send_email(user.email, "Password Reset", f"Click the link to reset your password: {reset_link}")
     return {"message": "Password reset link sent"}

@@ -6,14 +6,25 @@ ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=off
 ENV ALEMBIC_CONFIG=/usr/src/alembic/alembic.ini
 
-# Installing dependencies
+# Installing dependencies for Python and Chrome
 RUN apt update && apt install -y \
     gcc \
     libpq-dev \
     netcat-openbsd \
     postgresql-client \
     dos2unix \
-    && apt clean
+    # Додаткові залежності для Google Chrome
+    wget \
+    gnupg \
+    fonts-liberation \
+    libappindicator3-1 \
+    xdg-utils \
+    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
+    && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
+    && apt update \
+    && apt install -y google-chrome-stable \
+    && apt clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install Poetry
 RUN python -m pip install --upgrade pip && \
@@ -26,7 +37,6 @@ COPY ./alembic.ini /usr/src/alembic/alembic.ini
 COPY ./car_data.csv /usr/src/car_data.csv
 
 # Copy certificates
-# Копіюємо сертифікати в контейнер
 COPY ./cert.pem /usr/src/certs/cert.pem
 COPY ./key.pem /usr/src/certs/key.pem
 

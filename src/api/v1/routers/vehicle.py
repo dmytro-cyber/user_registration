@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -21,6 +22,7 @@ from schemas.vehicle import (
 from typing import Optional, Dict, Any
 from fastapi import Query, Depends
 from sqlalchemy.orm.attributes import InstrumentedAttribute
+from services.screpers.dc_scraper import DealerCenterScraper
 
 
 router = APIRouter()
@@ -67,6 +69,38 @@ async def get_cars(
     db: AsyncSession = Depends(get_db),
 ) -> CarListResponseSchema:
     query = select(CarModel).options(selectinload(CarModel.photos))
+    
+    if filters.get("vin") and len(filters.get("vin")) == 17:
+        vin = filters.get("vin")
+        vehicle_result = await db.execute(select(CarModel).filter(CarModel.vin == vin))
+        vehicle = vehicle_result.scalars().first()
+        if vehicle:
+            return CarListResponseSchema(cars=[CarBaseSchema.model_validate(vehicle)], page_links={})
+        else:
+            scraper = DealerCenterScraper(vin)
+            result = await asyncio.to_thread(scraper.scrape)
+            scraped_car = CarBaseSchema(
+                vin=vin,
+                vehicle=result.get("vehicle"),
+                year=result.get("year"),
+                mileage=result.get("mileage"),
+                auction=None,
+                auction_name=None,
+                date=None,
+                lot=None,
+                seller=None,
+                owners=result.get("owners"),
+                accident_count=result.get("accident_count"),
+                engine=None,
+                has_keys=None,
+                predicted_roi=None,
+                predicted_profit_margin=None,
+                bid=None,
+                location=None,
+                photos=[]
+            )
+            return CarListResponseSchema(cars=[scraped_car], page_links={})
+            
 
     for field, value in filters.items():
         if value is not None and hasattr(CarModel, field):
