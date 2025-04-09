@@ -23,8 +23,8 @@ load_dotenv()
 class GmailClient:
     def __init__(self):
         load_dotenv()
-        self.email = os.getenv("GMAIL_APP_USERNAME")
-        self.password = os.getenv("GMAIL_APP_PASSWORD")
+        self.email = os.getenv("SMTP_USER")
+        self.password = os.getenv("SMTP_PASSWORD")
         self.imap_server = "imap.gmail.com"
 
     def get_verification_code(self, max_wait=30, poll_interval=2):
@@ -179,6 +179,7 @@ class DealerCenterScraper:
         submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
         verification_code_field.send_keys(verification_code)
         submit_button.click()
+        logging.error("Error during email verification.")
         self._save_cookies()
 
     def _click_if_exists(self, xpath, fallback_id=None):
