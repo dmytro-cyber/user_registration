@@ -70,8 +70,8 @@ async def get_cars(
 ) -> CarListResponseSchema:
     query = select(CarModel).options(selectinload(CarModel.photos))
     
-    if filters.get("vin") and len(filters.get("vin")) == 17:
-        vin = filters.get("vin")
+    if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
+        vin = filters.get("vin").replace(" ", "")
         vehicle_result = await db.execute(select(CarModel).filter(CarModel.vin == vin))
         vehicle = vehicle_result.scalars().first()
         if vehicle:
@@ -96,6 +96,7 @@ async def get_cars(
                 predicted_roi=None,
                 predicted_profit_margin=None,
                 bid=None,
+                suggested_bid=None,
                 location=None,
                 photos=[]
             )

@@ -162,24 +162,91 @@ class DealerCenterScraper:
         logging.info("Cookies are invalid or session is not active. Clearing cookies and performing login...")
         self._clear_cookies_file()
 
-        username_field = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
-        password_field = self.driver.find_element(By.ID, "password")
-        login_button = self.driver.find_element(By.ID, "login")
-        username_field.send_keys(os.getenv("DC_USERNAME"))
-        password_field.send_keys(os.getenv("DC_PASSWORD"))
+        # Логуємо значення змінних
+        dc_username = os.getenv("DC_USERNAME")
+        dc_password = os.getenv("DC_PASSWORD")
+        logging.info(f"DC_USERNAME: {dc_username}")
+        logging.info(f"DC_PASSWORD: {dc_password}")
+
+        # Перевірка, чи змінні не порожні
+        if not dc_username or not dc_password:
+            logging.error("DC_USERNAME or DC_PASSWORD is not set in .env file")
+            raise ValueError("DC_USERNAME or DC_PASSWORD is not set in .env file")
+
+        # Очікуємо поле для логіну
+        try:
+            username_field = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
+            password_field = self.driver.find_element(By.ID, "password")
+            login_button = self.driver.find_element(By.ID, "login")
+            logging.info("Login form elements found")
+        except Exception as e:
+            logging.error(f"Failed to find login form elements: {str(e)}")
+            screenshot_path = "/usr/src/fastapi/screenshots/login_form_error.png"
+            self.driver.save_screenshot(screenshot_path)
+            logging.info(f"Screenshot saved to {screenshot_path}")
+            raise
+
+        # Вводимо логін і пароль
+        username_field.send_keys(dc_username)
+        password_field.send_keys(dc_password)
         login_button.click()
-        self._click_if_exists("//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail")
+        logging.info("Clicked login button")
+
+        # Очікуємо появу кнопки для запиту коду верифікації
+        try:
+            self._click_if_exists("//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail")
+            logging.info("Clicked Email Verification Code link")
+        except Exception as e:
+            logging.error(f"Failed to click Email Verification Code link: {str(e)}")
+            screenshot_path = "/usr/src/fastapi/screenshots/email_verification_error.png"
+            self.driver.save_screenshot(screenshot_path)
+            logging.info(f"Screenshot saved to {screenshot_path}")
+            raise
+
         # Added 5-second delay before fetching the verification code
         time.sleep(5)
         gmail = GmailClient()
         verification_code = gmail.get_verification_code(max_wait=30, poll_interval=2)
         if not verification_code:
+            logging.error("Failed to retrieve verification code.")
+            screenshot_path = "/usr/src/fastapi/screenshots/verification_code_retrieval_error.png"
+            self.driver.save_screenshot(screenshot_path)
+            logging.info(f"Screenshot saved to {screenshot_path}")
             raise Exception("Failed to retrieve verification code.")
-        verification_code_field = self.wait.until(EC.presence_of_element_located((By.ID, "email-passcode-input")))
-        submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
+
+        # Очікуємо поле для введення коду верифікації
+        try:
+            verification_code_field = self.wait.until(EC.presence_of_element_located((By.ID, "email-passcode-input")))
+            submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
+            logging.info("Verification code input field found")
+        except Exception as e:
+            logging.error(f"Failed to find verification code input field: {str(e)}")
+            screenshot_path = "/usr/src/fastapi/screenshots/verification_code_input_error.png"
+            self.driver.save_screenshot(screenshot_path)
+            logging.info(f"Screenshot saved to {screenshot_path}")
+            raise
+
+        # Вводимо код верифікації
         verification_code_field.send_keys(verification_code)
         submit_button.click()
-        logging.error("Error during email verification.")
+        logging.info("Submitted verification code")
+
+        # Додаємо скріншот після натискання кнопки відправки коду
+        screenshot_path = "/usr/src/fastapi/screenshots/after_verification_submit.png"
+        self.driver.save_screenshot(screenshot_path)
+        logging.info(f"Screenshot saved to {screenshot_path}")
+
+        # Логування помилки під час верифікації
+        try:
+            logging.error("Error during email verification.")
+            screenshot_path = "/usr/src/fastapi/screenshots/email_verification_error_log.png"
+            self.driver.save_screenshot(screenshot_path)
+            logging.info(f"Screenshot saved to {screenshot_path}")
+        except Exception as e:
+            logging.error(f"Error during email verification logging: {str(e)}")
+            raise
+
+        # Зберігаємо куки
         self._save_cookies()
 
     def _click_if_exists(self, xpath, fallback_id=None):
@@ -196,6 +263,7 @@ class DealerCenterScraper:
 
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
+        time.sleep(2)  # Added delay to ensure the page is fully loaded
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         # Added 2-second delay before searching for the VIN input field
@@ -205,12 +273,16 @@ class DealerCenterScraper:
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))).click()
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
         self.driver.switch_to.frame(iframe)
-        self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
+        owners_value = None
         try:
-            owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
-            owners_value = int(owners_element.text)
+            self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
+            try:
+                owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
+                owners_value = int(owners_element.text)
+            except:
+                owners_value = 1
         except:
-            owners_value = 1
+            pass
         odometer_value = self.driver.find_element(
             By.XPATH,
             "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
@@ -227,14 +299,14 @@ class DealerCenterScraper:
         vin_input.send_keys(self.vin)
         odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
         odometer_input.click()
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
+        # self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
         self._click_if_exists("//button[contains(., 'Next')]")
         time.sleep(2)
         odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
         odometer_input.send_keys(str(odometer_value))
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
         # Added 2-second delay after the first "Books" click to allow page update
-        time.sleep(2)
+        time.sleep(3)
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]"))).click()
         retail_value = self.wait.until(EC.presence_of_element_located((
