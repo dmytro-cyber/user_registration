@@ -1,46 +1,71 @@
 import pytest
-from core.security.utils import generate_secure_token
-from schemas.user import UserRegistrationRequestSchema
-from services.auth import verefy_invite
-from fastapi import HTTPException
-from tests.mock_jwt_manager import MockJWTAuthManager
-from datetime import timedelta
+from src.auth import create_access_token
 
-
-def test_verify_invite_valid():
-    jwt_manager = MockJWTAuthManager()
-    valid_token = jwt_manager.create_refresh_token({"user_email": "test@example.com", "exp": 9999999999})
-    user_data = UserRegistrationRequestSchema(
-        email="test@example.com",
-        password="Secure123!",
-        invite_code=valid_token,
-        first_name="Test",
-        last_name="User",
-        phone_number="123456789",
-        date_of_birth="2000-01-01",
+@pytest.mark.asyncio
+async def test_register_user(client):
+    response = client.post(
+        "/register",
+        json={"email": "test@example.com", "password": "testpassword"}
     )
+    assert response.status_code == 200
+    assert response.json()["email"] == "test@example.com"
 
-    result = verefy_invite(user_data, jwt_manager)
-    assert result["user_email"] == "test@example.com"
-
-
-def test_verify_invite_expired():
-    jwt_manager = MockJWTAuthManager()
-    expired_token = jwt_manager.create_expired_token(
-        {"user_email": "test@example.com", "exp": timedelta(minutes=6000)}
+@pytest.mark.asyncio
+async def test_register_duplicate_user(client):
+    response = client.post(
+        "/register",
+        json={"email": "test@example.com", "password": "testpassword"}
     )
-    user_data = UserRegistrationRequestSchema(
-        email="test@example.com",
-        password="Secure123!",
-        invite_code=expired_token,
-        first_name="Test",
-        last_name="User",
-        phone_number="123456789",
-        date_of_birth="2000-01-01",
+    assert response.status_code == 400
+    assert "already registered" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_login(client):
+    response = client.post(
+        "/login",
+        json={"email": "test@example.com", "password": "testpassword"}
     )
+    assert response.status_code == 200
+    assert "access_token" in response.json()
+    assert response.json()["token_type"] == "bearer"
 
-    with pytest.raises(HTTPException) as exc:
-        verefy_invite(user_data, jwt_manager)
+@pytest.mark.asyncio
+async def test_login_invalid_credentials(client):
+    response = client.post(
+        "/login",
+        json={"email": "test@example.com", "password": "wrongpassword"}
+    )
+    assert response.status_code == 401
+    assert "Incorrect email or password" in response.json()["detail"]
 
-    assert exc.value.status_code == 400
-    assert "has expired" in exc.value.detail
+@pytest.mark.asyncio
+async def test_get_me(client):
+    token = create_access_token(data={"sub": "test@example.com"})
+    response = client.get(
+        "/me",
+        headers={"Authorization": f"Bearer {token}"}
+    )
+    assert response.status_code == 200
+    assert response.json()["email"] == "test@example.com"
+
+@pytest.mark.asyncio
+async def test_get_me_unauthorized(client):
+    response = client.get("/me")
+    assert response.status_code == 401
+    assert "Not authenticated" in response.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_crud_operations(db_session):
+    from src.crud import get_user_by_email, create_user
+    from src.schemas import UserCreate
+
+    user_in = UserCreate(email="crud@example.com", password="crudpassword")
+    user = await create_user(db=db_session, user=user_in)
+    assert user.email == "crud@example.com"
+
+    fetched_user = await get_user_by_email(db=db_session, email="crud@example.com")
+    assert fetched_user is not None
+    assert fetched_user.email == "crud@example.com"
+
+    non_existent_user = await get_user_by_email(db=db_session, email="nonexistent@example.com")
+    assert non_existent_user is None
