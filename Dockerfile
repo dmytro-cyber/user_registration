@@ -37,11 +37,11 @@ COPY ./alembic.ini /usr/src/alembic/alembic.ini
 COPY ./car_data.csv /usr/src/car_data.csv
 
 # Copy certificates
-COPY ./cert.pem /usr/src/certs/cert.pem
-COPY ./key.pem /usr/src/certs/key.pem
+# COPY ./cert.pem /usr/src/certs/cert.pem
+# COPY ./key.pem /usr/src/certs/key.pem
 
-ENV SSL_CERT_FILE=/usr/src/certs/cert.pem
-ENV SSL_KEY_FILE=/usr/src/certs/key.pem
+# ENV SSL_CERT_FILE=/usr/src/certs/cert.pem
+# ENV SSL_KEY_FILE=/usr/src/certs/key.pem
 
 # Configure Poetry to avoid creating a virtual environment
 RUN poetry config virtualenvs.create false
