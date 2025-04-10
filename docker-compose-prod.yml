@@ -86,7 +86,7 @@ services:
     env_file:
       - ./docker/nginx/.env
     networks:
-      - theater_network
+      - restaurants_network
 
 
 volumes:
