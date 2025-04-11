@@ -71,19 +71,29 @@ class GmailClient:
         return None
 
 class DealerCenterScraper:
+    # Static variable to store proxy usage decision (shared across all instances)
+    _use_proxy = None
+    # Static variable to store cookies (shared across all instances)
+    _cookies = None
+
     def __init__(self, vin):
         self.vin = vin
         self.proxy_host = os.getenv("PROXY_HOST")
         self.proxy_port = os.getenv("PROXY_PORT")
-        self.cookies_file = "cookies.json"
-        self.driver = self._init_driver()
-        self.wait = WebDriverWait(self.driver, 30)  # Reduced default timeout to 10 seconds
+        self.driver = None
         self.driver_closed = False  # Flag to track if the driver has been closed
+        self.use_proxy = self._determine_proxy_usage()  # Determine if proxy should be used
+        self.driver = self._init_driver()  # Initialize driver with the determined proxy setting
+        self.wait = WebDriverWait(self.driver, 30)  # Default timeout for WebDriverWait
 
-    def _init_driver(self):
-        """Initialize the Chrome driver with specified options."""
+    def _setup_chrome_options(self, use_proxy=False):
+        """Set up Chrome options with or without proxy based on the use_proxy flag."""
         chrome_options = Options()
-        chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
+        if use_proxy:
+            chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
+            logging.info("Using proxy for Chrome driver.")
+        else:
+            logging.info("Attempting connection without proxy.")
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-insecure-localhost")
         chrome_options.add_argument("--disable-web-security")
@@ -95,50 +105,101 @@ class DealerCenterScraper:
         chrome_options.add_argument("--disable-background-timer-throttling")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-breakpad")
-        
         chrome_options.binary_location = "/usr/bin/google-chrome"
-        
+        return chrome_options
+
+    def _test_connection(self, driver, url="https://app.dealercenter.net"):
+        """Test if the connection to the target URL is successful by checking for the presence of the body tag."""
+        try:
+            driver.get(url)
+            WebDriverWait(driver, 5).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+            logging.info(f"Successfully connected to {url}.")
+            return True
+        except TimeoutException:
+            logging.warning(f"Failed to connect to {url}.")
+            return False
+        except Exception as e:
+            logging.error(f"Error while testing connection to {url}: {str(e)}")
+            return False
+
+    def _determine_proxy_usage(self):
+        """Determine whether to use a proxy based on previous runs or by testing the connection."""
+        # Check if proxy usage has already been determined
+        if DealerCenterScraper._use_proxy is not None:
+            logging.info(f"Using saved proxy setting: use_proxy={DealerCenterScraper._use_proxy}")
+            return DealerCenterScraper._use_proxy
+
+        # If no previous decision exists, test connection without proxy first
+        chrome_options = self._setup_chrome_options(use_proxy=False)
         service = Service()
         driver = uc.Chrome(service=service, options=chrome_options)
-        logging.info("Chrome driver initialized.")
+        logging.info("Testing connection without proxy.")
+
+        # Test connection without proxy
+        if self._test_connection(driver):
+            logging.info("Connection without proxy successful. Saving decision.")
+            driver.quit()
+            DealerCenterScraper._use_proxy = False
+            return False
+
+        # If connection without proxy fails, test with proxy
+        logging.info("Connection without proxy failed. Testing with proxy...")
+        driver.quit()
+
+        chrome_options = self._setup_chrome_options(use_proxy=True)
+        driver = uc.Chrome(service=service, options=chrome_options)
+        logging.info("Testing connection with proxy.")
+
+        if self._test_connection(driver):
+            logging.info("Connection with proxy successful. Saving decision.")
+            driver.quit()
+            DealerCenterScraper._use_proxy = True
+            return True
+
+        # If both attempts fail, raise an exception
+        driver.quit()
+        logging.error("Failed to connect with or without proxy. Aborting.")
+        raise Exception("Unable to establish connection with or without proxy.")
+
+    def _init_driver(self):
+        """Initialize the Chrome driver with the determined proxy setting."""
+        chrome_options = self._setup_chrome_options(use_proxy=self.use_proxy)
+        service = Service()
+        driver = uc.Chrome(service=service, options=chrome_options)
+        logging.info("Chrome driver initialized with determined proxy setting.")
         return driver
 
     def _save_cookies(self):
-        """Save current session cookies to a file."""
-        cookies = self.driver.get_cookies()
-        with open(self.cookies_file, "w") as f:
-            json.dump(cookies, f)
-        logging.info("Cookies saved to file.")
+        """Save current session cookies to a class variable."""
+        DealerCenterScraper._cookies = self.driver.get_cookies()
+        logging.info("Cookies saved to class variable.")
 
     def _load_cookies(self):
-        """Load session cookies from a file if it exists and validate them."""
+        """Load session cookies from a class variable if they exist and validate them."""
         self.driver.get("https://app.dealercenter.net/apps/shell/reports/home")
-        if not os.path.exists(self.cookies_file):
-            logging.info("Cookies file does not exist.")
+        if DealerCenterScraper._cookies is None:
+            logging.info("No cookies available in class variable.")
             return False
 
         try:
             self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            with open(self.cookies_file, "r") as f:
-                cookies = json.load(f)
-                for cookie in cookies:
-                    if "domain" in cookie and "dealercenter.net" in cookie["domain"]:
-                        try:
-                            self.driver.add_cookie(cookie)
-                        except Exception as e:
-                            logging.error(f"Failed to add cookie {cookie.get('name')}: {str(e)}")
-                            return False
-            logging.info("Cookies loaded from file.")
+            for cookie in DealerCenterScraper._cookies:
+                if "domain" in cookie and "dealercenter.net" in cookie["domain"]:
+                    try:
+                        self.driver.add_cookie(cookie)
+                    except Exception as e:
+                        logging.error(f"Failed to add cookie {cookie.get('name')}: {str(e)}")
+                        return False
+            logging.info("Cookies loaded from class variable.")
             return True
         except Exception as e:
             logging.error(f"Error loading cookies: {str(e)}")
             return False
 
     def _clear_cookies_file(self):
-        """Delete the cookies file if it exists."""
-        if os.path.exists(self.cookies_file):
-            os.remove(self.cookies_file)
-            logging.info("Cookies file deleted.")
+        """Clear the cookies stored in the class variable."""
+        DealerCenterScraper._cookies = None
+        logging.info("Cookies cleared from class variable.")
 
     def check_session(self):
         """Check if the current session is active."""
@@ -158,22 +219,20 @@ class DealerCenterScraper:
             logging.info("Login not required, session is active.")
             return
 
-        # If cookies are invalid or loading failed, delete the file and perform login
+        # If cookies are invalid or loading failed, clear them and perform login
         logging.info("Cookies are invalid or session is not active. Clearing cookies and performing login...")
         self._clear_cookies_file()
 
-        # Логуємо значення змінних
+        # Log the values of environment variables
         dc_username = os.getenv("DC_USERNAME")
         dc_password = os.getenv("DC_PASSWORD")
-        logging.info(f"DC_USERNAME: {dc_username}")
-        logging.info(f"DC_PASSWORD: {dc_password}")
 
-        # Перевірка, чи змінні не порожні
+        # Check if environment variables are set
         if not dc_username or not dc_password:
             logging.error("DC_USERNAME or DC_PASSWORD is not set in .env file")
             raise ValueError("DC_USERNAME or DC_PASSWORD is not set in .env file")
 
-        # Очікуємо поле для логіну
+        # Wait for login form elements
         try:
             username_field = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
             password_field = self.driver.find_element(By.ID, "password")
@@ -181,26 +240,20 @@ class DealerCenterScraper:
             logging.info("Login form elements found")
         except Exception as e:
             logging.error(f"Failed to find login form elements: {str(e)}")
-            screenshot_path = "/usr/src/fastapi/screenshots/login_form_error.png"
-            self.driver.save_screenshot(screenshot_path)
-            logging.info(f"Screenshot saved to {screenshot_path}")
             raise
 
-        # Вводимо логін і пароль
+        # Enter login credentials and submit
         username_field.send_keys(dc_username)
         password_field.send_keys(dc_password)
         login_button.click()
         logging.info("Clicked login button")
 
-        # Очікуємо появу кнопки для запиту коду верифікації
+        # Wait for the Email Verification Code link and click it
         try:
             self._click_if_exists("//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail")
             logging.info("Clicked Email Verification Code link")
         except Exception as e:
             logging.error(f"Failed to click Email Verification Code link: {str(e)}")
-            screenshot_path = "/usr/src/fastapi/screenshots/email_verification_error.png"
-            self.driver.save_screenshot(screenshot_path)
-            logging.info(f"Screenshot saved to {screenshot_path}")
             raise
 
         # Added 5-second delay before fetching the verification code
@@ -209,45 +262,24 @@ class DealerCenterScraper:
         verification_code = gmail.get_verification_code(max_wait=30, poll_interval=2)
         if not verification_code:
             logging.error("Failed to retrieve verification code.")
-            screenshot_path = "/usr/src/fastapi/screenshots/verification_code_retrieval_error.png"
-            self.driver.save_screenshot(screenshot_path)
-            logging.info(f"Screenshot saved to {screenshot_path}")
             raise Exception("Failed to retrieve verification code.")
 
-        # Очікуємо поле для введення коду верифікації
+        # Enter the verification code and submit
         try:
             verification_code_field = self.wait.until(EC.presence_of_element_located((By.ID, "email-passcode-input")))
             submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
             logging.info("Verification code input field found")
         except Exception as e:
             logging.error(f"Failed to find verification code input field: {str(e)}")
-            screenshot_path = "/usr/src/fastapi/screenshots/verification_code_input_error.png"
-            self.driver.save_screenshot(screenshot_path)
-            logging.info(f"Screenshot saved to {screenshot_path}")
             raise
 
-        # Вводимо код верифікації
-        verification_code_field.send_keys(verification_code)
-        submit_button.click()
-        logging.info("Submitted verification code")
-
-        # Додаємо скріншот після натискання кнопки відправки коду
-        screenshot_path = "/usr/src/fastapi/screenshots/after_verification_submit.png"
-        self.driver.save_screenshot(screenshot_path)
-        logging.info(f"Screenshot saved to {screenshot_path}")
-
-        # Логування помилки під час верифікації
         try:
-            logging.error("Error during email verification.")
-            screenshot_path = "/usr/src/fastapi/screenshots/email_verification_error_log.png"
-            self.driver.save_screenshot(screenshot_path)
-            logging.info(f"Screenshot saved to {screenshot_path}")
+            verification_code_field.send_keys(verification_code)
+            submit_button.click()
+            logging.info("Submitted verification code")
         except Exception as e:
-            logging.error(f"Error during email verification logging: {str(e)}")
+            logging.error(f"Error during email verification: {str(e)}")
             raise
-
-        # Зберігаємо куки
-        self._save_cookies()
 
     def _click_if_exists(self, xpath, fallback_id=None):
         """Click an element if it exists, with an optional fallback ID."""
@@ -264,6 +296,10 @@ class DealerCenterScraper:
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
         time.sleep(2)  # Added delay to ensure the page is fully loaded
+
+        # Save cookies after successful login
+        self._save_cookies()
+
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         # Added 2-second delay before searching for the VIN input field
@@ -299,7 +335,6 @@ class DealerCenterScraper:
         vin_input.send_keys(self.vin)
         odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
         odometer_input.click()
-        # self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
         self._click_if_exists("//button[contains(., 'Next')]")
         time.sleep(2)
         odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
@@ -317,7 +352,7 @@ class DealerCenterScraper:
         time.sleep(0.5)
 
         # Create a shorter wait for the market data elements
-        short_wait = WebDriverWait(self.driver, 5)  # Reduced timeout to 5 seconds
+        short_wait = WebDriverWait(self.driver, 10)  # Reduced timeout to 5 seconds
 
         # Extract price value
         try:
@@ -345,7 +380,7 @@ class DealerCenterScraper:
 
         try:
             year_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]")
-            year_value = int(year_element.text.strip().split()[0])
+            year_value = year_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
@@ -406,14 +441,24 @@ class DealerCenterScraper:
         self.login()
         owners, odometer, accidents = self.run_history_report()
         retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
+        try :
+            odometer = int(odometer.replace(",", ""))
+        except AttributeError:
+            logging.error(f"Invalid odometer value: {odometer}. Defaulting to 0.")
+            odometer = 0
+        try:
+            year = int(year.replace(",", ""))
+        except AttributeError:
+            logging.error(f"Invalid year value: {year}. Defaulting to 0.")
+            year = 0
         return {
             "owners": owners,
             "vehicle": f"{year} {make} {model}",
-            "mileage": int(odometer),
+            "mileage": odometer,
             "accident_count": accidents,
             "retail": retail,
             "price": price,
-            "year": int(year),
+            "year": year,
             "make": make,
             "model": model,
             "drivetrain": drivetrain,

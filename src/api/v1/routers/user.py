@@ -220,13 +220,13 @@ async def change_password(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Old password is incorrect.",
         )
-    
+
     if change_password_data.new_password_1 == change_password_data.old_password:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="New password cannot be the same as the old password.",
         )
-    
+
     if change_password_data.new_password_1 != change_password_data.new_password_2:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

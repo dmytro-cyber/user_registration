@@ -69,7 +69,7 @@ async def get_cars(
     db: AsyncSession = Depends(get_db),
 ) -> CarListResponseSchema:
     query = select(CarModel).options(selectinload(CarModel.photos))
-    
+
     if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
         vin = filters.get("vin").replace(" ", "")
         vehicle_result = await db.execute(select(CarModel).filter(CarModel.vin == vin))
@@ -106,10 +106,9 @@ async def get_cars(
                 bid=None,
                 suggested_bid=None,
                 location=None,
-                photos=[]
+                photos=[],
             )
             return CarListResponseSchema(cars=[response_scraped_car], page_links={})
-            
 
     for field, value in filters.items():
         if value is not None and hasattr(CarModel, field):
