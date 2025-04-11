@@ -84,7 +84,7 @@ class DealerCenterScraper:
         self.driver_closed = False  # Flag to track if the driver has been closed
         self.use_proxy = self._determine_proxy_usage()  # Determine if proxy should be used
         self.driver = self._init_driver()  # Initialize driver with the determined proxy setting
-        self.wait = WebDriverWait(self.driver, 30)  # Default timeout for WebDriverWait
+        self.wait = WebDriverWait(self.driver, 60)  # Default timeout for WebDriverWait
 
     def _setup_chrome_options(self, use_proxy=False):
         """Set up Chrome options with or without proxy based on the use_proxy flag."""
