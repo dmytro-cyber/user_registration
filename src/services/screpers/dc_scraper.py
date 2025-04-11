@@ -271,6 +271,7 @@ class DealerCenterScraper:
             logging.info("Verification code input field found")
         except Exception as e:
             logging.error(f"Failed to find verification code input field: {str(e)}")
+            logging.info(self.driver.page_source)  # Log the page source for debugging
             raise
 
         try:
