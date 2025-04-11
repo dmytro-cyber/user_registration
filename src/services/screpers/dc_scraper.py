@@ -226,6 +226,7 @@ class DealerCenterScraper:
         # Log the values of environment variables
         dc_username = os.getenv("DC_USERNAME")
         dc_password = os.getenv("DC_PASSWORD")
+        logging.info(f"DC_USERNAME: {dc_username}, DC_PASSWORD: {dc_password}")
 
         # Check if environment variables are set
         if not dc_username or not dc_password:
