@@ -321,10 +321,13 @@ class DealerCenterScraper:
                 owners_value = 1
         except:
             pass
-        odometer_value = self.driver.find_element(
-            By.XPATH,
-            "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
-        ).text.replace(",", "")
+        try:
+            odometer_value = self.driver.find_element(
+                By.XPATH,
+                "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
+            ).text.replace(",", "")
+        except:
+            odometer_value = None
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
         self.driver.switch_to.default_content()
         return owners_value, odometer_value, accidents_value
@@ -335,12 +338,13 @@ class DealerCenterScraper:
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))).click()
         vin_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input")))
         vin_input.send_keys(self.vin)
-        odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
-        odometer_input.click()
-        self._click_if_exists("//button[contains(., 'Next')]")
-        time.sleep(2)
-        odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
-        odometer_input.send_keys(str(odometer_value))
+        if odometer_value:
+            odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            odometer_input.click()
+            self._click_if_exists("//button[contains(., 'Next')]")
+            time.sleep(2)
+            odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            odometer_input.send_keys(str(odometer_value))
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
         # Added 2-second delay after the first "Books" click to allow page update
         time.sleep(3)

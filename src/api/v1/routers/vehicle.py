@@ -72,13 +72,16 @@ async def get_cars(
 
     if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
         vin = filters.get("vin").replace(" ", "")
-        vehicle_result = await db.execute(select(CarModel).filter(CarModel.vin == vin))
+        vehicle_result = await db.execute(select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin))
         vehicle = vehicle_result.scalars().first()
         if vehicle:
-            return CarListResponseSchema(cars=[CarBaseSchema.model_validate(vehicle)], page_links={})
+            return CarListResponseSchema(cars=[CarBaseSchema.model_validate(vehicle), ], page_links={})
         else:
             scraper = DealerCenterScraper(vin)
-            result = await asyncio.to_thread(scraper.scrape)
+            try:
+                result = await asyncio.to_thread(scraper.scrape)
+            except:
+                raise HTTPException(status_code=404, detail="Information not found")
             # scraped_car = CarModel(vehicle=result.get("vehicle"), vin=vin)
             # scraped_car.year = result.get("year")
             # scraped_car.mileage = result.get("mileage")
