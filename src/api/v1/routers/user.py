@@ -234,17 +234,13 @@ async def change_password(
         )
 
     try:
-        validate_password_strength(change_password_data.new_password_1)
+        user.password = change_password_data.new_password_1
+        await db.commit()
     except ValueError as e:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=str(e),
         )
-
-    hashed_new_password = pwd_context.hash(change_password_data.new_password_1)
-
-    user._hashed_password = hashed_new_password
-    await db.commit()
 
     return MessageResponseSchema(message="Password changed successfully.")
 

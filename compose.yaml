@@ -71,6 +71,26 @@ services:
       - restaurants_network
 
 
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    container_name: nginx
+    restart: always
+    ports:
+      - "443:443"
+    volumes:
+      - ./cert.pem:/etc/nginx/certs/cert.pem:ro
+      - ./key.pem:/etc/nginx/certs/key.pem:ro
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - web
+    env_file:
+      - ./docker/nginx/.env
+    networks:
+      - restaurants_network
+
+
 volumes:
   postgres_restaurants_data:
     driver: local
