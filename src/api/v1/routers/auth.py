@@ -41,9 +41,7 @@ router = APIRouter()
     responses={
         400: {
             "description": "Bad Request - Invalid phone number format.",
-            "content": {
-                "application/json": {"example": {"detail": "Invalid phone number format."}}
-            },
+            "content": {"application/json": {"example": {"detail": "Invalid phone number format."}}},
         },
         409: {
             "description": "Conflict - User with this email already exists.",
@@ -72,7 +70,7 @@ async def register_user(
     - Raises HTTP 500 if an error occurs during user creation.
     """
     logger.info(f"Starting user registration for email: {user_data.email}")
-    
+
     decoded_code = verefy_invite(user_data, jwt_manager)
     logger.debug(f"Decoded invitation code: {decoded_code}")
 
@@ -284,6 +282,6 @@ async def logout(response: Response, current_user: UserModel = Depends(get_curre
 
     delete_token_cookie(response, "access_token")
     delete_token_cookie(response, "refresh_token")
-    
+
     logger.info(f"User logged out successfully {current_user.email}")
     return {"message": "Logged out"}

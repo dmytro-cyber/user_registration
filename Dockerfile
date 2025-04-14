@@ -13,7 +13,6 @@ RUN apt update && apt install -y \
     netcat-openbsd \
     postgresql-client \
     dos2unix \
-    # Додаткові залежності для Google Chrome
     wget \
     gnupg \
     fonts-liberation \

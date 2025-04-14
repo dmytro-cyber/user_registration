@@ -16,9 +16,10 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 load_dotenv()
+
 
 class GmailClient:
     def __init__(self):
@@ -69,6 +70,7 @@ class GmailClient:
             time.sleep(poll_interval)
         logging.error("Failed to retrieve verification code within the timeout period.")
         return None
+
 
 class DealerCenterScraper:
     # Static variable to store proxy usage decision (shared across all instances)
@@ -251,7 +253,9 @@ class DealerCenterScraper:
 
         # Wait for the Email Verification Code link and click it
         try:
-            self._click_if_exists("//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail")
+            self._click_if_exists(
+                "//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail"
+            )
             logging.info("Clicked Email Verification Code link")
         except Exception as e:
             logging.error(f"Failed to click Email Verification Code link: {str(e)}")
@@ -306,9 +310,13 @@ class DealerCenterScraper:
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         # Added 2-second delay before searching for the VIN input field
         time.sleep(2)
-        elements = self.wait.until(EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]")))
+        elements = self.wait.until(
+            EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
+        )
         elements[-1].send_keys(self.vin)
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
+        ).click()
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
         self.driver.switch_to.frame(iframe)
         owners_value = None
@@ -323,8 +331,7 @@ class DealerCenterScraper:
             pass
         try:
             odometer_value = self.driver.find_element(
-                By.XPATH,
-                "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
+                By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
             ).text.replace(",", "")
         except:
             odometer_value = None
@@ -335,26 +342,49 @@ class DealerCenterScraper:
     def get_market_data(self, odometer_value):
         """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))).click()
-        vin_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input")))
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
+        ).click()
+        vin_input = self.wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
+        )
         vin_input.send_keys(self.vin)
         if odometer_value:
-            odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            odometer_input = self.wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")
+                )
+            )
             odometer_input.click()
             self._click_if_exists("//button[contains(., 'Next')]")
             time.sleep(2)
-            odometer_input = self.wait.until(EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            odometer_input = self.wait.until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")
+                )
+            )
             odometer_input.send_keys(str(odometer_value))
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        ).click()
         # Added 2-second delay after the first "Books" click to allow page update
         time.sleep(3)
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]"))).click()
-        retail_value = self.wait.until(EC.presence_of_element_located((
-            By.XPATH,
-            "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"
-        ))).get_attribute("aria-valuenow")
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        ).click()
+        self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
+            )
+        ).click()
+        retail_value = self.wait.until(
+            EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
+        ).get_attribute("aria-valuenow")
+        self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
+            )
+        ).click()
         time.sleep(0.5)
 
         # Create a shorter wait for the market data elements
@@ -362,19 +392,27 @@ class DealerCenterScraper:
 
         # Extract price value
         try:
-            price_tooltip_element = short_wait.until(EC.presence_of_element_located((
-                By.XPATH,
-                "//span[contains(@class, 'max-digital__risk-slider-bar-tooltip')]//span[contains(@class, 'font-weight-bold')]"
-            )))
-            price_value = price_tooltip_element.text.strip().replace('$', '').replace(',', '')
+            price_tooltip_element = short_wait.until(
+                EC.presence_of_element_located(
+                    (
+                        By.XPATH,
+                        "//span[contains(@class, 'max-digital__risk-slider-bar-tooltip')]//span[contains(@class, 'font-weight-bold')]",
+                    )
+                )
+            )
+            price_value = price_tooltip_element.text.strip().replace("$", "").replace(",", "")
         except (TimeoutException, NoSuchElementException):
             price_value = None
 
         # Wait for the main container of the market data elements to ensure the page is loaded
-        short_wait.until(EC.presence_of_element_located((
-            By.XPATH,
-            "//dc-ui-shared-ui-shared-multiselect[contains(@formcontrolname, 'year') or contains(@formcontrolname, 'make') or contains(@formcontrolname, 'model') or contains(@formcontrolname, 'driveTrain') or contains(@formcontrolname, 'fuel') or contains(@formcontrolname, 'bodyStyle')]"
-        )))
+        short_wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//dc-ui-shared-ui-shared-multiselect[contains(@formcontrolname, 'year') or contains(@formcontrolname, 'make') or contains(@formcontrolname, 'model') or contains(@formcontrolname, 'driveTrain') or contains(@formcontrolname, 'fuel') or contains(@formcontrolname, 'bodyStyle')]",
+                )
+            )
+        )
 
         # Extract all market data elements in one go
         year_value = None
@@ -385,42 +423,69 @@ class DealerCenterScraper:
         body_style_value = None
 
         try:
-            year_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]")
+            year_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]",
+            )
             year_value = year_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
         try:
-            make_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='make']//div[starts-with(@id, 'tag-')]")
+            make_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='make']//div[starts-with(@id, 'tag-')]",
+            )
             make_value = make_element.text.strip()
         except NoSuchElementException:
             pass
 
         try:
-            model_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='model']//div[starts-with(@id, 'tag-')]")
+            model_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='model']//div[starts-with(@id, 'tag-')]",
+            )
             model_value = model_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
         try:
-            drivetrain_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='driveTrain']//div[starts-with(@id, 'tag-')]")
+            drivetrain_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='driveTrain']//div[starts-with(@id, 'tag-')]",
+            )
             drivetrain_value = drivetrain_element.text.strip()
         except NoSuchElementException:
             pass
 
         try:
-            fuel_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='fuel']//div[starts-with(@id, 'tag-')]")
+            fuel_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='fuel']//div[starts-with(@id, 'tag-')]",
+            )
             fuel_value = fuel_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
         try:
-            body_style_element = self.driver.find_element(By.XPATH, "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='bodyStyle']//div[starts-with(@id, 'tag-')]")
+            body_style_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='bodyStyle']//div[starts-with(@id, 'tag-')]",
+            )
             body_style_value = body_style_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
-        return retail_value, price_value, year_value, make_value, model_value, drivetrain_value, fuel_value, body_style_value
+        return (
+            retail_value,
+            price_value,
+            year_value,
+            make_value,
+            model_value,
+            drivetrain_value,
+            fuel_value,
+            body_style_value,
+        )
 
     def close(self):
         """Close the browser driver safely."""
@@ -447,7 +512,7 @@ class DealerCenterScraper:
         self.login()
         owners, odometer, accidents = self.run_history_report()
         retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
-        try :
+        try:
             odometer = int(odometer.replace(",", ""))
         except AttributeError:
             logging.error(f"Invalid odometer value: {odometer}. Defaulting to 0.")
@@ -469,5 +534,5 @@ class DealerCenterScraper:
             "model": model,
             "drivetrain": drivetrain,
             "fuel": fuel,
-            "body_style": body_style
+            "body_style": body_style,
         }

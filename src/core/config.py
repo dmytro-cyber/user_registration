@@ -11,7 +11,7 @@ class BaseAppSettings(BaseModel):
     BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
 
     PATH_TO_DB: str = Field(
-        default_factory=lambda: str(Path(__file__).parent.parent / "database" / "source" / "restaurants.db")
+        default_factory=lambda: str(Path(__file__).parent.parent / "database" / "source" / "cars_and_beyond.db")
     )
 
     LOGIN_TIME_DAYS: int = 7
