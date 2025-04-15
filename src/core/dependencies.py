@@ -1,4 +1,5 @@
 import os
+import logging
 
 from fastapi import Depends, HTTPException, status, Request
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -9,6 +10,8 @@ from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
 from sqlalchemy.orm import selectinload
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 def get_settings() -> Settings:
     # environment = os.getenv("ENVIRONMENT", "developing")
@@ -20,9 +23,12 @@ def get_settings() -> Settings:
 def get_jwt_auth_manager(
     settings: Settings = Depends(get_settings),
 ) -> JWTAuthManagerInterface:
+    logger.info("Initializing JWTAuthManager with settings")
+    logger.debug(f"Settings: {settings}")
     return JWTAuthManager(
         secret_key_access=settings.SECRET_KEY_ACCESS,
         secret_key_refresh=settings.SECRET_KEY_REFRESH,
+        secret_key_user_interaction=settings.SECRET_KEY_USER_INTERACTION,
         algorithm=settings.JWT_SIGNING_ALGORITHM,
     )
 
@@ -34,12 +40,9 @@ async def get_current_user(request: Request, settings: Settings = Depends(get_se
     token = request.cookies.get("access_token")
 
     db: AsyncSession = await anext(get_db())
+    jwt_auth_manager = get_jwt_auth_manager(settings)
     try:
-        payload = JWTAuthManager(
-            secret_key_access=settings.SECRET_KEY_ACCESS,
-            secret_key_refresh=settings.SECRET_KEY_REFRESH,
-            algorithm=settings.JWT_SIGNING_ALGORITHM,
-        ).decode_access_token(token)
+        payload = jwt_auth_manager.decode_access_token(token)
 
         user_id = payload.get("user_id")
         if user_id is None:

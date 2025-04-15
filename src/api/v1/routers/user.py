@@ -32,7 +32,6 @@ from jose import jwt
 import logging
 from datetime import timedelta
 
-# Налаштування логування
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -83,6 +82,8 @@ async def invite_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be an ADMIN to perform this action.",
         )
+    
+    logger.info(f"User {current_user.email} is inviting a new user with email: {user_data.email}")
 
     existing_user = await db.execute(select(UserModel).where(UserModel.email == user_data.email))
     existing_user = existing_user.scalars().first()
@@ -97,7 +98,7 @@ async def invite_user(
         "user_email": user_data.email,
         "role_id": user_data.role_id,
     }
-    invite_code = jwt_manager.create_invitation_code(invite_data, expires_delta=timedelta(user_data.expire_days_delta))
+    invite_code = jwt_manager.create_user_interaction_token(invite_data, expires_delta=timedelta(user_data.expire_days_delta))
     invite_link = f"https://link-to-front?invite={invite_code}"
     logger.info(f"Invitation link generated for {user_data.email}: {invite_link}")
     return UserInvitationResponseSchema(invite_link=invite_link)
@@ -311,8 +312,7 @@ async def change_password(
             detail=str(e),
         )
 
-    hashed_new_password = pwd_context.hash(change_password_data.new_password_1)
-    user._hashed_password = hashed_new_password
+    user.password = change_password_data.new_password_1
     try:
         await db.commit()
         logger.info(f"Password successfully changed for user {current_user.email}")
@@ -488,7 +488,7 @@ async def request_email_change(
         raise HTTPException(status_code=400, detail="This email is already in use")
 
     token_data = {"user_id": current_user.id, "new_email": new_email}
-    token = jwt_manager.create_invitation_code(token_data, expires_delta=timedelta(hours=1))
+    token = jwt_manager.create_user_interaction_token(token_data, expires_delta=timedelta(hours=1))
 
     result = await db.execute(select(UserModel).filter(UserModel.id == current_user.id))
     current_user = result.scalars().first()
@@ -549,7 +549,7 @@ async def confirm_email_change(
     logger.info("Confirming email change with provided token")
 
     try:
-        payload = jwt_manager.decode_refresh_token(token)
+        payload = jwt_manager.decode_user_interaction_token(token)
         user_id = payload["user_id"]
         new_email = payload["new_email"]
         logger.debug(f"Decoded token: user_id={user_id}, new_email={new_email}")
@@ -621,7 +621,7 @@ async def request_password_reset(
         logger.warning(f"User with email {data.email} not found")
         raise HTTPException(status_code=404, detail="User not found")
 
-    token = jwt_manager.create_invitation_code({"sub": user.email}, expires_delta=timedelta(minutes=15))
+    token = jwt_manager.create_user_interaction_token({"sub": user.email}, expires_delta=timedelta(minutes=15))
     reset_link = f"https://localhost:5173/set-new-password?token={token}"
 
     try:
@@ -676,7 +676,7 @@ async def confirm_password_reset(
     logger.info("Confirming password reset with provided token")
 
     try:
-        payload = jwt_manager.decode_refresh_token(data.token)
+        payload = jwt_manager.decode_user_interaction_token(data.token)
         if not payload:
             logger.error("Invalid or expired token")
             raise HTTPException(status_code=400, detail="Invalid or expired token")

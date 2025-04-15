@@ -14,7 +14,7 @@ import datetime
 def verefy_invite(user_data: UserRegistrationRequestSchema, jwt_manager: JWTAuthManagerInterface) -> dict:
     invite_code = user_data.invite_code
     try:
-        decoded_code = jwt_manager.decode_refresh_token(invite_code)
+        decoded_code = jwt_manager.decode_user_interaction_token(invite_code)
     except BaseSecurityError:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Invalid invite code {invite_code}.")
 

@@ -19,13 +19,15 @@ class JWTAuthManager(JWTAuthManagerInterface):
 
     _ACCESS_KEY_TIMEDELTA_MINUTES = int(os.getenv("ACCESS_KEY_TIMEDELTA_MINUTES"))
     _REFRESH_KEY_TIMEDELTA_MINUTES = int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES"))
+    _USER_INTERACTION_KEY_TIMEDELTA_DAYS = int(os.getenv("USER_INTERACTION_KEY_TIMEDELTA_DAYS"))
 
-    def __init__(self, secret_key_access: str, secret_key_refresh: str, algorithm: str):
+    def __init__(self, secret_key_access: str, secret_key_refresh: str, secret_key_user_interaction: str, algorithm: str):
         """
         Initialize the manager with secret keys and algorithm for token operations.
         """
         self._secret_key_access = secret_key_access
         self._secret_key_refresh = secret_key_refresh
+        self._secret_key_user_interaction = secret_key_user_interaction
         self._algorithm = algorithm
 
     def _create_token(self, data: dict, secret_key: str, expires_delta: timedelta) -> str:
@@ -57,14 +59,14 @@ class JWTAuthManager(JWTAuthManagerInterface):
             expires_delta or timedelta(minutes=self._REFRESH_KEY_TIMEDELTA_MINUTES),
         )
 
-    def create_invitation_code(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    def create_user_interaction_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """
         Create a new refresh token with a default or specified expiration time.
         """
         return self._create_token(
             data,
-            self._secret_key_refresh,
-            expires_delta or timedelta(days=7),
+            self._secret_key_user_interaction,
+            expires_delta or timedelta(days=self._USER_INTERACTION_KEY_TIMEDELTA_DAYS),
         )
 
     def decode_access_token(self, token: str) -> dict:
@@ -89,12 +91,12 @@ class JWTAuthManager(JWTAuthManagerInterface):
         except JWTError:
             raise InvalidTokenError
 
-    def decode_invite_code(self, code: str) -> dict:
+    def decode_user_interaction_token(self, code: str) -> dict:
         """
         Decode and validate a invitation code, returning the invitation's data.
         """
         try:
-            return jwt.decode(code, self._secret_key_refresh, algorithms=[self._algorithm])
+            return jwt.decode(code, self._secret_key_user_interaction, algorithms=[self._algorithm])
         except ExpiredSignatureError:
             raise TokenExpiredError
         except JWTError:
@@ -111,3 +113,9 @@ class JWTAuthManager(JWTAuthManagerInterface):
         Verify an access token and raise an error if it's invalid or expired.
         """
         self.decode_access_token(token)
+
+    def verify_user_interaction_token_or_raise(self, code: str) -> None:
+        """
+        Verify an invitation code and raise an error if it's invalid or expired.
+        """
+        self.decode_user_interaction_token(code)

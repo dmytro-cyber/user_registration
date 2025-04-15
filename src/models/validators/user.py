@@ -1,8 +1,9 @@
 import re
+
+import email_validator
 import phonenumbers
 import phonenumbers.carrier
 from phonenumbers.phonenumberutil import NumberParseException
-import email_validator
 
 
 def validate_password_strength(password: str) -> str:

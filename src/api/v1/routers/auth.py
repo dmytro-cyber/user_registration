@@ -71,10 +71,10 @@ async def register_user(
     """
     logger.info(f"Starting user registration for email: {user_data.email}")
 
-    decoded_code = verefy_invite(user_data, jwt_manager)
-    logger.debug(f"Decoded invitation code: {decoded_code}")
+    payload = verefy_invite(user_data, jwt_manager)
+    logger.debug(f"Decoded invitation code: {payload}")
 
-    result = await db.execute(select(UserModel).where(UserModel.email == decoded_code.get("user_email")))
+    result = await db.execute(select(UserModel).where(UserModel.email == payload.get("user_email")))
     existing_user = result.scalars().first()
 
     if existing_user:
@@ -93,10 +93,10 @@ async def register_user(
 
     try:
         new_user = UserModel.create(
-            email=str(decoded_code.get("user_email")),
+            email=str(payload.get("user_email")),
             raw_password=user_data.password,
         )
-        new_user.role_id = decoded_code.get("role_id")
+        new_user.role_id = payload.get("role_id")
         new_user.first_name = user_data.first_name
         new_user.last_name = user_data.last_name
         new_user.phone_number = user_data.phone_number

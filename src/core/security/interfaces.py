@@ -17,16 +17,9 @@ class JWTAuthManagerInterface(ABC):
         pass
 
     @abstractmethod
-    def create_invitation_code(self, data: dict) -> str:
+    def create_user_interaction_token(self, data: dict) -> str:
         """
-        Create a new invitation code.
-        """
-        pass
-
-    @abstractmethod
-    def create_invitation_code(self, data: dict) -> str:
-        """
-        Create a new invitation code.
+        Create a new user interaction token.
         """
         pass
 
@@ -45,9 +38,9 @@ class JWTAuthManagerInterface(ABC):
         pass
 
     @abstractmethod
-    def decode_refresh_token(self, code: str) -> dict:
+    def decode_user_interaction_token(self, code: str) -> dict:
         """
-        Decode and validate a invitation code.
+        Decode and validate a user interaction token.
         """
         pass
 
@@ -62,5 +55,12 @@ class JWTAuthManagerInterface(ABC):
     def verify_access_token_or_raise(self, token: str) -> None:
         """
         Verify an access token or raise an error if invalid.
+        """
+        pass
+
+    @abstractmethod
+    def verify_user_interaction_token_or_raise(self, token: str) -> None:
+        """
+        Verify an user interaction token or raise an error if invalid.
         """
         pass
