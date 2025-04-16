@@ -3,16 +3,16 @@ services:
     image: 'postgres:latest'
     container_name: postgres_cars_and_beyond
     env_file:
-      - .env
+      - ./entities/.env
     ports:
       - "5432:5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./entities/init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres_cars_and_beyond_data:/var/lib/postgresql/data/
     networks:
       - cars_and_beyond_network
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB -h 127.0.0.1 || exit 1" ]
+      test: ["CMD-SHELL", "pg_isready -U admin -d cars_and_beyond -h 127.0.0.1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -24,7 +24,7 @@ services:
     ports:
       - "3333:80"
     env_file:
-      - .env
+      - ./entities/.env
     depends_on:
       db:
         condition: service_healthy
@@ -39,7 +39,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - redis_cars_and_beyond_data:/data
+      - redis_cars_and_beyond_data:/var/lib/data
     networks:
       - cars_and_beyond_network
     healthcheck:
@@ -49,78 +49,108 @@ services:
       retries: 5
       start_period: 10s
 
-  web:
+  entities:
     restart: always
-    build: .
+    build:
+      context: .
+      dockerfile: entities/Dockerfile
     container_name: backend_cars_and_beyond
-    command: [ "/bin/bash", "/commands/run_web_server_dev.sh" ]
+    command: [ "/bin/bash", "/commands/run_entities_server_dev.sh" ]
     env_file:
-      - .env
+      - ./entities/.env
     environment:
       - LOG_LEVEL=debug
-      - PYTHONPATH=/usr/src/fastapi
+      - PYTHONPATH=/usr/entities/fastapi
       - WATCHFILES_FORCE_POLLING=true
     ports:
       - "8000:8000"
     depends_on:
       db:
         condition: service_healthy
-      redis:
-        condition: service_healthy
+      # redis:
+      #   condition: service_healthy
     volumes:
-      - ./src:/usr/src/fastapi
+      - ./entities:/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
 
+
+  parsers:
+    restart: always
+    build:
+      context: .
+      dockerfile: parsers/Dockerfile
+    container_name: parser_cars_and_beyond
+    command: [ "/bin/bash", "/commands/run_parsers_server_dev.sh" ]
+    env_file:
+      - ./parsers/.env
+    environment:
+      - LOG_LEVEL=debug
+      - PYTHONPATH=/usr/parsers/fastapi
+      - WATCHFILES_FORCE_POLLING=true
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./parsers:/usr/parsers/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
   migrator:
-    build: .
+    build:
+      context: .
+      dockerfile: entities/Dockerfile
     container_name: alembic_migrator_cars_and_beyond
     command: ["/bin/bash", "/commands/run_migration.sh"]
     depends_on:
       db:
         condition: service_healthy
     volumes:
-      - ./src:/usr/src/fastapi
+      - ./entities:/usr/entities/fastapi
     env_file:
-      - .env
+      - ./entities/.env
     environment:
-      - PYTHONPATH=/usr/src/fastapi
+      - PYTHONPATH=/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
 
   celery_worker:
-    build: .
+    build: 
+      context: .
+      dockerfile: parsers/Dockerfile
     container_name: celery_worker_cars_and_beyond
-    command: ["celery", "-A", "celery_config.app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "worker", "--loglevel=info"]
     env_file:
-      - .env
+      - ./parsers/.env
     environment:
-      - PYTHONPATH=/usr/src/fastapi
+      - PYTHONPATH=/usr/parsers/fastapi
     depends_on:
       redis:
         condition: service_healthy
       db:
         condition: service_healthy
     volumes:
-      - ./src:/usr/src/fastapi
+      - ./parsers:/usr/parsers/fastapi
     networks:
       - cars_and_beyond_network
 
   celery_beat:
-    build: .
+    build: 
+      context: .
+      dockerfile: parsers/Dockerfile
     container_name: celery_beat_cars_and_beyond
-    command: ["celery", "-A", "celery_config.app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "beat", "--loglevel=info"]
     env_file:
-      - .env
+      - ./parsers/.env
     environment:
-      - PYTHONPATH=/usr/src/fastapi
+      - PYTHONPATH=/usr/parsers/fastapi
     depends_on:
       redis:
         condition: service_healthy
       db:
         condition: service_healthy
     volumes:
-      - ./src:/usr/src/fastapi
+      - ./parsers:/usr/parsers/fastapi
     networks:
       - cars_and_beyond_network
 
@@ -137,7 +167,7 @@ services:
       - ./key.pem:/etc/nginx/certs/key.pem:ro
       - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
     depends_on:
-      - web
+      - entities
     env_file:
       - ./docker/nginx/.env
     networks:
