@@ -8,7 +8,7 @@ from schemas.user import (
     UserRegistrationResponseSchema,
 )
 from schemas.message import MessageResponseSchema
-from core.security import get_jwt_auth_manager
+from core.dependencies import get_jwt_auth_manager
 from models.user import UserModel
 from models.validators.user import validate_phone_number
 from core.dependencies import Settings, get_current_user, get_settings

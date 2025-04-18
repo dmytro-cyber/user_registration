@@ -28,7 +28,7 @@ def get_token(request: Request) -> str:
             detail="Authorization header is missing",
         )
 
-    if authorization != os.getenv("AUTH_TOKEN"):
+    if authorization != os.getenv("PARSERS_AUTH_TOKEN"):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",

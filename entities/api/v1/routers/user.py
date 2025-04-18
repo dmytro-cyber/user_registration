@@ -20,7 +20,7 @@ from schemas.user import (
 )
 from sqlalchemy.orm import selectinload
 from schemas.message import MessageResponseSchema
-from core.security import get_jwt_auth_manager
+from core.dependencies import get_jwt_auth_manager
 from core.security.passwords import pwd_context
 from services.email import send_email
 from models.validators.user import validate_password_strength, validate_email, validate_phone_number

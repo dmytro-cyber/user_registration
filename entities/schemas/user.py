@@ -4,6 +4,7 @@ from typing import List
 from models.validators import user as validators
 
 import datetime
+from datetime import date
 
 
 class BaseEmailPasswordSchema(BaseModel):
@@ -43,7 +44,19 @@ class UserRegistrationRequestSchema(BaseModel):
     first_name: str
     last_name: str
     phone_number: str
-    date_of_birth: datetime.date
+    date_of_birth: date
+
+    @field_validator("date_of_birth")
+    def parse_date_of_birth(cls, value):
+        if isinstance(value, str):
+            return datetime.strptime(value, "%Y-%m-%d").date()
+        return value
+
+    @field_validator("date_of_birth")
+    def validate_date_of_birth(cls, value):
+        if value > date.today():
+            raise ValueError("Date of birth cannot be in the future")
+        return value
 
 
 class UserLoginRequestSchema(BaseEmailPasswordSchema):
@@ -83,7 +96,7 @@ class UserResponseSchema(BaseModel):
     first_name: str
     last_name: str
     phone_number: str
-    date_of_birth: datetime.date
+    date_of_birth: date
     role: str
 
     model_config = ConfigDict(from_attributes=True)
@@ -93,7 +106,7 @@ class UserUpdateRequestSchema(BaseModel):
     first_name: str | None
     last_name: str | None
     phone_number: str | None
-    date_of_birth: datetime.date | None
+    date_of_birth: date | None
 
 
 class UpdateEmailSchema(BaseModel):

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from fastapi import APIRouter, Depends, Query, Request, HTTPException
 from sqlalchemy import func
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,16 +19,28 @@ from schemas.vehicle import (
     UpdateCarStatusSchema,
     PartRequestScheme,
     PartResponseScheme,
+    CarCreateSchema,
 )
 from core.config import Settings
-from core.dependencies import get_settings
+from core.dependencies import get_settings, get_token
+from crud.vehicle import save_vehicle
 
-from typing import Optional, Dict, Any
-from fastapi import Query, Depends
-from sqlalchemy.orm.attributes import InstrumentedAttribute
+from typing import Optional, Dict, Any, List
 
+# Configure logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 router = APIRouter()
+
+
+def car_with_photos_to_dict(vehicle: CarModel) -> Dict[str, Any]:
+    photos_data = [photo.url for photo in vehicle.photos] if vehicle.photos else []
+    
+    return  {
+        **vehicle.__dict__,
+        "photos": photos_data
+    }
 
 
 def get_filters(
@@ -71,60 +84,50 @@ async def get_cars(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> CarListResponseSchema:
+    logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}")
+    
     query = select(CarModel).options(selectinload(CarModel.photos))
 
     if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
         vin = filters.get("vin").replace(" ", "")
+        logger.info(f"Searching for vehicle with VIN: {vin}")
         vehicle_result = await db.execute(
             select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
         )
         vehicle = vehicle_result.scalars().first()
         if vehicle:
+            logger.info(f"Found vehicle with VIN: {vin}")
+
+            vehicle_data = car_with_photos_to_dict(vehicle)
+
+            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
             return CarListResponseSchema(
-                cars=[
-                    CarBaseSchema.model_validate(vehicle),
-                ],
+                cars=[validated_vehicle],
                 page_links={},
             )
         else:
-            httpx_client = httpx.AsyncClient(timeout=300.0)
+            logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape")
+            httpx_client = httpx.AsyncClient(timeout=10.0)
             httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
             response = await httpx_client.get(
-                f"http://parsers:8001/api/v1/parsers/scrape/dc/{vin}")
-            result = response.json()
-            if result.get("error"):
-                raise HTTPException(status_code=404, detail="Information not found")
-                # result = await asyncio.to_thread(scraper.scrape)
-            # scraped_car = CarModel(vehicle=result.get("vehicle"), vin=vin)
-            # scraped_car.year = result.get("year")
-            # scraped_car.mileage = result.get("mileage")
-            # scraped_car.owners = result.get("owners")
-            # scraped_car.accident_count = result.get("accident_count")
-            # db.add(scraped_car)
-            # await db.commit()
-            # await db.refresh(scraped_car)
-            response_scraped_car = CarBaseSchema(
-                vin=vin,
-                vehicle=result.get("vehicle"),
-                year=result.get("year"),
-                mileage=result.get("mileage"),
-                auction=None,
-                auction_name=None,
-                date=None,
-                lot=None,
-                seller=None,
-                owners=result.get("owners"),
-                accident_count=result.get("accident_count"),
-                engine=None,
-                has_keys=None,
-                predicted_roi=None,
-                predicted_profit_margin=None,
-                bid=None,
-                suggested_bid=None,
-                location=None,
-                photos=[],
-            )
-            return CarListResponseSchema(cars=[response_scraped_car], page_links={})
+                f"http://parsers:8001/api/v1/apicar/get/{vin}")
+            response.raise_for_status()
+            result = CarCreateSchema.model_validate(response.json())
+            save = await save_vehicle(result)
+            if save:
+                vehicle_result = await db.execute(
+                    select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
+                )
+
+                vehicle = vehicle_result.scalars().first()
+
+                vehicle_data = car_with_photos_to_dict(vehicle)
+                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+
+                return CarListResponseSchema(
+                    cars=[validated_vehicle],
+                    page_links={},
+                )
 
     for field, value in filters.items():
         if value is not None and hasattr(CarModel, field):
@@ -147,14 +150,30 @@ async def get_cars(
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
     cars = result.scalars().all()
 
+    for car in cars:
+        logger.debug(f"Car VIN: {car.vin}, photos: {car.photos}")
+
+    validated_cars = []
+    for car in cars:
+        try:
+            car_data = car_with_photos_to_dict(car)
+            validated_car = CarBaseSchema.model_validate(car_data)
+            validated_cars.append(validated_car)
+        except Exception as e:
+            logger.error(f"Failed to validate car VIN {car.vin}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Validation error for car VIN {car.vin}: {str(e)}")
+
     base_url = str(request.url.remove_query_params("page"))
     page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
 
-    return CarListResponseSchema(cars=[CarBaseSchema.model_validate(car) for car in cars], page_links=page_links)
+    logger.info(f"Returning {len(validated_cars)} cars, total pages: {total_pages}")
+    return CarListResponseSchema(cars=validated_cars, page_links=page_links)
 
 
 @router.get("/vehicles/{car_id}/", response_model=CarDeteilResponseSchema)
 async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDeteilResponseSchema:
+    logger.info(f"Fetching details for car with ID: {car_id}")
+    
     result = await db.execute(
         select(CarModel)
         .options(
@@ -167,46 +186,60 @@ async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> Car
     car = result.scalars().first()
 
     if not car:
+        logger.warning(f"Car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Car not found")
 
+    logger.info(f"Returning details for car with ID: {car_id}")
     return car
 
 
-@router.put("/cars/{car_id}/status", response_model=UpdateCarStatusSchema)
+@router.put("/vehicles/{car_id}/status/", response_model=UpdateCarStatusSchema)
 async def update_car_status(car_id: int, status_data: UpdateCarStatusSchema, db: AsyncSession = Depends(get_db)):
+    logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}")
+    
     async with db.begin():
         result = await db.execute(select(CarModel).where(CarModel.id == car_id))
         car = result.scalars().first()
 
         if not car:
+            logger.warning(f"Car with ID {car_id} not found")
             raise HTTPException(status_code=404, detail="Car not found")
 
         car.car_status = status_data.car_status
         await db.commit()
         await db.refresh(car)
 
+    logger.info(f"Status updated for car with ID: {car_id}")
     return status_data
 
 
-@router.post("/cars/{car_id}/parts", response_model=PartResponseScheme)
+@router.post("/vehicles/{vehicle_id}/parts/", response_model=PartResponseScheme)
 async def add_part(car_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
+    logger.info(f"Adding part for car with ID: {car_id}, part: {part.dict()}")
+    
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
+        logger.warning(f"Car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Car not found")
 
     new_part = PartModel(**part.dict(), car_id=car_id)
     db.add(new_part)
     await db.commit()
     await db.refresh(new_part)
+    
+    logger.info(f"Part added for car with ID: {car_id}, part ID: {new_part.id}")
     return new_part
 
 
-@router.put("/cars/{car_id}/parts/{part_id}", response_model=PartResponseScheme)
+@router.put("/vehicles/{vehicle_id}/parts/{part_id}/", response_model=PartResponseScheme)
 async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
+    logger.info(f"Updating part with ID: {part_id} for car with ID: {car_id}")
+    
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     existing_part = result.scalars().first()
     if not existing_part:
+        logger.warning(f"Part with ID {part_id} for car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Part not found")
 
     for key, value in part.dict().items():
@@ -214,16 +247,58 @@ async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: As
 
     await db.commit()
     await db.refresh(existing_part)
+    
+    logger.info(f"Part with ID: {part_id} updated for car with ID: {car_id}")
     return existing_part
 
 
-@router.delete("/cars/{car_id}/parts/{part_id}", status_code=204)
+@router.delete("/vehicles/{vehicle_id}/parts/{part_id}/", status_code=204)
 async def delete_part(car_id: int, part_id: int, db: AsyncSession = Depends(get_db)):
+    logger.info(f"Deleting part with ID: {part_id} for car with ID: {car_id}")
+    
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     part = result.scalars().first()
     if not part:
+        logger.warning(f"Part with ID {part_id} for car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Part not found")
 
     await db.delete(part)
     await db.commit()
+    
+    logger.info(f"Part with ID: {part_id} deleted for car with ID: {car_id}")
     return {"message": "Part deleted successfully"}
+
+
+@router.post("/vehicles/bulk/", status_code=201)
+async def bulk_create_cars(vehicles: List[CarCreateSchema], db: AsyncSession = Depends(get_db), token: str = Depends(get_token)):
+    """
+    Bulk create cars, ignoring vehicles with duplicate VINs.
+    
+    Args:
+        vehicles: List of vehicle data to create.
+        db: Database session.
+        token: Authentication token.
+    
+    Returns:
+        Dict with success message and list of skipped VINs (if any).
+    """
+    logger.info(f"Starting bulk creation of {len(vehicles)} vehicles")
+    
+    skipped_vins = []
+    
+    for vehicle_data in vehicles:
+        # Call the save function for each vehicle
+        success = await save_vehicle(vehicle_data)
+        if not success:
+            logger.warning(f"Skipped vehicle with VIN: {vehicle_data.vin} due to duplicate")
+            skipped_vins.append(vehicle_data.vin)
+
+    # Form the response
+    response = {"message": "Cars created successfully"}
+    if skipped_vins:
+        response["skipped_vins"] = skipped_vins
+        logger.info(f"Bulk creation completed, skipped {len(skipped_vins)} vehicles with VINs: {skipped_vins}")
+    else:
+        logger.info("Bulk creation completed with no skipped vehicles")
+    
+    return response
