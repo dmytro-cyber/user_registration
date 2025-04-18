@@ -9,6 +9,7 @@ class PhotoSchema(BaseModel):
 
 
 class CarBaseSchema(BaseModel):
+    id: int | None
     vin: str | None
     vehicle: str | None
     year: int | None

@@ -82,48 +82,58 @@ async def get_cars(
     settings: Settings = Depends(get_settings),
 ) -> CarListResponseSchema:
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}")
-
+    
     query = select(CarModel).options(selectinload(CarModel.photos))
 
     if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
         vin = filters.get("vin").replace(" ", "")
         logger.info(f"Searching for vehicle with VIN: {vin}")
-        vehicle_result = await db.execute(
-            select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
-        )
-        vehicle = vehicle_result.scalars().first()
-        if vehicle:
-            logger.info(f"Found vehicle with VIN: {vin}")
-
-            vehicle_data = car_with_photos_to_dict(vehicle)
-
-            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-            return CarListResponseSchema(
-                cars=[validated_vehicle],
-                page_links={},
+        async with db.begin():
+            vehicle_result = await db.execute(
+                select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
             )
-        else:
-            logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape")
-            httpx_client = httpx.AsyncClient(timeout=10.0)
-            httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
-            response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
-            response.raise_for_status()
-            result = CarCreateSchema.model_validate(response.json())
-            save = await save_vehicle(result)
-            if save:
-                vehicle_result = await db.execute(
-                    select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
-                )
-
-                vehicle = vehicle_result.scalars().first()
-
+            vehicle = vehicle_result.scalars().first()
+            if vehicle:
+                logger.info(f"Found vehicle with VIN: {vin}")
                 vehicle_data = car_with_photos_to_dict(vehicle)
                 validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-
                 return CarListResponseSchema(
                     cars=[validated_vehicle],
                     page_links={},
                 )
+            else:
+                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape")
+                httpx_client = httpx.AsyncClient(timeout=10.0)
+                httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
+                try:
+                    response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
+                    response.raise_for_status()
+                    result = CarCreateSchema.model_validate(response.json())
+                except httpx.HTTPError as e:
+                    logger.warning(f"Failed to scrape data for VIN {vin}: {str(e)}")
+                    raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Failed to validate scraped data for VIN {vin}: {str(e)}")
+                    raise HTTPException(status_code=422, detail=f"Invalid data from parser: {str(e)}")
+
+                saved = await save_vehicle(result, db)
+                if not saved:
+                    logger.warning(f"Vehicle with VIN {vin} already exists in DB")
+                    raise HTTPException(status_code=409, detail=f"Vehicle with VIN {vin} already exists")
+
+                vehicle_result = await db.execute(
+                    select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin)
+                )
+                vehicle = vehicle_result.scalars().first()
+                if not vehicle:
+                    logger.error(f"Failed to retrieve saved vehicle with VIN {vin}")
+                    raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")
+
+                vehicle_data = car_with_photos_to_dict(vehicle)
+                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+                
+                logger.info(f"Scraped and saved data for VIN {vin}, returning response")
+                return CarListResponseSchema(cars=[validated_vehicle], page_links={})
 
     for field, value in filters.items():
         if value is not None and hasattr(CarModel, field):
@@ -268,7 +278,7 @@ async def delete_part(car_id: int, part_id: int, db: AsyncSession = Depends(get_
 @router.post("/vehicles/bulk/", status_code=201)
 async def bulk_create_cars(
     vehicles: List[CarCreateSchema], db: AsyncSession = Depends(get_db), token: str = Depends(get_token)
-):
+) -> Dict:
     """
     Bulk create cars, ignoring vehicles with duplicate VINs.
 
@@ -285,13 +295,11 @@ async def bulk_create_cars(
     skipped_vins = []
 
     for vehicle_data in vehicles:
-        # Call the save function for each vehicle
-        success = await save_vehicle(vehicle_data)
+        success = await save_vehicle(vehicle_data, db)
         if not success:
             logger.warning(f"Skipped vehicle with VIN: {vehicle_data.vin} due to duplicate")
             skipped_vins.append(vehicle_data.vin)
 
-    # Form the response
     response = {"message": "Cars created successfully"}
     if skipped_vins:
         response["skipped_vins"] = skipped_vins

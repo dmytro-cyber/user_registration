@@ -12,7 +12,7 @@ app = FastAPI(title="My Async FastAPI Project")
 @app.on_event("startup")
 async def on_startup():
     await create_roles()
-    await import_cars_from_csv("../car_data.csv")
+    # await import_cars_from_csv("../car_data.csv")
 
 
 app.add_middleware(
