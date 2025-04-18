@@ -13,6 +13,7 @@ from sqlalchemy.orm import selectinload
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def get_settings() -> Settings:
     return Settings()
 

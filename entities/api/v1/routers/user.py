@@ -82,7 +82,7 @@ async def invite_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You must be an ADMIN to perform this action.",
         )
-    
+
     logger.info(f"User {current_user.email} is inviting a new user with email: {user_data.email}")
 
     existing_user = await db.execute(select(UserModel).where(UserModel.email == user_data.email))
@@ -98,7 +98,9 @@ async def invite_user(
         "user_email": user_data.email,
         "role_id": user_data.role_id,
     }
-    invite_code = jwt_manager.create_user_interaction_token(invite_data, expires_delta=timedelta(user_data.expire_days_delta))
+    invite_code = jwt_manager.create_user_interaction_token(
+        invite_data, expires_delta=timedelta(user_data.expire_days_delta)
+    )
     invite_link = f"https://link-to-front?invite={invite_code}"
     logger.info(f"Invitation link generated for {user_data.email}: {invite_link}")
     return UserInvitationResponseSchema(invite_link=invite_link)

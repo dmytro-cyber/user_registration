@@ -9,14 +9,14 @@ TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
 engine = create_async_engine(TEST_DATABASE_URL, echo=True)
 
 # Create async session factory
-async_session = sessionmaker(
-    engine, class_=AsyncSession, expire_on_commit=False
-)
+async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
 
 @asynccontextmanager
 async def get_test_db_session():
     """Async context manager for test database session."""
     from models import Base
+
     async with engine.begin() as conn:
         # Create tables in memory
         await conn.run_sync(Base.metadata.create_all)

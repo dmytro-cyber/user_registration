@@ -12,6 +12,7 @@ from db.session import get_db
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 async def fetch_data_from_api() -> list[dict]:
     """
     Fetch data from an external API.
@@ -22,7 +23,7 @@ async def fetch_data_from_api() -> list[dict]:
             # response = await client.get("https://api.example.com/data")
             # response.raise_for_status()
             # return response.json()
-            
+
             # Mock data
             return [
                 {"name": "Example 1", "description": "Description for Example 1"},
@@ -35,6 +36,7 @@ async def fetch_data_from_api() -> list[dict]:
         logger.error(f"Error fetching data from API: {str(e)}")
         raise
 
+
 async def save_data_to_db(db: AsyncSession, data: list[dict]):
     """
     Save data to the database.
@@ -42,10 +44,8 @@ async def save_data_to_db(db: AsyncSession, data: list[dict]):
     try:
         for item in data:
             schema_item = CarBaseSchema(**item)
-            
-            existing_item = await db.execute(
-                select(CarModel).where(CarModel.name == schema_item.name)
-            )
+
+            existing_item = await db.execute(select(CarModel).where(CarModel.name == schema_item.name))
             existing_item = existing_item.scalars().first()
 
             if existing_item:
@@ -53,10 +53,7 @@ async def save_data_to_db(db: AsyncSession, data: list[dict]):
                 db.add(existing_item)
                 logger.debug(f"Updated existing item: {schema_item.name}")
             else:
-                new_item = CarModel(
-                    name=schema_item.name,
-                    description=schema_item.description
-                )
+                new_item = CarModel(name=schema_item.name, description=schema_item.description)
                 db.add(new_item)
                 logger.debug(f"Added new item: {schema_item.name}")
 
@@ -68,13 +65,14 @@ async def save_data_to_db(db: AsyncSession, data: list[dict]):
         logger.error(f"Error saving data to database: {str(e)}")
         raise
 
+
 @app.task
 async def fetch_and_save_data():
     """
     Periodic task: fetches data from API and saves it to the database.
     """
     logger.info("Starting periodic task to fetch and save data")
-    
+
     try:
         # Since Celery doesn't support async directly, use asyncio.run
         loop = asyncio.get_event_loop()

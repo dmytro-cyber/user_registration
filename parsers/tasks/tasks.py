@@ -34,7 +34,7 @@ app.conf.timezone = "UTC"
 #         response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
 #         response.raise_for_status()
 #         data = response.json()
-#         
+#
 #         print(f"API data: {data}")
 #         for vehicle in data.get("data"):
 #             vehicle = format_car_data(vehicle)
@@ -43,24 +43,25 @@ app.conf.timezone = "UTC"
 #         print(f"Failed to fetch API data: {e}")
 #         return None
 
+
 @app.task
 def fetch_api_data():
     """
     Load saved API response from iaai_response_ex.json and process it.
-    
+
     Returns:
         List containing the processed data, or None if an error occurs.
     """
     file_path = os.path.join("iaai_response_ex.json")
-    
+
     try:
         with open(file_path, "r") as file:
             data = json.load(file)
-        
+
         data = data.get("data")
         if not data:
             return None
-        
+
         processed_vehicles = []
         for vehicle in data:
             formatted_vehicle = format_car_data(vehicle)
@@ -82,22 +83,21 @@ def fetch_api_data():
                 "drive_type": formatted_vehicle.get("drive_type"),
                 "exterior_color": formatted_vehicle.get("exterior_color"),
                 "body_style": formatted_vehicle.get("body_style"),
-                "transmision": formatted_vehicle.get("transmision"),  # Залишаємо як є, але можливо виправити на "transmission"
+                "transmision": formatted_vehicle.get(
+                    "transmision"
+                ),  # Залишаємо як є, але можливо виправити на "transmission"
                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
                 "is_salvage": formatted_vehicle.get("is_salvage", False),
                 "photos": formatted_vehicle.get("photos", []),
             }
             processed_vehicles.append(adapted_vehicle)
-        
+
         httpx_client = httpx.Client(timeout=5.0)
         httpx_client.headers.update({"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")})
-        response = httpx_client.post(
-            f"http://entities:8000/api/v1/vehicles/bulk/",
-            json=processed_vehicles
-        )
+        response = httpx_client.post(f"http://entities:8000/api/v1/vehicles/bulk/", json=processed_vehicles)
         print(f"Received response: {response.status_code} - {response.text}")
         return processed_vehicles
-    
+
     except FileNotFoundError:
         print(f"File {file_path} not found.")
         return None

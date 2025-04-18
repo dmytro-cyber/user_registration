@@ -35,7 +35,7 @@ async def scrape_dc(car_vin: str):
 
     with open(file_path, "r") as file:
         data = json.load(file)
-    
+
     vehicle = data[0]
     if not vehicle:
         print("No 'data' key found in JSON")
@@ -68,4 +68,3 @@ async def scrape_dc(car_vin: str):
     }
 
     return adapted_vehicle
-    

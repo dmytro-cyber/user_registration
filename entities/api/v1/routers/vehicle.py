@@ -29,18 +29,15 @@ from typing import Optional, Dict, Any, List
 
 # Configure logging
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 router = APIRouter()
 
 
 def car_with_photos_to_dict(vehicle: CarModel) -> Dict[str, Any]:
     photos_data = [photo.url for photo in vehicle.photos] if vehicle.photos else []
-    
-    return  {
-        **vehicle.__dict__,
-        "photos": photos_data
-    }
+
+    return {**vehicle.__dict__, "photos": photos_data}
 
 
 def get_filters(
@@ -85,7 +82,7 @@ async def get_cars(
     settings: Settings = Depends(get_settings),
 ) -> CarListResponseSchema:
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}")
-    
+
     query = select(CarModel).options(selectinload(CarModel.photos))
 
     if filters.get("vin") and len(filters.get("vin").replace(" ", "")) == 17:
@@ -109,8 +106,7 @@ async def get_cars(
             logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape")
             httpx_client = httpx.AsyncClient(timeout=10.0)
             httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
-            response = await httpx_client.get(
-                f"http://parsers:8001/api/v1/apicar/get/{vin}")
+            response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
             response.raise_for_status()
             result = CarCreateSchema.model_validate(response.json())
             save = await save_vehicle(result)
@@ -173,7 +169,7 @@ async def get_cars(
 @router.get("/vehicles/{car_id}/", response_model=CarDeteilResponseSchema)
 async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDeteilResponseSchema:
     logger.info(f"Fetching details for car with ID: {car_id}")
-    
+
     result = await db.execute(
         select(CarModel)
         .options(
@@ -196,7 +192,7 @@ async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> Car
 @router.put("/vehicles/{car_id}/status/", response_model=UpdateCarStatusSchema)
 async def update_car_status(car_id: int, status_data: UpdateCarStatusSchema, db: AsyncSession = Depends(get_db)):
     logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}")
-    
+
     async with db.begin():
         result = await db.execute(select(CarModel).where(CarModel.id == car_id))
         car = result.scalars().first()
@@ -216,7 +212,7 @@ async def update_car_status(car_id: int, status_data: UpdateCarStatusSchema, db:
 @router.post("/vehicles/{vehicle_id}/parts/", response_model=PartResponseScheme)
 async def add_part(car_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
     logger.info(f"Adding part for car with ID: {car_id}, part: {part.dict()}")
-    
+
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
@@ -227,7 +223,7 @@ async def add_part(car_id: int, part: PartRequestScheme, db: AsyncSession = Depe
     db.add(new_part)
     await db.commit()
     await db.refresh(new_part)
-    
+
     logger.info(f"Part added for car with ID: {car_id}, part ID: {new_part.id}")
     return new_part
 
@@ -235,7 +231,7 @@ async def add_part(car_id: int, part: PartRequestScheme, db: AsyncSession = Depe
 @router.put("/vehicles/{vehicle_id}/parts/{part_id}/", response_model=PartResponseScheme)
 async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: AsyncSession = Depends(get_db)):
     logger.info(f"Updating part with ID: {part_id} for car with ID: {car_id}")
-    
+
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     existing_part = result.scalars().first()
     if not existing_part:
@@ -247,7 +243,7 @@ async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: As
 
     await db.commit()
     await db.refresh(existing_part)
-    
+
     logger.info(f"Part with ID: {part_id} updated for car with ID: {car_id}")
     return existing_part
 
@@ -255,7 +251,7 @@ async def update_part(car_id: int, part_id: int, part: PartRequestScheme, db: As
 @router.delete("/vehicles/{vehicle_id}/parts/{part_id}/", status_code=204)
 async def delete_part(car_id: int, part_id: int, db: AsyncSession = Depends(get_db)):
     logger.info(f"Deleting part with ID: {part_id} for car with ID: {car_id}")
-    
+
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     part = result.scalars().first()
     if not part:
@@ -264,28 +260,30 @@ async def delete_part(car_id: int, part_id: int, db: AsyncSession = Depends(get_
 
     await db.delete(part)
     await db.commit()
-    
+
     logger.info(f"Part with ID: {part_id} deleted for car with ID: {car_id}")
     return {"message": "Part deleted successfully"}
 
 
 @router.post("/vehicles/bulk/", status_code=201)
-async def bulk_create_cars(vehicles: List[CarCreateSchema], db: AsyncSession = Depends(get_db), token: str = Depends(get_token)):
+async def bulk_create_cars(
+    vehicles: List[CarCreateSchema], db: AsyncSession = Depends(get_db), token: str = Depends(get_token)
+):
     """
     Bulk create cars, ignoring vehicles with duplicate VINs.
-    
+
     Args:
         vehicles: List of vehicle data to create.
         db: Database session.
         token: Authentication token.
-    
+
     Returns:
         Dict with success message and list of skipped VINs (if any).
     """
     logger.info(f"Starting bulk creation of {len(vehicles)} vehicles")
-    
+
     skipped_vins = []
-    
+
     for vehicle_data in vehicles:
         # Call the save function for each vehicle
         success = await save_vehicle(vehicle_data)
@@ -300,5 +298,5 @@ async def bulk_create_cars(vehicles: List[CarCreateSchema], db: AsyncSession = D
         logger.info(f"Bulk creation completed, skipped {len(skipped_vins)} vehicles with VINs: {skipped_vins}")
     else:
         logger.info("Bulk creation completed with no skipped vehicles")
-    
+
     return response

@@ -21,7 +21,9 @@ class JWTAuthManager(JWTAuthManagerInterface):
     _REFRESH_KEY_TIMEDELTA_MINUTES = int(os.getenv("REFRESH_KEY_TIMEDELTA_MINUTES"))
     _USER_INTERACTION_KEY_TIMEDELTA_DAYS = int(os.getenv("USER_INTERACTION_KEY_TIMEDELTA_DAYS"))
 
-    def __init__(self, secret_key_access: str, secret_key_refresh: str, secret_key_user_interaction: str, algorithm: str):
+    def __init__(
+        self, secret_key_access: str, secret_key_refresh: str, secret_key_user_interaction: str, algorithm: str
+    ):
         """
         Initialize the manager with secret keys and algorithm for token operations.
         """

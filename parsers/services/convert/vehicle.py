@@ -6,21 +6,24 @@ def str_to_bool(value: str) -> bool:
     """Convert 'Yes'/'No' string to boolean."""
     return value.lower() == "yes"
 
+
 def is_salvage_from_document(document: str) -> bool:
     """Convert document field to boolean is_salvage."""
     return document.lower() == "salvage"
+
 
 def parse_auction_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string to datetime."""
     return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
 
+
 def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     """
     Format API response to match CarModel structure.
-    
+
     Args:
         api_response: JSON response from the API.
-    
+
     Returns:
         Dict matching CarModel fields and types.
     """
@@ -78,10 +81,25 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
 
     # Поля, які відсутні у JSON
     optional_fields = [
-        "owners", "accident_count", "actual_bid", "price_sold", "suggested_bid",
-        "total_investment", "net_profit", "profit_margin", "roi", "parts_cost",
-        "maintenance", "auction_fee", "transportation", "labor", "parts_needed",
-        "predicted_roi", "predicted_profit_margin", "interior_color", "style_id"
+        "owners",
+        "accident_count",
+        "actual_bid",
+        "price_sold",
+        "suggested_bid",
+        "total_investment",
+        "net_profit",
+        "profit_margin",
+        "roi",
+        "parts_cost",
+        "maintenance",
+        "auction_fee",
+        "transportation",
+        "labor",
+        "parts_needed",
+        "predicted_roi",
+        "predicted_profit_margin",
+        "interior_color",
+        "style_id",
     ]
     for field in optional_fields:
         car_data.setdefault(field, None)
@@ -100,15 +118,16 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     # Condition Assessment
     condition_assessments = []
     if "damage_pr" in api_response:
-        condition_assessments.append({
-            "part_name": api_response["damage_pr"],
-            "issue_description": f"{api_response['damage_pr']} damage"
-        })
+        condition_assessments.append(
+            {"part_name": api_response["damage_pr"], "issue_description": f"{api_response['damage_pr']} damage"}
+        )
     if "damage_sec" in api_response:
-        condition_assessments.append({
-            "part_name": api_response["damage_sec"],
-            "issue_description": f"{api_response['damage_sec']} secondary damage"
-        })
+        condition_assessments.append(
+            {
+                "part_name": api_response["damage_sec"],
+                "issue_description": f"{api_response['damage_sec']} secondary damage",
+            }
+        )
     car_data["condition_assessment"] = condition_assessments
 
     return car_data

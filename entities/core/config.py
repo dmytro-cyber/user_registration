@@ -39,7 +39,7 @@ class Settings(BaseAppSettings):
     COOKIE_SECURE: bool = os.getenv("COOKIE_SECURE")
     COOKIE_HTTPONLY: bool = os.getenv("COOKIE_HTTPONLY")
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE")
-    
+
     PARSERS_AUTH_TOKEN: str = os.getenv("PARSERS_AUTH_TOKEN")
 
 

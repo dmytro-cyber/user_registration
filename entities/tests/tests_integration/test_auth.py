@@ -8,6 +8,7 @@ import os
 from models.user import UserModel, UserRoleModel, UserRoleEnum  # Додаємо UserRoleModel
 from exceptions.security import BaseSecurityError
 
+
 @pytest.mark.asyncio
 class TestAuthEndpoints:
     """Test suite for authentication endpoints."""
@@ -15,28 +16,54 @@ class TestAuthEndpoints:
     @pytest.mark.parametrize(
         "invite_code, first_name, last_name, phone_number, date_of_birth, email, password",  # Змінюємо invitation_code на invite_code
         [
-            ("valid_code", "John", "Doe", "+12064471575", "1990-01-01", "newuser@gmail.com", "ZXCzxc!@#123"),  # Valid case
-            ("valid_code", "", "", "+12064471575", "1985-05-15", "anotheruser@gmail.com", "ZXCzxc!@#123"),  # Empty first_name and last_name
+            (
+                "valid_code",
+                "John",
+                "Doe",
+                "+12064471575",
+                "1990-01-01",
+                "newuser@gmail.com",
+                "ZXCzxc!@#123",
+            ),  # Valid case
+            (
+                "valid_code",
+                "",
+                "",
+                "+12064471575",
+                "1985-05-15",
+                "anotheruser@gmail.com",
+                "ZXCzxc!@#123",
+            ),  # Empty first_name and last_name
         ],
-        ids=["valid_user", "empty_names"]
+        ids=["valid_user", "empty_names"],
     )
     async def test_sign_up_success(
-        self, client: AsyncClient, db_session: AsyncSession, mock_verefy_invite,
-        invite_code, first_name, last_name, phone_number, date_of_birth, email, password, setup_roles, reset_db  # Змінюємо invitation_code на invite_code
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mock_verefy_invite,
+        invite_code,
+        first_name,
+        last_name,
+        phone_number,
+        date_of_birth,
+        email,
+        password,
+        setup_roles,
+        reset_db,  # Змінюємо invitation_code на invite_code
     ):
         """Test successful user registration with valid data."""
         # Get the USER role
-        user_role = (await db_session.execute(
-            select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER)
-        )).scalars().first()
-        
+        user_role = (
+            (await db_session.execute(select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER)))
+            .scalars()
+            .first()
+        )
+
         assert user_role is not None, f"Role {UserRoleEnum.USER} not found in database"
-        
+
         # Setup mock for verefy_invite
-        mock_verefy_invite.return_value = {
-            "user_email": email,
-            "role_id": user_role.id
-        }
+        mock_verefy_invite.return_value = {"user_email": email, "role_id": user_role.id}
 
         # Request data
         request_data = {
@@ -65,39 +92,84 @@ class TestAuthEndpoints:
         assert response_data["phone_number"] == phone_number
 
         # Verify user in database
-        user = (await db_session.execute(
-            select(UserModel).where(UserModel.email == email)
-        )).scalars().first()
+        user = (await db_session.execute(select(UserModel).where(UserModel.email == email))).scalars().first()
         assert user is not None
         assert user.verify_password(password)
 
     @pytest.mark.parametrize(
         "invite_code, first_name, last_name, phone_number, date_of_birth, email, password, expected_error",  # Змінюємо invitation_code на invite_code
         [
-            ("valid_code", "John", "Doe", "invalid_phone", "1990-01-01", "newuser@example.com", "StrongPass123!", "Invalid phone number format"),  # Invalid phone
-            ("valid_code", "John", "Doe", "+380123456789", "1990-01-01", "invalid-email", "StrongPass123!", "Invalid email format"),  # Invalid email
-            ("valid_code", "John", "Doe", "+380123456789", "1990-01-01", "newuser@example.com", "weak", "Password must be at least 8 characters long"),  # Weak password
-            ("valid_code", "John", "Doe", "+380123456789", "invalid-date", "newuser@example.com", "StrongPass123!", "time data 'invalid-date' does not match format"),  # Invalid date
+            (
+                "valid_code",
+                "John",
+                "Doe",
+                "invalid_phone",
+                "1990-01-01",
+                "newuser@example.com",
+                "StrongPass123!",
+                "Invalid phone number format",
+            ),  # Invalid phone
+            (
+                "valid_code",
+                "John",
+                "Doe",
+                "+380123456789",
+                "1990-01-01",
+                "invalid-email",
+                "StrongPass123!",
+                "Invalid email format",
+            ),  # Invalid email
+            (
+                "valid_code",
+                "John",
+                "Doe",
+                "+380123456789",
+                "1990-01-01",
+                "newuser@example.com",
+                "weak",
+                "Password must be at least 8 characters long",
+            ),  # Weak password
+            (
+                "valid_code",
+                "John",
+                "Doe",
+                "+380123456789",
+                "invalid-date",
+                "newuser@example.com",
+                "StrongPass123!",
+                "time data 'invalid-date' does not match format",
+            ),  # Invalid date
         ],
-        ids=["invalid_phone", "invalid_email", "weak_password", "invalid_date"]
+        ids=["invalid_phone", "invalid_email", "weak_password", "invalid_date"],
     )
     async def test_sign_up_validation_errors(
-        self, client: AsyncClient, db_session: AsyncSession, mock_verefy_invite,
-        invite_code, first_name, last_name, phone_number, date_of_birth, email, password, expected_error, setup_roles, reset_db  # Змінюємо invitation_code на invite_code
+        self,
+        client: AsyncClient,
+        db_session: AsyncSession,
+        mock_verefy_invite,
+        invite_code,
+        first_name,
+        last_name,
+        phone_number,
+        date_of_birth,
+        email,
+        password,
+        expected_error,
+        setup_roles,
+        reset_db,  # Змінюємо invitation_code на invite_code
     ):
         """Test user registration with invalid input data."""
         # Get the USER role
-        user_role = (await db_session.execute(
-            select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER)
-        )).scalars().first()
-        
+        user_role = (
+            (await db_session.execute(select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER)))
+            .scalars()
+            .first()
+        )
+
         assert user_role is not None, f"Role {UserRoleEnum.USER} not found in database"
-        
+
         # Setup mock for verefy_invite
-        mock_verefy_invite.return_value = {
-            "user_email": email,
-            "role_id": user_role.id
-        }
+        mock_verefy_invite.return_value = {"user_email": email, "role_id": user_role.id}
 
         # Request data with invalid fields
         request_data = {
@@ -120,10 +192,7 @@ class TestAuthEndpoints:
     ):
         """Test user registration with an existing email."""
         # Setup mock for verefy_invite
-        mock_verefy_invite.return_value = {
-            "user_email": test_user.email,
-            "role_id": test_user.role_id
-        }
+        mock_verefy_invite.return_value = {"user_email": test_user.email, "role_id": test_user.role_id}
 
         # Request data with existing email
         request_data = {
@@ -133,7 +202,7 @@ class TestAuthEndpoints:
             "phone_number": "+380123456789",
             "date_of_birth": "1990-01-01",
             "email": test_user.email,
-            "password": "StrongPass123!"
+            "password": "StrongPass123!",
         }
 
         # Make request
@@ -156,7 +225,7 @@ class TestAuthEndpoints:
             "phone_number": "+380123456789",
             "date_of_birth": "1990-01-01",
             "email": "newuser@example.com",
-            "password": "StrongPass123!"
+            "password": "StrongPass123!",
         }
 
         # Make request
@@ -169,10 +238,7 @@ class TestAuthEndpoints:
     ):
         """Test successful user login with valid credentials."""
         # Request data
-        request_data = {
-            "email": test_user.email,
-            "password": "StrongPass123!"
-        }
+        request_data = {"email": test_user.email, "password": "StrongPass123!"}
 
         # Make request
         response = await client.post("/login/", json=request_data)
@@ -199,17 +265,14 @@ class TestAuthEndpoints:
             ("", "StrongPass123!", "Invalid email or password."),  # Empty email
             ("testuser@example.com", "", "Invalid email or password."),  # Empty password
         ],
-        ids=["wrong_email", "wrong_password", "empty_email", "empty_password"]
+        ids=["wrong_email", "wrong_password", "empty_email", "empty_password"],
     )
     async def test_login_invalid_credentials(
         self, client: AsyncClient, db_session: AsyncSession, test_user, email, password, expected_detail, reset_db
     ):
         """Test user login with invalid credentials."""
         # Request data with invalid credentials
-        request_data = {
-            "email": email,
-            "password": password
-        }
+        request_data = {"email": email, "password": password}
 
         # Make request
         response = await client.post("/login/", json=request_data)
@@ -245,9 +308,7 @@ class TestAuthEndpoints:
         assert decoded_access["user_id"] == test_user.id
         assert decoded_refresh["user_id"] == test_user.id
 
-    async def test_refresh_no_token(
-        self, client: AsyncClient, db_session: AsyncSession, reset_db
-    ):
+    async def test_refresh_no_token(self, client: AsyncClient, db_session: AsyncSession, reset_db):
         """Test token refresh with no refresh token in cookies."""
         # Make request without refresh token
         response = await client.post("/refresh/")
@@ -260,8 +321,7 @@ class TestAuthEndpoints:
         """Test token refresh with an expired refresh token."""
         # Generate an expired refresh token
         expired_token = jwt_manager.create_refresh_token(
-            {"user_id": test_user.id},
-            expires_delta=timedelta(seconds=-1)
+            {"user_id": test_user.id}, expires_delta=timedelta(seconds=-1)
         )
 
         # Set cookies
@@ -272,9 +332,7 @@ class TestAuthEndpoints:
         assert response.status_code == 400
         assert "Token has expired" in response.json()["detail"]
 
-    async def test_refresh_user_not_found(
-        self, client: AsyncClient, db_session: AsyncSession, jwt_manager, reset_db
-    ):
+    async def test_refresh_user_not_found(self, client: AsyncClient, db_session: AsyncSession, jwt_manager, reset_db):
         """Test token refresh for a non-existent user."""
         # Generate a token for a non-existent user
         refresh_token = jwt_manager.create_refresh_token({"user_id": 9999})
@@ -306,9 +364,7 @@ class TestAuthEndpoints:
         assert "access_token" not in response.cookies or response.cookies["access_token"] == ""
         assert "refresh_token" not in response.cookies or response.cookies["refresh_token"] == ""
 
-    async def test_logout_unauthorized(
-        self, client: AsyncClient, db_session: AsyncSession, reset_db
-    ):
+    async def test_logout_unauthorized(self, client: AsyncClient, db_session: AsyncSession, reset_db):
         """Test user logout without an access token."""
         # Make request without access token
         response = await client.post("/logout/")

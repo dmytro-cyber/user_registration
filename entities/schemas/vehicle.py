@@ -101,7 +101,8 @@ class PartResponseScheme(PartBaseScheme):
 
     class Config:
         from_attributes = True
-        
+
+
 # ---------------------------------------------------------
 
 

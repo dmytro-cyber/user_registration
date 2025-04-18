@@ -10,7 +10,6 @@ load_dotenv()
 class BaseAppSettings(BaseModel):
     BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
 
-
     LOGIN_TIME_DAYS: int = 7
 
 

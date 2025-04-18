@@ -8,6 +8,7 @@ from core.config import Settings
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def get_settings() -> Settings:
     return Settings()
 
@@ -33,4 +34,3 @@ def get_token(request: Request) -> str:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid token",
         )
-
