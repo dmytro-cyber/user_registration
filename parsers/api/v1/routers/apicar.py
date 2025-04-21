@@ -61,10 +61,11 @@ async def scrape_dc(car_vin: str):
         "drive_type": formatted_vehicle.get("drive_type"),
         "exterior_color": formatted_vehicle.get("exterior_color"),
         "body_style": formatted_vehicle.get("body_style"),
-        "transmision": formatted_vehicle.get("transmision"),  # Залишаємо як є, але можливо виправити на "transmission"
+        "transmision": formatted_vehicle.get("transmision"),
         "vehicle_type": formatted_vehicle.get("vehicle_type"),
         "is_salvage": formatted_vehicle.get("is_salvage", False),
         "photos": formatted_vehicle.get("photos", []),
+        "sales_history": formatted_vehicle.get("sales_history", []),
     }
 
     return adapted_vehicle

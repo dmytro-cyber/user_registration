@@ -51,15 +51,18 @@ class ConditionAssessmentResponseSchema(BaseModel):
     issue_description: str | None
 
 
-class SalesHistoryResponseSchema(BaseModel):
+class SalesHistoryBaseSchema(BaseModel):
     date: datetime
-    spurce: str
+    source: str
     lot_number: int
     final_bid: int
     status: str
 
 
-class CarDeteilResponseSchema(BaseModel):
+class CarDetailResponseSchema(BaseModel):
+    id: int
+    auction: str | None
+    
     # title
     vehicle: str
 
@@ -75,12 +78,16 @@ class CarDeteilResponseSchema(BaseModel):
     body_style: str | None
     interior_color: str | None
     style_id: int | None
+    
+    photos: List[str] = []
 
     # condition assessment
-    condition_assessment: List[ConditionAssessmentResponseSchema]
+    condition_assessment: List[ConditionAssessmentResponseSchema] = []
 
     # sales history
-    sales_history: List[SalesHistoryResponseSchema]
+    sales_history: List[SalesHistoryBaseSchema] = []
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UpdateCarStatusSchema(BaseModel):
@@ -124,65 +131,57 @@ class ConditionAssessmentSchema(BaseModel):
     car_id: Optional[int] = None
 
 
-class CarSaleHistorySchema(BaseModel):
-    date: datetime
-    source: str
-    lot_number: int
-    final_bid: Optional[int] = None
-    status: Optional[str] = None
-    car_id: Optional[int] = None
-
-
 class CarCreateSchema(BaseModel):
     vin: str
     vehicle: str
-    year: Optional[int] = None
-    mileage: Optional[int] = None
-    auction: Optional[str] = None
-    auction_name: Optional[str] = None
-    date: Optional[datetime] = None
-    lot: Optional[int] = None
-    seller: Optional[str] = None
-    owners: Optional[int] = None
-    location: Optional[str] = None
+    year: int | None = None
+    mileage: int | None = None
+    auction: str | None = None
+    auction_name: str | None = None
+    date: datetime | None = None
+    lot: int | None = None
+    seller: str | None = None
+    owners: int | None = None
+    location: str | None = None
 
-    accident_count: Optional[int] = None
+    accident_count: int | None = None
 
     has_correct_vin: bool = False
     has_correct_owners: bool = False
     has_correct_accidents: bool = False
     has_correct_mileage: bool = False
 
-    bid: Optional[float] = None
-    actual_bid: Optional[float] = None
-    price_sold: Optional[float] = None
-    suggested_bid: Optional[float] = None
-    total_investment: Optional[float] = None
-    net_profit: Optional[float] = None
-    profit_margin: Optional[float] = None
-    roi: Optional[float] = None
+    bid: float | None = None
+    actual_bid: float | None = None
+    price_sold: float | None = None
+    suggested_bid: float | None = None
+    total_investment: float | None = None
+    net_profit: float | None = None
+    profit_margin: float | None = None
+    roi: float | None = None
 
-    parts_cost: Optional[float] = None
-    maintenance: Optional[float] = None
-    auction_fee: Optional[float] = None
-    transportation: Optional[float] = None
-    labor: Optional[float] = None
+    parts_cost: float | None = None
+    maintenance: float | None = None
+    auction_fee: float | None = None
+    transportation: float | None = None
+    labor: float | None = None
 
     is_salvage: bool = False
-    parts_needed: Optional[str] = None
+    parts_needed: str | None = None
 
-    engine: Optional[float] = None
+    engine: float | None = None
     has_keys: bool = False
-    predicted_roi: Optional[float] = None
-    predicted_profit_margin: Optional[float] = None
+    predicted_roi: float | None = None
+    predicted_profit_margin: float | None = None
 
-    engine_cylinder: Optional[int] = None
-    drive_type: Optional[str] = None
-    interior_color: Optional[str] = None
-    exterior_color: Optional[str] = None
-    body_style: Optional[str] = None
-    style_id: Optional[int] = None
-    transmision: Optional[str] = None
-    vehicle_type: Optional[str] = None
+    engine_cylinder: int | None = None
+    drive_type: str | None = None
+    interior_color: str | None = None
+    exterior_color: str | None = None
+    body_style: str | None = None
+    style_id: int | None = None
+    transmision: str | None = None
+    vehicle_type: str | None = None
 
-    photos: List[PhotoSchema] = []
+    photos: List[PhotoSchema] = Field(default=[], exclude=True)
+    sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)

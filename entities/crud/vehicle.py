@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
-from models.vehicle import CarModel, PhotoModel
+from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel
 from schemas.vehicle import CarCreateSchema
 import logging
 
@@ -33,6 +33,13 @@ async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
                 db.add(photo)
 
         logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}.")
+
+
+        if hasattr(vehicle_data, "sales_history") and vehicle_data.sales_history:
+            for sales_history_data in vehicle_data.sales_history:
+                sales_history = CarSaleHistoryModel(**sales_history_data.dict(), car_id=vehicle.id)
+                db.add(sales_history)
+        
         return True
 
     except IntegrityError as e:

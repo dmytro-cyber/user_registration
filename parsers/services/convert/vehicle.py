@@ -114,6 +114,19 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
 
     # Photos
     car_data["photos"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
+    
+    # Sales history
+    if "sale_history" in api_response:
+        car_data["sales_history"] = [
+            {
+                "date": parse_auction_date(item["sale_date"]),
+                "source": item["base_site"],
+                "lot_number": item["lot_id"],
+                "final_bid": item["purchase_price"],
+                "status": item["sale_status"],
+            }
+            for item in api_response["sale_history"]
+        ]
 
     # Condition Assessment
     condition_assessments = []

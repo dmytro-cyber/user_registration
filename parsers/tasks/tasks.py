@@ -9,6 +9,9 @@ from services.convert.vehicle import format_car_data
 
 load_dotenv()
 
+
+CREATED_AT = None
+
 # Celery configuration
 app = Celery(
     "tasks",
@@ -28,16 +31,43 @@ app.conf.timezone = "UTC"
 
 # @app.task
 # def fetch_api_data():
-#     url = "https://api.apicar.store/api/cars?size=30"
+    
+#     url = "https://api.apicar.store/api/cars?size=30&transmission=Automatic&status=Run%20%26%20Drive&odometer_min=50000&odometer_max=100000&sort=created_at&direction=DESC"
 #     print("Fetching data from API...")
 #     try:
 #         response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
 #         response.raise_for_status()
-#         data = response.json()
-#
-#         print(f"API data: {data}")
-#         for vehicle in data.get("data"):
-#             vehicle = format_car_data(vehicle)
+#         data = response.json().get("data")
+
+#         processed_vehicles = []
+#         for vehicle in data:
+#             formatted_vehicle = format_car_data(vehicle)
+#             adapted_vehicle = {
+#                 "vin": formatted_vehicle["vin"],
+#                 "vehicle": formatted_vehicle["vehicle"],
+#                 "year": formatted_vehicle.get("year"),
+#                 "mileage": formatted_vehicle.get("mileage"),
+#                 "auction": formatted_vehicle.get("auction"),
+#                 "auction_name": formatted_vehicle.get("auction_name"),
+#                 "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
+#                 "lot": formatted_vehicle.get("lot"),
+#                 "seller": formatted_vehicle.get("seller"),
+#                 "location": formatted_vehicle.get("location"),
+#                 "bid": formatted_vehicle.get("bid"),
+#                 "engine": formatted_vehicle.get("engine"),
+#                 "has_keys": formatted_vehicle.get("has_keys"),
+#                 "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
+#                 "drive_type": formatted_vehicle.get("drive_type"),
+#                 "exterior_color": formatted_vehicle.get("exterior_color"),
+#                 "body_style": formatted_vehicle.get("body_style"),
+#                 "transmision": formatted_vehicle.get(
+#                     "transmision"
+#                 ),
+#                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
+#                 "is_salvage": formatted_vehicle.get("is_salvage", False),
+#                 "photos": formatted_vehicle.get("photos", []),
+#             }
+#             processed_vehicles.append(adapted_vehicle)
 #         return data
 #     except httpx.HTTPError as e:
 #         print(f"Failed to fetch API data: {e}")
@@ -85,7 +115,7 @@ def fetch_api_data():
                 "body_style": formatted_vehicle.get("body_style"),
                 "transmision": formatted_vehicle.get(
                     "transmision"
-                ),  # Залишаємо як є, але можливо виправити на "transmission"
+                ),
                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
                 "is_salvage": formatted_vehicle.get("is_salvage", False),
                 "photos": formatted_vehicle.get("photos", []),

@@ -6,20 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 from sqlalchemy import Integer, String
-from sqlalchemy.sql import text
 from sqlalchemy.orm.attributes import InstrumentedAttribute
 import httpx
 
 from db.session import get_db
-from models.vehicle import CarModel
+from models.vehicle import CarModel, PartModel
 from schemas.vehicle import (
     CarBaseSchema,
     CarListResponseSchema,
-    CarDeteilResponseSchema,
+    CarDetailResponseSchema,
     UpdateCarStatusSchema,
     PartRequestScheme,
     PartResponseScheme,
     CarCreateSchema,
+    SalesHistoryBaseSchema
 )
 from core.config import Settings
 from core.dependencies import get_settings, get_token
@@ -34,7 +34,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 router = APIRouter()
 
 
-def car_with_photos_to_dict(vehicle: CarModel) -> Dict[str, Any]:
+def car_to_dict(vehicle: CarModel) -> Dict[str, Any]:
     photos_data = [photo.url for photo in vehicle.photos] if vehicle.photos else []
 
     return {**vehicle.__dict__, "photos": photos_data}
@@ -95,7 +95,7 @@ async def get_cars(
             vehicle = vehicle_result.scalars().first()
             if vehicle:
                 logger.info(f"Found vehicle with VIN: {vin}")
-                vehicle_data = car_with_photos_to_dict(vehicle)
+                vehicle_data = car_to_dict(vehicle)
                 validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
                 return CarListResponseSchema(
                     cars=[validated_vehicle],
@@ -129,7 +129,7 @@ async def get_cars(
                     logger.error(f"Failed to retrieve saved vehicle with VIN {vin}")
                     raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")
 
-                vehicle_data = car_with_photos_to_dict(vehicle)
+                vehicle_data = car_to_dict(vehicle)
                 validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
                 
                 logger.info(f"Scraped and saved data for VIN {vin}, returning response")
@@ -162,7 +162,7 @@ async def get_cars(
     validated_cars = []
     for car in cars:
         try:
-            car_data = car_with_photos_to_dict(car)
+            car_data = car_to_dict(car)
             validated_car = CarBaseSchema.model_validate(car_data)
             validated_cars.append(validated_car)
         except Exception as e:
@@ -176,8 +176,8 @@ async def get_cars(
     return CarListResponseSchema(cars=validated_cars, page_links=page_links)
 
 
-@router.get("/vehicles/{car_id}/", response_model=CarDeteilResponseSchema)
-async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDeteilResponseSchema:
+@router.get("/vehicles/{car_id}/", response_model=CarDetailResponseSchema)
+async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDetailResponseSchema:
     logger.info(f"Fetching details for car with ID: {car_id}")
 
     result = await db.execute(
@@ -196,7 +196,25 @@ async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> Car
         raise HTTPException(status_code=404, detail="Car not found")
 
     logger.info(f"Returning details for car with ID: {car_id}")
-    return car
+    return CarDetailResponseSchema(
+        id = car.id,
+        auction=car.auction,
+        vehicle=car.vehicle,
+        vin=car.vin,
+        mileage=car.mileage,
+        has_keys=car.has_keys,
+        engine_and_cylinder=car.engine_and_cylinder,
+        drive_type=car.drive_type,
+        transmision=car.transmision,
+        vehicle_type=car.vehicle_type,
+        exterior_color=car.exterior_color,
+        body_style=car.body_style,
+        interior_color=car.interior_color,
+        style_id=car.style_id,
+        photos=[photo.url for photo in car.photos] if car.photos else [],
+        condition_assessment=[],
+        sales_history=[SalesHistoryBaseSchema(**sales_history.__dict__) for sales_history in car.sales_history] if car.sales_history else [],
+    )
 
 
 @router.put("/vehicles/{car_id}/status/", response_model=UpdateCarStatusSchema)
