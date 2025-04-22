@@ -8,6 +8,13 @@ import logging
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
+
+async def save_sale_history(sale_history_data, car_id, db: AsyncSession) -> None:
+    for history_data in sale_history_data:
+        sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
+        db.add(sales_history)
+
+
 async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
     """
     Save a single vehicle and its photos.
@@ -36,9 +43,7 @@ async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
 
 
         if hasattr(vehicle_data, "sales_history") and vehicle_data.sales_history:
-            for sales_history_data in vehicle_data.sales_history:
-                sales_history = CarSaleHistoryModel(**sales_history_data.dict(), car_id=vehicle.id)
-                db.add(sales_history)
+            save_sale_history(vehicle_data.sales_history, vehicle.id, db)
         
         return True
 

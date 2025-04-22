@@ -23,7 +23,7 @@ from schemas.vehicle import (
 )
 from core.config import Settings
 from core.dependencies import get_settings, get_token
-from crud.vehicle import save_vehicle
+from crud.vehicle import save_vehicle, save_sale_history
 
 from typing import Optional, Dict, Any, List
 
@@ -117,6 +117,7 @@ async def get_cars(
                     raise HTTPException(status_code=422, detail=f"Invalid data from parser: {str(e)}")
 
                 saved = await save_vehicle(result, db)
+                await db.commit()
                 if not saved:
                     logger.warning(f"Vehicle with VIN {vin} already exists in DB")
                     raise HTTPException(status_code=409, detail=f"Vehicle with VIN {vin} already exists")
@@ -177,7 +178,7 @@ async def get_cars(
 
 
 @router.get("/vehicles/{car_id}/", response_model=CarDetailResponseSchema)
-async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> CarDetailResponseSchema:
+async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db), settings: Settings = Depends(get_settings),) -> CarDetailResponseSchema:
     logger.info(f"Fetching details for car with ID: {car_id}")
 
     result = await db.execute(
@@ -194,6 +195,29 @@ async def get_car_detail(car_id: int, db: AsyncSession = Depends(get_db)) -> Car
     if not car:
         logger.warning(f"Car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Car not found")
+    
+    # if not car.sales_history:
+    #     httpx_client = httpx.AsyncClient(timeout=10.0)
+    #     httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
+    #     try:
+    #         response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{car.vin}")
+    #         response.raise_for_status()
+    #         result = CarCreateSchema.model_validate(response.json())
+    #         save_sale_history(result.sales_history, car.id, db)
+
+    #         result = await db.execute(
+    #             select(CarModel)
+    #             .options(
+    #                 selectinload(CarModel.photos),
+    #                 selectinload(CarModel.condition_assessment),
+    #                 selectinload(CarModel.sales_history),
+    #             )
+    #             .filter(CarModel.id == car_id)
+    #         )
+    #         car = result.scalars().first()
+    #     except httpx.HTTPError as e:
+    #         logger.warning(f"Failed to scrape data for VIN {car.vin}: {str(e)}")
+    #         raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")
 
     logger.info(f"Returning details for car with ID: {car_id}")
     return CarDetailResponseSchema(
@@ -314,6 +338,7 @@ async def bulk_create_cars(
 
     for vehicle_data in vehicles:
         success = await save_vehicle(vehicle_data, db)
+        await db.commit()
         if not success:
             logger.warning(f"Skipped vehicle with VIN: {vehicle_data.vin} due to duplicate")
             skipped_vins.append(vehicle_data.vin)
