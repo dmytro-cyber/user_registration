@@ -342,11 +342,10 @@ async def bulk_create_cars(
         
         if success:
             logger.info(f"Vehicle with VIN: {vehicle_data.vin} created successfully")
-            parse_and_update_car.delay(vehicle_data.vin)
+            # parse_and_update_car.delay(vehicle_data.vin)
         else:
             logger.warning(f"Skipped vehicle with VIN: {vehicle_data.vin} due to duplicate")
             skipped_vins.append(vehicle_data.vin)
-            parse_and_update_car.delay(vehicle_data.vin)
 
     response = {"message": "Cars created successfully"}
     if skipped_vins:
