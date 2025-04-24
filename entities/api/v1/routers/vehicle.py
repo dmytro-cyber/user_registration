@@ -24,7 +24,7 @@ from schemas.vehicle import (
 from core.config import Settings
 from core.dependencies import get_settings, get_token
 from crud.vehicle import save_vehicle, save_sale_history
-
+from tasks.task import parse_and_update_car
 from typing import Optional, Dict, Any, List
 
 # Configure logging
@@ -339,9 +339,14 @@ async def bulk_create_cars(
     for vehicle_data in vehicles:
         success = await save_vehicle(vehicle_data, db)
         await db.commit()
-        if not success:
+        
+        if success:
+            logger.info(f"Vehicle with VIN: {vehicle_data.vin} created successfully")
+            parse_and_update_car.delay(vehicle_data.vin)
+        else:
             logger.warning(f"Skipped vehicle with VIN: {vehicle_data.vin} due to duplicate")
             skipped_vins.append(vehicle_data.vin)
+            parse_and_update_car.delay(vehicle_data.vin)
 
     response = {"message": "Cars created successfully"}
     if skipped_vins:

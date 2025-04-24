@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from api.v1.routers.auth import router as auth_router
 from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
+from api.v1.routers.filter import router as filter_router
 from core.setup import create_roles, import_cars_from_csv
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,6 +33,7 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1", tags=["Auth"])
 app.include_router(user_router, prefix="/api/v1", tags=["User"])
 app.include_router(vehicle_router, prefix="/api/v1", tags=["Vehicle"])
+app.include_router(filter_router, prefix="/api/v1", tags=["Filter"])
 
 if __name__ == "__main__":
     import uvicorn

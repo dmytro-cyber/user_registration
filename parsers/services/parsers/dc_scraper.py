@@ -301,12 +301,32 @@ class DealerCenterScraper:
 
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
-        time.sleep(2)  # Added delay to ensure the page is fully loaded
-
+        time.sleep(5)  # Added delay to ensure the page is fully loaded
+        # Save cookies after successful login
+        self._save_cookies()
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared, proceeding with clicking Inventory.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear within timeout, proceeding anyway.")
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
+        # Wait for loader to disappear after clicking Inventory
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Inventory.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Inventory, proceeding anyway.")
+
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
+        # Wait for loader to disappear after clicking Run History Report
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Run History Report.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Run History Report, proceeding anyway.")
+
         # Added 2-second delay before searching for the VIN input field
-        time.sleep(2)
+        time.sleep(5)
         elements = self.wait.until(
             EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
         )
@@ -314,8 +334,22 @@ class DealerCenterScraper:
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
         ).click()
+        # Wait for loader to disappear after clicking Run
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Run.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Run, proceeding anyway.")
+
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
         self.driver.switch_to.frame(iframe)
+        # Wait for loader to disappear after switching to iframe
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after switching to iframe.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after switching to iframe, proceeding anyway.")
+
         owners_value = None
         try:
             self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
@@ -334,17 +368,36 @@ class DealerCenterScraper:
             odometer_value = None
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
         self.driver.switch_to.default_content()
+        # Wait for loader to disappear after switching back to default content
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after switching back to default content.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after switching back to default content, proceeding anyway.")
 
         return owners_value, odometer_value, accidents_value
 
     def get_market_data(self, odometer_value):
         """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
-        # Save cookies after successful login
-        self._save_cookies()
+
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
+        # Wait for loader to disappear after clicking Inventory
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Inventory.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Inventory, proceeding anyway.")
+
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
         ).click()
+        # Wait for loader to disappear after clicking Appraise New Vehicle
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Appraise New Vehicle.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Appraise New Vehicle, proceeding anyway.")
+
         vin_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
         )
@@ -369,14 +422,35 @@ class DealerCenterScraper:
         ).click()
         # Added 2-second delay after the first "Books" click to allow page update
         time.sleep(3)
+        # Wait for loader to disappear after first Books click
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after first Books click.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after first Books click, proceeding anyway.")
+
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
         ).click()
+        # Wait for loader to disappear after second Books click
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after second Books click.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after second Books click, proceeding anyway.")
+
         self.wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
             )
         ).click()
+        # Wait for loader to disappear after clicking J.D. Power
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking J.D. Power.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking J.D. Power, proceeding anyway.")
+
         retail_value = self.wait.until(
             EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
         ).get_attribute("aria-valuenow")
@@ -385,6 +459,13 @@ class DealerCenterScraper:
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
             )
         ).click()
+        # Wait for loader to disappear after clicking Market Data
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Market Data.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Market Data, proceeding anyway.")
+
         time.sleep(0.5)
 
         # Create a shorter wait for the market data elements

@@ -13,4 +13,4 @@ class FilterModel(Base):
     year_to = Column(Integer, nullable=True)
     odometer_min = Column(Integer, nullable=True)
     odometer_max = Column(Integer, nullable=True)
-    created_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, nullable=True)

@@ -49,6 +49,24 @@ services:
       retries: 5
       start_period: 10s
 
+
+  redis_1:
+    image: 'redis:latest'
+    container_name: redis_1_cars_and_beyond
+    ports:
+      - "6380:6380"
+    command: ["redis-server", "--port", "6380"]
+    volumes:
+      - redis_1_cars_and_beyond_data:/var/lib/data
+    networks:
+      - cars_and_beyond_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   entities:
     restart: always
     build:
@@ -111,6 +129,27 @@ services:
       - ./entities/.env
     environment:
       - PYTHONPATH=/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
+  celery:
+    build: 
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: celery_cars_and_beyond
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=solo"]
+    env_file:
+      - ./entities/.env
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+    depends_on:
+      redis_1:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
 
@@ -179,6 +218,8 @@ volumes:
   pgadmin_cars_and_beyond_data:
     driver: local
   redis_cars_and_beyond_data:
+    driver: local
+  redis_1_cars_and_beyond_data:
     driver: local
 
 networks:

@@ -8,3 +8,4 @@ from .user import UserRoleEnum as UserRoleEnum
 from .vehicle import PhotoModel as PhotoModel
 from .vehicle import CarModel as CarModel
 from .vehicle import PartModel as PartModel
+from .filter import FilterModel as FilterModel
