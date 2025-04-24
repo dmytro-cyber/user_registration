@@ -20,6 +20,10 @@ class FilterUpdate(FilterBase):
     pass
 
 
+class FilterUpdateTimestamp(BaseModel):
+    updated_at: datetime
+
+
 class FilterResponse(FilterBase):
     id: int
     updated_at: datetime | None
