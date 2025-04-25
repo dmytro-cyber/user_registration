@@ -1,33 +1,31 @@
+# api/v1/routers/auth.py
 from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
-from sqlalchemy.exc import SQLAlchemyError
 from schemas.user import (
     UserLoginRequestSchema,
     UserRegistrationRequestSchema,
     UserRegistrationResponseSchema,
 )
+from models.user import UserModel
 from schemas.message import MessageResponseSchema
 from core.dependencies import get_jwt_auth_manager
-from models.user import UserModel
 from models.validators.user import validate_phone_number
 from core.dependencies import Settings, get_current_user, get_settings
 from core.security.interfaces import JWTAuthManagerInterface
 from exceptions.security import BaseSecurityError
 from db.session import get_db
-from services.auth import verefy_invite
+from services.auth import verify_invite
 from services.cookie import set_token_cookie, delete_token_cookie
+from crud.user import create_user, get_user_by_email, get_user_by_id
 from dotenv import load_dotenv
 import os
 import logging
 
-import datetime
-from models.validators.user import validate_phone_number
+load_dotenv()
 
+# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
-load_dotenv()
 
 router = APIRouter()
 
@@ -71,12 +69,10 @@ async def register_user(
     """
     logger.info(f"Starting user registration for email: {user_data.email}")
 
-    payload = verefy_invite(user_data, jwt_manager)
+    payload = verify_invite(user_data, jwt_manager)
     logger.debug(f"Decoded invitation code: {payload}")
 
-    result = await db.execute(select(UserModel).where(UserModel.email == payload.get("user_email")))
-    existing_user = result.scalars().first()
-
+    existing_user = await get_user_by_email(db, payload.get("user_email"))
     if existing_user:
         logger.warning(f"User with email {user_data.email} already exists")
         raise HTTPException(
@@ -91,28 +87,16 @@ async def register_user(
         logger.error(f"Invalid phone number: {str(exc)}")
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    try:
-        new_user = UserModel.create(
-            email=str(payload.get("user_email")),
-            raw_password=user_data.password,
-        )
-        new_user.role_id = payload.get("role_id")
-        new_user.first_name = user_data.first_name
-        new_user.last_name = user_data.last_name
-        new_user.phone_number = user_data.phone_number
-        new_user.date_of_birth = user_data.date_of_birth
-        db.add(new_user)
-        await db.commit()
-        await db.refresh(new_user)
-        logger.info(f"User {new_user.email} successfully registered with role_id: {new_user.role_id}")
-
-    except SQLAlchemyError as e:
-        logger.error(f"Error during user creation: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred during user creation.",
-        )
-
+    new_user = await create_user(
+        db=db,
+        email=payload.get("user_email"),
+        raw_password=user_data.password,
+        first_name=user_data.first_name,
+        last_name=user_data.last_name,
+        phone_number=user_data.phone_number,
+        date_of_birth=user_data.date_of_birth,
+        role_id=payload.get("role_id")
+    )
     return UserRegistrationResponseSchema.model_validate(new_user)
 
 
@@ -153,9 +137,7 @@ async def login_user(
     """
     logger.info(f"Login attempt for email: {login_data.email}")
 
-    result = await db.execute(select(UserModel).where(UserModel.email == login_data.email))
-    user = result.scalars().first()
-
+    user = await get_user_by_email(db, login_data.email)
     if not user or not user.verify_password(login_data.password):
         logger.warning(f"Failed login attempt for email: {login_data.email} - Invalid credentials")
         raise HTTPException(
@@ -236,9 +218,7 @@ async def refresh_access_token(
             detail=str(error),
         )
 
-    result = await db.execute(select(UserModel).filter_by(id=user_id))
-    user = result.scalar_one_or_none()
-
+    user = await get_user_by_id(db, user_id)
     if not user:
         logger.warning(f"User with id {user_id} not found")
         raise HTTPException(
