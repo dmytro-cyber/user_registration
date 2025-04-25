@@ -113,7 +113,7 @@ class UpdateEmailSchema(BaseModel):
     new_email: EmailStr
 
 
-class SendInvieteRequestSchema(BaseModel):
+class SendInviteRequestSchema(BaseModel):
     email: str
     invite: str
 

@@ -185,4 +185,5 @@ class CarCreateSchema(BaseModel):
     vehicle_type: str | None = None
 
     photos: List[PhotoSchema] = Field(default=[], exclude=True)
+    photos_hd: List[PhotoSchema] = Field(default=[], exclude=True)
     sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)

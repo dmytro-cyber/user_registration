@@ -28,8 +28,13 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
 
         if hasattr(vehicle_data, "photos") and vehicle_data.photos:
             for photo_data in vehicle_data.photos:
-                photo = PhotoModel(url=photo_data.url, car_id=vehicle.id)
+                photo = PhotoModel(url=photo_data.url, car_id=vehicle.id, is_hd=False)
                 db.add(photo)
+        
+        if hasattr(vehicle_data, "photos_hd") and vehicle_data.photos_hd:
+            for photo_data_hd in vehicle_data.photos_hd:
+                photo_hd = PhotoModel(url=photo_data_hd.url, car_id=vehicle.id, is_hd=True)
+                db.add(photo_hd)
 
         logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}.")
 
@@ -105,7 +110,7 @@ async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]
     result = await db.execute(
         select(CarModel)
         .options(
-            selectinload(CarModel.photos),
+            selectinload(CarModel.photos_hd),
             selectinload(CarModel.condition_assessment),
             selectinload(CarModel.sales_history),
         )

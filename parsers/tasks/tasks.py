@@ -272,6 +272,7 @@ def fetch_api_data():
                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
                 "is_salvage": formatted_vehicle.get("is_salvage", False),
                 "photos": formatted_vehicle.get("photos", []),
+                "photos_hd": formatted_vehicle.get("photos_hd", []),
             }
             processed_vehicles.append(adapted_vehicle)
 

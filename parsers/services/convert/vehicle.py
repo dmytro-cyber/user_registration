@@ -113,7 +113,8 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     car_data["sales_history"] = []  # Немає даних у JSON
 
     # Photos
-    car_data["photos"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
+    car_data["photos"] = [{"url": url} for url in api_response.get("link_img_small", [])]
+    car_data["photos_hd"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
 
     # Sales history
     if "sale_history" in api_response:

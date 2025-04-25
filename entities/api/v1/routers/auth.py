@@ -95,7 +95,7 @@ async def register_user(
         last_name=user_data.last_name,
         phone_number=user_data.phone_number,
         date_of_birth=user_data.date_of_birth,
-        role_id=payload.get("role_id")
+        role_id=payload.get("role_id"),
     )
     return UserRegistrationResponseSchema.model_validate(new_user)
 

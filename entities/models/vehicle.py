@@ -87,7 +87,18 @@ class CarModel(Base):
 
     # Relationships
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
-    photos = relationship("PhotoModel", back_populates="car", cascade="all, delete-orphan")
+    photos = relationship(
+        "PhotoModel",
+        primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == False)",
+        back_populates="car",
+        cascade="all, delete-orphan"
+    )
+    photos_hd = relationship(
+        "PhotoModel",
+        primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == True)",
+        back_populates="car",
+        cascade="all, delete-orphan"
+    )
     condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
 
@@ -113,8 +124,9 @@ class PhotoModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, nullable=False)
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    is_hd = Column(Boolean, default=False, nullable=False)
 
-    car = relationship("CarModel", back_populates="photos")
+    car = relationship("CarModel", back_populates=["photos", "photos_hd"])
 
 
 class CarSaleHistoryModel(Base):
