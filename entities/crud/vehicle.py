@@ -1,34 +1,26 @@
-from fastapi import HTTPException
+from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
-from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel
+from sqlalchemy.orm import selectinload
+from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel
 from schemas.vehicle import CarCreateSchema
+from fastapi import HTTPException
 import logging
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-async def save_sale_history(sale_history_data, car_id, db: AsyncSession) -> None:
+async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: int, db: AsyncSession) -> None:
+    """Save sales history for a vehicle."""
     for history_data in sale_history_data:
         sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
         db.add(sales_history)
 
 
-async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
-    """
-    Save a single vehicle and its photos.
-
-    Args:
-        vehicle_data: Pydantic schema with vehicle data and photos.
-        db: Database session.
-
-    Returns:
-        bool: True if saved successfully, False if duplicate VIN.
-
-    Raises:
-        HTTPException: For non-duplicate VIN database errors or unexpected errors.
-    """
+async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
+    """Save a single vehicle and its photos."""
     try:
         vehicle = CarModel(**vehicle_data.dict(exclude={"photos"}))
         db.add(vehicle)
@@ -41,10 +33,9 @@ async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
 
         logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}.")
 
-
         if hasattr(vehicle_data, "sales_history") and vehicle_data.sales_history:
-            save_sale_history(vehicle_data.sales_history, vehicle.id, db)
-        
+            await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
+
         return True
 
     except IntegrityError as e:
@@ -54,3 +45,135 @@ async def save_vehicle(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
             raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
+
+async def get_vehicle_by_vin(db: AsyncSession, vin: str) -> Optional[CarModel]:
+    """Get a vehicle by VIN from the database."""
+    result = await db.execute(select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin))
+    return result.scalars().first()
+
+
+async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optional[CarModel]:
+    """Save a vehicle to the database if it doesn't already exist."""
+    existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+    if existing_vehicle:
+        return None
+
+    db_vehicle = CarModel(**vehicle_data.dict(exclude_unset=True))
+    db.add(db_vehicle)
+    return db_vehicle
+
+
+async def get_filtered_vehicles(
+    db: AsyncSession, filters: Dict[str, Any], page: int, page_size: int
+) -> tuple[List[CarModel], int, int]:
+    """Get filtered vehicles with pagination."""
+    query = select(CarModel).options(selectinload(CarModel.photos))
+
+    if "make" in filters and filters["make"]:
+        query = query.filter(CarModel.make.in_(filters["make"]))
+    if "model" in filters and filters["model"]:
+        query = query.filter(CarModel.model.in_(filters["model"]))
+    if "auction" in filters and filters["auction"]:
+        query = query.filter(CarModel.auction.in_(filters["auction"]))
+    if "auction_name" in filters and filters["auction_name"]:
+        query = query.filter(CarModel.auction_name.in_(filters["auction_name"]))
+    if "mileage_min" in filters and filters["mileage_min"] is not None:
+        query = query.filter(CarModel.mileage >= filters["mileage_min"])
+    if "mileage_max" in filters and filters["mileage_max"] is not None:
+        query = query.filter(CarModel.mileage <= filters["mileage_max"])
+    if "min_accident_count" in filters and filters["min_accident_count"] is not None:
+        query = query.filter(CarModel.accident_count >= filters["min_accident_count"])
+    if "max_accident_count" in filters and filters["max_accident_count"] is not None:
+        query = query.filter(CarModel.accident_count <= filters["max_accident_count"])
+    if "min_year" in filters and filters["min_year"] is not None:
+        query = query.filter(CarModel.year >= filters["min_year"])
+    if "max_year" in filters and filters["max_year"] is not None:
+        query = query.filter(CarModel.year <= filters["max_year"])
+
+    total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+    total_pages = (total_count + page_size - 1) // page_size
+
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
+    vehicles = result.scalars().all()
+
+    return vehicles, total_count, total_pages
+
+
+async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]:
+    """Get a vehicle by ID with related data."""
+    result = await db.execute(
+        select(CarModel)
+        .options(
+            selectinload(CarModel.photos),
+            selectinload(CarModel.condition_assessment),
+            selectinload(CarModel.sales_history),
+        )
+        .filter(CarModel.id == car_id)
+    )
+    return result.scalars().first()
+
+
+async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) -> Optional[CarModel]:
+    """Update the status of a vehicle."""
+    result = await db.execute(select(CarModel).where(CarModel.id == car_id))
+    car = result.scalars().first()
+    if not car:
+        return None
+
+    car.car_status = car_status
+    await db.commit()
+    await db.refresh(car)
+    return car
+
+
+async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
+    """Add a part to a vehicle."""
+    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    car = result.scalars().first()
+    if not car:
+        return None
+
+    new_part = PartModel(**part_data, car_id=car_id)
+    db.add(new_part)
+    await db.commit()
+    await db.refresh(new_part)
+    return new_part
+
+
+async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
+    """Update a part for a vehicle."""
+    result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
+    existing_part = result.scalars().first()
+    if not existing_part:
+        return None
+
+    for key, value in part_data.items():
+        setattr(existing_part, key, value)
+
+    await db.commit()
+    await db.refresh(existing_part)
+    return existing_part
+
+
+async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
+    """Delete a part for a vehicle."""
+    result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
+    part = result.scalars().first()
+    if not part:
+        return False
+
+    await db.delete(part)
+    await db.commit()
+    return True
+
+
+async def bulk_save_vehicles(db: AsyncSession, vehicles: List[CarCreateSchema]) -> List[str]:
+    """Bulk save vehicles and return skipped VINs."""
+    skipped_vins = []
+    for vehicle_data in vehicles:
+        success = await save_vehicle_with_photos(vehicle_data, db)
+        await db.commit()
+        if not success:
+            skipped_vins.append(vehicle_data.vin)
+    return skipped_vins

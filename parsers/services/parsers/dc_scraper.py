@@ -1,24 +1,24 @@
-import json
+# dealer_center_scraper.py
+import email
+import imaplib
+import logging
 import os
 import re
 import time
-import email
-import imaplib
 from email.header import decode_header
+from typing import List, Optional, Tuple
+
 from dotenv import load_dotenv
-from selenium.webdriver.common.by import By
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.support.ui import WebDriverWait
 import undetected_chromedriver as uc
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-import logging
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-
-load_dotenv()
 
 
 class GmailClient:
@@ -28,7 +28,7 @@ class GmailClient:
         self.password = os.getenv("SMTP_PASSWORD")
         self.imap_server = "imap.gmail.com"
 
-    def get_verification_code(self, max_wait=30, poll_interval=2):
+    def get_verification_code(self, max_wait: int = 30, poll_interval: int = 2) -> Optional[str]:
         """Poll the inbox for the verification code with a maximum wait time."""
         start_time = time.time()
         while time.time() - start_time < max_wait:
@@ -72,23 +72,56 @@ class GmailClient:
         return None
 
 
+class OptionSelector:
+    @staticmethod
+    def select_best_match(options: List[str], reference: str) -> Optional[str]:
+        """
+        Select the best matching option from a list based on the reference string.
+
+        Args:
+            options (List[str]): List of options to choose from (e.g., ["SLT Quad Cab", "Sport Quad Cab"]).
+            reference (str): Reference string to compare against (e.g., vehicle_name or engine).
+
+        Returns:
+            str: The best matching option, or None if no options are provided.
+        """
+        if not options:
+            return None
+
+        def to_upper_set(s: str) -> set:
+            """Convert a string to a set of uppercase characters, ignoring spaces and special characters."""
+            return set(re.sub(r"[^a-zA-Z0-9]", "", s).upper())
+
+        reference_set = to_upper_set(reference)
+        differences = []
+
+        for option in options:
+            option_set = to_upper_set(option)
+            diff = len(option_set.symmetric_difference(reference_set))
+            differences.append((diff, option))
+
+        differences.sort(key=lambda x: x[0])
+        return differences[0][1]
+
+
 class DealerCenterScraper:
-    # Static variable to store proxy usage decision (shared across all instances)
     _use_proxy = None
-    # Static variable to store cookies (shared across all instances)
     _cookies = None
 
-    def __init__(self, vin):
+    def __init__(self, vin: str, vehicle_name: str = None, engine: str = None, gmail_client: GmailClient = None):
         self.vin = vin
+        self.vehicle_name = vehicle_name
+        self.engine = engine
+        self.gmail_client = gmail_client or GmailClient()
         self.proxy_host = os.getenv("PROXY_HOST")
         self.proxy_port = os.getenv("PROXY_PORT")
         self.driver = None
-        self.driver_closed = False  # Flag to track if the driver has been closed
-        self.use_proxy = self._determine_proxy_usage()  # Determine if proxy should be used
-        self.driver = self._init_driver()  # Initialize driver with the determined proxy setting
-        self.wait = WebDriverWait(self.driver, 60)  # Default timeout for WebDriverWait
+        self.driver_closed = False
+        self.use_proxy = self._determine_proxy_usage()
+        self.driver = self._init_driver()
+        self.wait = WebDriverWait(self.driver, 60)
 
-    def _setup_chrome_options(self, use_proxy=False):
+    def _setup_chrome_options(self, use_proxy: bool = False) -> Options:
         """Set up Chrome options with or without proxy based on the use_proxy flag."""
         chrome_options = Options()
         if use_proxy:
@@ -99,7 +132,7 @@ class DealerCenterScraper:
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-insecure-localhost")
         chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--headless")  # Enable headless mode
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
@@ -110,7 +143,7 @@ class DealerCenterScraper:
         chrome_options.binary_location = "/usr/bin/google-chrome"
         return chrome_options
 
-    def _test_connection(self, driver, url="https://app.dealercenter.net"):
+    def _test_connection(self, driver, url: str = "https://app.dealercenter.net") -> bool:
         """Test if the connection to the target URL is successful by checking for the presence of the body tag."""
         try:
             driver.get(url)
@@ -124,27 +157,23 @@ class DealerCenterScraper:
             logging.error(f"Error while testing connection to {url}: {str(e)}")
             return False
 
-    def _determine_proxy_usage(self):
+    def _determine_proxy_usage(self) -> bool:
         """Determine whether to use a proxy based on previous runs or by testing the connection."""
-        # Check if proxy usage has already been determined
         if DealerCenterScraper._use_proxy is not None:
             logging.info(f"Using saved proxy setting: use_proxy={DealerCenterScraper._use_proxy}")
             return DealerCenterScraper._use_proxy
 
-        # If no previous decision exists, test connection without proxy first
         chrome_options = self._setup_chrome_options(use_proxy=False)
         service = Service()
         driver = uc.Chrome(service=service, options=chrome_options)
         logging.info("Testing connection without proxy.")
 
-        # Test connection without proxy
         if self._test_connection(driver):
             logging.info("Connection without proxy successful. Saving decision.")
             driver.quit()
             DealerCenterScraper._use_proxy = False
             return False
 
-        # If connection without proxy fails, test with proxy
         logging.info("Connection without proxy failed. Testing with proxy...")
         driver.quit()
 
@@ -158,7 +187,6 @@ class DealerCenterScraper:
             DealerCenterScraper._use_proxy = True
             return True
 
-        # If both attempts fail, raise an exception
         driver.quit()
         logging.error("Failed to connect with or without proxy. Aborting.")
         raise Exception("Unable to establish connection with or without proxy.")
@@ -171,12 +199,12 @@ class DealerCenterScraper:
         logging.info("Chrome driver initialized with determined proxy setting.")
         return driver
 
-    def _save_cookies(self):
+    def _save_cookies(self) -> None:
         """Save current session cookies to a class variable."""
         DealerCenterScraper._cookies = self.driver.get_cookies()
         logging.info("Cookies saved to class variable.")
 
-    def _load_cookies(self):
+    def _load_cookies(self) -> bool:
         """Load session cookies from a class variable if they exist and validate them."""
         self.driver.get("https://app.dealercenter.net/apps/shell/reports/home")
         if DealerCenterScraper._cookies is None:
@@ -198,12 +226,28 @@ class DealerCenterScraper:
             logging.error(f"Error loading cookies: {str(e)}")
             return False
 
-    def _clear_cookies_file(self):
+    def _clear_cookies(self) -> None:
         """Clear the cookies stored in the class variable."""
         DealerCenterScraper._cookies = None
         logging.info("Cookies cleared from class variable.")
 
-    def check_session(self):
+    def _wait_for_loader_to_disappear(self, action_description: str) -> None:
+        """
+        Wait for the loader to disappear and log the result.
+
+        Args:
+            action_description (str): Description of the action being performed (e.g., "after clicking Inventory").
+
+        Returns:
+            None
+        """
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info(f"Loader disappeared {action_description}.")
+        except TimeoutException:
+            logging.warning(f"Loader did not disappear {action_description}, proceeding anyway.")
+
+    def check_session(self) -> bool:
         """Check if the current session is active."""
         try:
             self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(text(),'Inventory')]")))
@@ -213,29 +257,24 @@ class DealerCenterScraper:
             logging.info("Session is not active.")
             return False
 
-    def login(self):
+    def login(self) -> None:
         """Perform login only if the session is not active."""
-        # Try to load cookies and check the session
         cookies_loaded = self._load_cookies()
         if cookies_loaded and self.check_session():
             logging.info("Login not required, session is active.")
             return
 
-        # If cookies are invalid or loading failed, clear them and perform login
         logging.info("Cookies are invalid or session is not active. Clearing cookies and performing login...")
-        self._clear_cookies_file()
+        self._clear_cookies()
 
-        # Log the values of environment variables
         dc_username = os.getenv("DC_USERNAME")
         dc_password = os.getenv("DC_PASSWORD")
         logging.info(f"DC_USERNAME: {dc_username}, DC_PASSWORD: {dc_password}")
 
-        # Check if environment variables are set
         if not dc_username or not dc_password:
             logging.error("DC_USERNAME or DC_PASSWORD is not set in .env file")
             raise ValueError("DC_USERNAME or DC_PASSWORD is not set in .env file")
 
-        # Wait for login form elements
         try:
             username_field = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
             password_field = self.driver.find_element(By.ID, "password")
@@ -245,13 +284,11 @@ class DealerCenterScraper:
             logging.error(f"Failed to find login form elements: {str(e)}")
             raise
 
-        # Enter login credentials and submit
         username_field.send_keys(dc_username)
         password_field.send_keys(dc_password)
         login_button.click()
         logging.info("Clicked login button")
 
-        # Wait for the Email Verification Code link and click it
         try:
             self._click_if_exists(
                 "//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail"
@@ -261,22 +298,19 @@ class DealerCenterScraper:
             logging.error(f"Failed to click Email Verification Code link: {str(e)}")
             raise
 
-        # Added 5-second delay before fetching the verification code
         time.sleep(5)
-        gmail = GmailClient()
-        verification_code = gmail.get_verification_code(max_wait=30, poll_interval=2)
+        verification_code = self.gmail_client.get_verification_code(max_wait=30, poll_interval=2)
         if not verification_code:
             logging.error("Failed to retrieve verification code.")
             raise Exception("Failed to retrieve verification code.")
 
-        # Enter the verification code and submit
         try:
             verification_code_field = self.wait.until(EC.presence_of_element_located((By.ID, "email-passcode-input")))
             submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
             logging.info("Verification code input field found")
         except Exception as e:
             logging.error(f"Failed to find verification code input field: {str(e)}")
-            logging.info(self.driver.page_source)  # Log the page source for debugging
+            logging.info(self.driver.page_source)
             raise
 
         try:
@@ -287,45 +321,29 @@ class DealerCenterScraper:
             logging.error(f"Error during email verification: {str(e)}")
             raise
 
-    def _click_if_exists(self, xpath, fallback_id=None):
+    def _click_if_exists(self, xpath: str, fallback_id: Optional[str] = None) -> None:
         """Click an element if it exists, with an optional fallback ID."""
         try:
             button = self.wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
             button.click()
-        except:
+        except Exception:
             if fallback_id:
                 try:
                     self.driver.find_element(By.ID, fallback_id).click()
-                except:
+                except Exception:
                     pass
 
-    def run_history_report(self):
+    def run_history_report(self) -> Tuple[Optional[int], Optional[str], int]:
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
-        time.sleep(5)  # Added delay to ensure the page is fully loaded
-        # Save cookies after successful login
+        time.sleep(5)
         self._save_cookies()
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared, proceeding with clicking Inventory.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear within timeout, proceeding anyway.")
+        self._wait_for_loader_to_disappear("before clicking Inventory")
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
-        # Wait for loader to disappear after clicking Inventory
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Inventory.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Inventory, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Inventory")
 
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
-        # Wait for loader to disappear after clicking Run History Report
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Run History Report.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Run History Report, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Run History Report")
 
-        # Added 2-second delay before searching for the VIN input field
         time.sleep(5)
         elements = self.wait.until(
             EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
@@ -334,21 +352,11 @@ class DealerCenterScraper:
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
         ).click()
-        # Wait for loader to disappear after clicking Run
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Run.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Run, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Run")
 
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
         self.driver.switch_to.frame(iframe)
-        # Wait for loader to disappear after switching to iframe
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after switching to iframe.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after switching to iframe, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after switching to iframe")
 
         owners_value = None
         try:
@@ -356,100 +364,117 @@ class DealerCenterScraper:
             try:
                 owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
                 owners_value = int(owners_element.text)
-            except:
+            except Exception:
                 owners_value = 1
-        except:
+        except Exception:
             pass
+
         try:
             odometer_value = self.driver.find_element(
                 By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
             ).text.replace(",", "")
-        except:
+        except Exception:
             odometer_value = None
+
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
         self.driver.switch_to.default_content()
-        # Wait for loader to disappear after switching back to default content
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after switching back to default content.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after switching back to default content, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after switching back to default content")
 
         return owners_value, odometer_value, accidents_value
 
-    def get_market_data(self, odometer_value):
+    def get_market_data(self, odometer_value: Optional[str]) -> Tuple[
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+        Optional[str],
+    ]:
         """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
-
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
-        # Wait for loader to disappear after clicking Inventory
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Inventory.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Inventory, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Inventory")
 
         self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
+            EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]"))
         ).click()
-        # Wait for loader to disappear after clicking Appraise New Vehicle
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Appraise New Vehicle.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Appraise New Vehicle, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Appraise New Vehicle")
 
         vin_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
         )
         vin_input.send_keys(self.vin)
+
+        odometer_input = self.wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
+        )
+        odometer_input.click()
+
+        max_attempts = 5
+        attempts = 0
+
+        while attempts < max_attempts:
+            try:
+                self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'car-wrap')]")))
+                option_elements = self.driver.find_elements(
+                    By.XPATH, "//div[contains(@class, 'car-wrap')]//span[contains(@class, 'ng-star-inserted')]"
+                )
+                options = [elem.text.strip() for elem in option_elements if elem.text.strip()]
+
+                if not options:
+                    logging.info("No options found, proceeding with 'Next' button.")
+                    break
+
+                logging.info(f"Found options: {options}")
+
+                reference = self.vehicle_name if self.vehicle_name else ""
+                if self.engine:
+                    reference += f" {self.engine}"
+
+                best_option = OptionSelector.select_best_match(options, reference)
+                logging.info(f"Selected best option: {best_option}")
+
+                best_option_element = self.driver.find_element(
+                    By.XPATH,
+                    f"//div[contains(@class, 'car-wrap')]//span[contains(@class, 'ng-star-inserted') and contains(text(), '{best_option}')]",
+                )
+                best_option_element.click()
+
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))).click()
+
+                time.sleep(2)
+                attempts += 1
+
+            except TimeoutException:
+                logging.info("No more option selection windows found, proceeding.")
+                break
+
+        odometer_input = self.wait.until(
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
+        )
         if odometer_value:
-            odometer_input = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")
-                )
-            )
-            odometer_input.click()
-            self._click_if_exists("//button[contains(., 'Next')]")
-            time.sleep(2)
-            odometer_input = self.wait.until(
-                EC.presence_of_element_located(
-                    (By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")
-                )
-            )
             odometer_input.send_keys(str(odometer_value))
-        self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
-        ).click()
-        # Added 2-second delay after the first "Books" click to allow page update
-        time.sleep(3)
-        # Wait for loader to disappear after first Books click
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after first Books click.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after first Books click, proceeding anyway.")
+        else:
+            odometer_input.send_keys("100000")
 
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
         ).click()
-        # Wait for loader to disappear after second Books click
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after second Books click.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after second Books click, proceeding anyway.")
+        time.sleep(3)
+        self._wait_for_loader_to_disappear("after first Books click")
+
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        ).click()
+        self._wait_for_loader_to_disappear("after second Books click")
 
         self.wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
             )
         ).click()
-        # Wait for loader to disappear after clicking J.D. Power
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking J.D. Power.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking J.D. Power, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking J.D. Power")
 
         retail_value = self.wait.until(
             EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
@@ -459,19 +484,12 @@ class DealerCenterScraper:
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
             )
         ).click()
-        # Wait for loader to disappear after clicking Market Data
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after clicking Market Data.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after clicking Market Data, proceeding anyway.")
+        self._wait_for_loader_to_disappear("after clicking Market Data")
 
         time.sleep(0.5)
 
-        # Create a shorter wait for the market data elements
-        short_wait = WebDriverWait(self.driver, 10)  # Reduced timeout to 5 seconds
+        short_wait = WebDriverWait(self.driver, 10)
 
-        # Extract price value
         try:
             price_tooltip_element = short_wait.until(
                 EC.presence_of_element_located(
@@ -485,7 +503,6 @@ class DealerCenterScraper:
         except (TimeoutException, NoSuchElementException):
             price_value = None
 
-        # Wait for the main container of the market data elements to ensure the page is loaded
         short_wait.until(
             EC.presence_of_element_located(
                 (
@@ -495,7 +512,6 @@ class DealerCenterScraper:
             )
         )
 
-        # Extract all market data elements in one go
         year_value = None
         make_value = None
         model_value = None
@@ -568,27 +584,24 @@ class DealerCenterScraper:
             body_style_value,
         )
 
-    def close(self):
+    def close(self) -> None:
         """Close the browser driver safely."""
         if not self.driver_closed:
             try:
-                # Close all browser windows
                 for handle in self.driver.window_handles:
                     self.driver.switch_to.window(handle)
                     self.driver.close()
-                # Small delay to ensure browser processes terminate
                 time.sleep(1)
                 self.driver.quit()
                 logging.info("Driver closed successfully.")
             except Exception as e:
                 logging.error(f"Error closing driver: {str(e)}")
             finally:
-                # Prevent __del__ from calling quit again
                 self.driver.service = None
                 self.driver.session_id = None
                 self.driver_closed = True
 
-    def scrape(self):
+    def scrape(self) -> dict:
         """Run the full scraping process and return the results."""
         self.login()
         owners, odometer, accidents = self.run_history_report()

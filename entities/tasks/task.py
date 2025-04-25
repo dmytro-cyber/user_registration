@@ -16,11 +16,11 @@ engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
-async def parse_and_update_car_async(vin: str):
+async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
 
     async with AsyncSessionLocal() as db:
         try:
-            url = f"http://parsers:8001/api/v1/parsers/scrape/dc/{vin}"
+            url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
             async with httpx.AsyncClient() as client:
                 response = await client.get(url, timeout=300.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
                 response.raise_for_status()
@@ -34,7 +34,7 @@ async def parse_and_update_car_async(vin: str):
             if not car:
                 logging.error(f"Car with VIN {vin} not found in database")
                 return
-            
+
             if data.get("error"):
                 logging.error(f"Errors in scraped data for VIN {vin}: {data.get('errors')}")
                 return
@@ -43,9 +43,9 @@ async def parse_and_update_car_async(vin: str):
 
             if data.get("mileage"):
                 car.has_correct_mileage = car.mileage == data.get("mileage")
-            
+
             car.accident_count = data.get("accident_count")
-            
+
             await db.commit()
             logging.info(f"Successfully updated car VIN {vin} with scraped data")
 
@@ -55,8 +55,9 @@ async def parse_and_update_car_async(vin: str):
         finally:
             await db.close()
 
+
 @app.task(name="tasks.task.parse_and_update_car")
-def parse_and_update_car(vin: str):
+def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
     try:
         asyncio.run(parse_and_update_car_async(vin))
     except Exception as e:

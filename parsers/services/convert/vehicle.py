@@ -114,7 +114,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
 
     # Photos
     car_data["photos"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
-    
+
     # Sales history
     if "sale_history" in api_response:
         car_data["sales_history"] = [

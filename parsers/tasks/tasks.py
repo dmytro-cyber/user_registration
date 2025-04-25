@@ -12,10 +12,7 @@ from urllib.parse import urlencode
 import time
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
 load_dotenv()
@@ -39,6 +36,7 @@ app.conf.beat_schedule = {
 
 app.conf.timezone = "UTC"
 
+
 def generate_car_api_url(data: dict, page: int = 1) -> str:
     """
     Generates a URL for the API request based on the provided response data, including pagination.
@@ -57,7 +55,7 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
         # "status": "Run & Drive",
         "sort": "created_at",
         "direction": "DESC",
-        "page": page
+        "page": page,
     }
 
     dynamic_params = {}
@@ -77,6 +75,7 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
     all_params = {**fixed_params, **dynamic_params}
     query_string = urlencode(all_params, safe="&")
     return f"{base_url}?{query_string}"
+
 
 # @app.task
 # def fetch_api_data():
@@ -106,7 +105,7 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
 #     for filter_data in filters:
 #         filter_id = filter_data.get("id")
 #         filter_updated_at_str = filter_data.get("updated_at")
-        
+
 #         # Parse filter's updated_at to datetime (if it exists)
 #         filter_updated_at = None
 #         if filter_updated_at_str:
@@ -229,6 +228,7 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
 #     logger.info("Finished processing all filters.")
 #     return "Finished processing all filters."
 
+
 @app.task
 def fetch_api_data():
     """
@@ -268,9 +268,7 @@ def fetch_api_data():
                 "drive_type": formatted_vehicle.get("drive_type"),
                 "exterior_color": formatted_vehicle.get("exterior_color"),
                 "body_style": formatted_vehicle.get("body_style"),
-                "transmision": formatted_vehicle.get(
-                    "transmision"
-                ),
+                "transmision": formatted_vehicle.get("transmision"),
                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
                 "is_salvage": formatted_vehicle.get("is_salvage", False),
                 "photos": formatted_vehicle.get("photos", []),
@@ -281,7 +279,6 @@ def fetch_api_data():
         httpx_client.headers.update({"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")})
         response = httpx_client.post(f"http://entities:8000/api/v1/vehicles/bulk/", json=processed_vehicles)
         print(f"Received response: {response.status_code} - {response.text}")
-        print("vins:", vins)
         return processed_vehicles
 
     except FileNotFoundError:

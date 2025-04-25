@@ -44,6 +44,7 @@ class CarUpdate(CarBaseSchema):
 class CarListResponseSchema(BaseModel):
     cars: List[CarBaseSchema]
     page_links: dict
+    last: bool
 
 
 class ConditionAssessmentResponseSchema(BaseModel):
@@ -62,7 +63,7 @@ class SalesHistoryBaseSchema(BaseModel):
 class CarDetailResponseSchema(BaseModel):
     id: int
     auction: str | None
-    
+
     # title
     vehicle: str
 
@@ -78,7 +79,7 @@ class CarDetailResponseSchema(BaseModel):
     body_style: str | None
     interior_color: str | None
     style_id: int | None
-    
+
     photos: List[str] = []
 
     # condition assessment
