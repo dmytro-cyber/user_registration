@@ -126,11 +126,10 @@ async def update_car_status(
 ):
     logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}")
 
-    async with db.begin():
-        car = await update_vehicle_status(db, car_id, status_data.car_status)
-        if not car:
-            logger.warning(f"Car with ID {car_id} not found")
-            raise HTTPException(status_code=404, detail="Car not found")
+    car = await update_vehicle_status(db, car_id, status_data.car_status)
+    if not car:
+        logger.warning(f"Car with ID {car_id} not found")
+        raise HTTPException(status_code=404, detail="Car not found")
 
     logger.info(f"Status updated for car with ID: {car_id}")
     return status_data

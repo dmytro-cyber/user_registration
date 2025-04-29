@@ -3,7 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel
+from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel, CarStatus
 from schemas.vehicle import CarCreateSchema
 from fastapi import HTTPException
 import logging
@@ -95,6 +95,8 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.year >= filters["min_year"])
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
+    if "bidding_hub" in filters and filters["bidding_hub"] == True:
+        query = query.filter(~CarModel.car_status.in_([CarStatus.NEW, ]))
 
     total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
     total_pages = (total_count + page_size - 1) // page_size
@@ -126,9 +128,10 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     if not car:
         return None
 
-    car.car_status = car_status
     await db.commit()
     await db.refresh(car)
+
+    car.car_status = car_status
     return car
 
 

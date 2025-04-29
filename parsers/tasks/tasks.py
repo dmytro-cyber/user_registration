@@ -247,9 +247,11 @@ def fetch_api_data():
         if not data:
             return None
 
+        asd = []
         processed_vehicles = []
         for vehicle in data:
             formatted_vehicle = format_car_data(vehicle)
+            asd.append({"vin": formatted_vehicle["vin"], "vehicle": formatted_vehicle["vehicle"], "engine": formatted_vehicle["engine"]})
             adapted_vehicle = {
                 "vin": formatted_vehicle["vin"],
                 "vehicle": formatted_vehicle["vehicle"],
@@ -276,6 +278,7 @@ def fetch_api_data():
             }
             processed_vehicles.append(adapted_vehicle)
 
+        print(f"Processed vehicles: {asd}")
         httpx_client = httpx.Client(timeout=5.0)
         httpx_client.headers.update({"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")})
         response = httpx_client.post(f"http://entities:8000/api/v1/vehicles/bulk/", json=processed_vehicles)

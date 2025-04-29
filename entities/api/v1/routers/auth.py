@@ -250,6 +250,16 @@ async def refresh_access_token(
     summary="Log out a user",
     description="Logs out the user by deleting access and refresh token cookies.",
     status_code=status.HTTP_200_OK,
+    responses={
+        200: {
+            "description": "OK - User logged out successfully.",
+            "content": {"application/json": {"example": {"message": "Logged out"}}},
+        },
+        403: {
+            "description": "Forbidden - User not authenticated.",
+            "content": {"application/json": {"example": {"detail": "User not authenticated."}}},
+        },
+    },
 )
 async def logout(response: Response, current_user: UserModel = Depends(get_current_user)) -> MessageResponseSchema:
     """

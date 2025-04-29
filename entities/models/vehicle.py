@@ -10,11 +10,12 @@ class RecommendationStatus(enum.Enum):
 
 
 class CarStatus(enum.Enum):
-    AT_AUCTION = "at_auction"
-    PURCHASED = "purchased"
-    IN_REPAIR = "in_repair"
-    READY_FOR_SALE = "ready_for_sale"
-    SOLD = "sold"
+    NEW = "New"
+    TO_BID = "To Bid"
+    BIDDING = "Bidding"
+    WON = "Won"
+    FAILED = "Failed"
+    DELETED_FROM_BIDDING_HUB = "Deleted from Bidding Hub"
 
 
 class CarModel(Base):
@@ -46,10 +47,11 @@ class CarModel(Base):
     actual_bid = Column(Float, nullable=True)
     price_sold = Column(Float, nullable=True)
     suggested_bid = Column(Float, nullable=True)
-    total_investment = Column(Float, nullable=True)
+    total_investment = Column(Integer, nullable=True)
     net_profit = Column(Float, nullable=True)
-    profit_margin = Column(Float, nullable=True)
+    profit_margin = Column(Integer, nullable=True)
     roi = Column(Float, nullable=True)
+    avg_market_price = Column(Integer, nullable=True)
 
     # Additional costs
     parts_cost = Column(Float, nullable=True)
@@ -66,7 +68,7 @@ class CarModel(Base):
     recommendation_status = Column(
         Enum(RecommendationStatus), nullable=False, default=RecommendationStatus.NOT_RECOMMENDED
     )
-    car_status = Column(Enum(CarStatus), nullable=False, default=CarStatus.AT_AUCTION)
+    car_status = Column(Enum(CarStatus), nullable=False, default=CarStatus.NEW)
 
     # List page info
     engine = Column(Float, nullable=True)
@@ -90,21 +92,36 @@ class CarModel(Base):
     photos = relationship(
         "PhotoModel",
         primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == False)",
-        back_populates="car",
+        back_populates="car_low_res",
         cascade="all, delete-orphan"
     )
     photos_hd = relationship(
         "PhotoModel",
         primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == True)",
-        back_populates="car",
+        back_populates="car_high_res",
         cascade="all, delete-orphan"
     )
+    bidding_hub_history = relationship("BiddingHubHistoryModel", back_populates="car", cascade="all, delete-orphan")
     condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
 
     @property
     def engine_and_cylinder(self) -> str:
         return f"{self.engine} / {self.engine_cylinder}"
+
+
+class BiddingHubHistoryModel(Base):
+    __tablename__ = "bidding_hub_history"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    date = Column(DateTime, nullable=False)
+    action = Column(String, nullable=False)  # "Added", "Deleted", "Updated"
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    
+    user = relationship("UserModel", back_populates="bidding_hub_history")
+    car = relationship("CarModel", back_populates="bidding_hub_history")
 
 
 class PartModel(Base):
@@ -126,7 +143,8 @@ class PhotoModel(Base):
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
     is_hd = Column(Boolean, default=False, nullable=False)
 
-    car = relationship("CarModel", back_populates=["photos", "photos_hd"])
+    car_low_res = relationship("CarModel", back_populates="photos")
+    car_high_res = relationship("CarModel", back_populates="photos_hd")
 
 
 class CarSaleHistoryModel(Base):

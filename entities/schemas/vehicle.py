@@ -187,3 +187,30 @@ class CarCreateSchema(BaseModel):
     photos: List[PhotoSchema] = Field(default=[], exclude=True)
     photos_hd: List[PhotoSchema] = Field(default=[], exclude=True)
     sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)
+
+
+class CarBiddinHubResponseSchema(BaseModel):
+    id: int | None = None
+    vehicle: str | None = None
+    auction: str | None = None
+    auction_name: str | None = None
+    mileage: int | None = None
+    auction: str | None = None
+    auction_name: str | None = None
+    date: datetime | None = None
+    lot: int | None = None
+    avg_market_price: int | None = None
+    total_investment: int | None = None
+    profit_margin: int | None = None
+    roi: float | None = None
+    actual_bid: float | None = None
+    suggested_bid: float | None = None
+    car_status: CarStatus | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class CarBiddinHubListResponseSchema(BaseModel):
+    vehicles: List[CarBiddinHubResponseSchema]
+    total_count: int
+    total_pages: int

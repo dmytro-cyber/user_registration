@@ -42,6 +42,7 @@ class UserModel(Base):
     temp_email: Mapped[str] = mapped_column(String, nullable=True)
     _hashed_password: Mapped[str] = mapped_column(String, nullable=False)
 
+    bidding_hub_history = relationship("BiddingHubHistoryModel", back_populates="user", cascade="all, delete-orphan")
     role_id: Mapped[int] = mapped_column(ForeignKey("user_roles.id", ondelete="CASCADE"), nullable=False)
     role: Mapped["UserRoleModel"] = relationship("UserRoleModel", back_populates="users")
 
@@ -50,6 +51,9 @@ class UserModel(Base):
 
     def has_role(self, role_name: UserRoleEnum) -> bool:
         return self.role.name == role_name
+    
+    def role_in(self, role_names = List[UserRoleEnum]) -> bool:
+        return self.role.name in role_names
 
     @classmethod
     def create(cls, email: str, raw_password: str) -> "UserModel":
