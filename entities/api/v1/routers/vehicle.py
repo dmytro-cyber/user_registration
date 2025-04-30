@@ -79,6 +79,10 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             year_query = select(distinct(CarModel.year)).where(CarModel.year.isnot(None))
             years_result = await db.execute(year_query)
             years = [row[0] for row in years_result.fetchall()]
+            
+            location_query = select(distinct(CarModel.location)).where(CarModel.location.isnot(None))
+            locations_result = await db.execute(location_query)
+            locations = [row[0] for row in locations_result.fetchall()]
 
             mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage))
             mileage_range_result = await db.execute(mileage_range_query)
@@ -103,6 +107,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             auction_names=auction_names,
             makes=makes,
             models=models,
+            locations=locations,
             years=years,
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,

@@ -239,5 +239,6 @@ class CarFilterOptionsSchema(BaseModel):
     makes: List[str] | None = []
     models: List[str] | None = []
     years: List[int] | None = []
+    locations: List[str] | None = []
     mileage_range: Optional[dict] | None = {}
     accident_count_range: Optional[dict] | None = {}
