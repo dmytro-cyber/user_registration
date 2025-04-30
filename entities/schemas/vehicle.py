@@ -240,5 +240,10 @@ class CarFilterOptionsSchema(BaseModel):
     models: List[str] | None = []
     years: List[int] | None = []
     locations: List[str] | None = []
-    mileage_range: Optional[dict] | None = {}
-    accident_count_range: Optional[dict] | None = {}
+    mileage_range: dict | None = {}
+    accident_count_range: dict | None = {}
+
+
+class UpdateCurrentBidSchema(BaseModel):
+    current_bid: float
+    comment: str | None = None

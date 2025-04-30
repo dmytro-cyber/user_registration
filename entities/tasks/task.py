@@ -45,6 +45,19 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                 car.has_correct_mileage = car.mileage == data.get("mileage")
 
             car.accident_count = data.get("accident_count")
+            
+            sum_price = data.get("price", 0) + data.get("retail", 0) + data.get("manheim", 0)
+            divisor = 0
+            if sum_price > 0:
+                if data.get("price", 0):
+                    divisor += 1
+                if data.get("retail", 0):
+                    divisor += 1
+                if data.get("manheim", 0):
+                    divisor += 1
+            car.avg_market_price = int(sum_price / divisor)
+            car.total_investment = car.avg_market_price / 1.8
+            car.roi = (car.avg_market_price - car.total_investment) / car.total_investment * 100
 
             await db.commit()
             logging.info(f"Successfully updated car VIN {vin} with scraped data")

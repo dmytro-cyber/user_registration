@@ -12,6 +12,7 @@ from schemas.vehicle import (
     CarBiddinHubListResponseSchema,
     BiddingHubHistoryListResponseSchema,
     BiddingHubHistorySchema,
+    UpdateCurrentBidSchema
 )
 from models.user import UserModel
 from schemas.user import UserResponseSchema
@@ -117,15 +118,14 @@ async def delete_vehicle(
 )
 async def update_current_bid(
     car_id: int,
-    current_bid: float,
-    comment: Optional[str] = None,
+    data: UpdateCurrentBidSchema,
     current_user: Settings = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     """
     Update the current bid for a vehicle in the bidding hub.
     """
-    logger.info(f"Updating current bid for car_id={car_id} to {current_bid} by user_id={current_user.id}")
+    logger.info(f"Updating current bid for car_id={car_id} to {data.current_bid} by user_id={current_user.id}")
 
     try:
         vehicle = await get_vehicle_by_id(db, car_id)
@@ -135,12 +135,12 @@ async def update_current_bid(
 
         hub_history = BiddingHubHistoryModel(
             car_id=car_id,
-            action=f"Updated current bid from {vehicle.current_bid} to {current_bid}",
+            action=f"Updated current bid from {vehicle.current_bid} to {data.current_bid}",
             user_id=current_user.id,
-            comment=comment,
+            comment=data.comment,
         )
         db.add(hub_history)
-        vehicle.current_bid = current_bid
+        vehicle.current_bid = data.current_bid
         await db.commit()
         await db.refresh(vehicle)
         logger.info(f"Successfully updated current bid for car_id={car_id} and logged history")
