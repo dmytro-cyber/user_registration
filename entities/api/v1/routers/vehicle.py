@@ -45,6 +45,79 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 router = APIRouter(prefix="/vehicles")
 
 
+@router.get(
+    "/filter-options/",
+    response_model=CarFilterOptionsSchema,
+    summary="Get available filter options for cars",
+    description="Retrieve unique values and ranges for filtering cars (e.g., auctions, makes, models, years, mileage, accident count).",
+)
+async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilterOptionsSchema:
+    logger.info("Fetching filter options for cars")
+
+    try:
+        async with db.begin():
+            auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None))
+            auctions_result = await db.execute(auction_query)
+            auctions = [row[0] for row in auctions_result.fetchall()]
+
+            auction_name_query = select(distinct(CarModel.auction_name)).where(CarModel.auction_name.isnot(None))
+            auction_names_result = await db.execute(auction_name_query)
+            auction_names = [row[0] for row in auction_names_result.fetchall()]
+
+            make_query = select(
+                distinct(func.split_part(CarModel.vehicle, " ", 1).label("make"))
+            ).where(CarModel.vehicle.isnot(None))
+            makes_result = await db.execute(make_query)
+            makes = [row[0] for row in makes_result.fetchall()]
+
+            model_query = select(
+                distinct(func.split_part(CarModel.vehicle, " ", 2).label("model"))
+            ).where(CarModel.vehicle.isnot(None))
+            models_result = await db.execute(model_query)
+            models = [row[0] for row in models_result.fetchall()]
+
+            year_query = select(distinct(CarModel.year)).where(CarModel.year.isnot(None))
+            years_result = await db.execute(year_query)
+            years = [row[0] for row in years_result.fetchall()]
+
+            mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage))
+            mileage_range_result = await db.execute(mileage_range_query)
+            mileage_min, mileage_max = mileage_range_result.fetchone()
+            mileage_range = (
+                {"min": mileage_min, "max": mileage_max}
+                if mileage_min is not None and mileage_max is not None
+                else None
+            )
+
+            accident_count_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count))
+            accident_count_range_result = await db.execute(accident_count_range_query)
+            accident_count_min, accident_count_max = accident_count_range_result.fetchone()
+            accident_count_range = (
+                {"min": accident_count_min, "max": accident_count_max}
+                if accident_count_min is not None and accident_count_max is not None
+                else None
+            )
+
+        response = CarFilterOptionsSchema(
+            auctions=auctions,
+            auction_names=auction_names,
+            makes=makes,
+            models=models,
+            years=years,
+            mileage_range=mileage_range,
+            accident_count_range=accident_count_range,
+        )
+        logger.info(f"Successfully fetched filter options: {response.dict()}")
+        return response
+
+    except Exception as e:
+        logger.error(f"Error fetching filter options for cars: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching filter options",
+        )
+
+
 @router.get("/", response_model=CarListResponseSchema)
 async def get_cars(
     request: Request,
