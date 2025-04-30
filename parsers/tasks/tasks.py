@@ -251,7 +251,13 @@ def fetch_api_data():
         processed_vehicles = []
         for vehicle in data:
             formatted_vehicle = format_car_data(vehicle)
-            asd.append({"vin": formatted_vehicle["vin"], "vehicle": formatted_vehicle["vehicle"], "engine": formatted_vehicle["engine"]})
+            asd.append(
+                {
+                    "vin": formatted_vehicle["vin"],
+                    "vehicle": formatted_vehicle["vehicle"],
+                    "engine": formatted_vehicle["engine"],
+                }
+            )
             adapted_vehicle = {
                 "vin": formatted_vehicle["vin"],
                 "vehicle": formatted_vehicle["vehicle"],

@@ -30,7 +30,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
             for photo_data in vehicle_data.photos:
                 photo = PhotoModel(url=photo_data.url, car_id=vehicle.id, is_hd=False)
                 db.add(photo)
-        
+
         if hasattr(vehicle_data, "photos_hd") and vehicle_data.photos_hd:
             for photo_data_hd in vehicle_data.photos_hd:
                 photo_hd = PhotoModel(url=photo_data_hd.url, car_id=vehicle.id, is_hd=True)
@@ -96,7 +96,13 @@ async def get_filtered_vehicles(
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
     if "bidding_hub" in filters and filters["bidding_hub"] == True:
-        query = query.filter(~CarModel.car_status.in_([CarStatus.NEW, ]))
+        query = query.filter(
+            ~CarModel.car_status.in_(
+                [
+                    CarStatus.NEW,
+                ]
+            )
+        )
 
     total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
     total_pages = (total_count + page_size - 1) // page_size

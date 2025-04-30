@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
+from sqlalchemy.sql import func
 from models import Base
 import enum
 
@@ -44,6 +45,7 @@ class CarModel(Base):
 
     # Financials
     bid = Column(Float, nullable=True)
+    current_bid = Column(Float, nullable=True)
     actual_bid = Column(Float, nullable=True)
     price_sold = Column(Float, nullable=True)
     suggested_bid = Column(Float, nullable=True)
@@ -93,13 +95,13 @@ class CarModel(Base):
         "PhotoModel",
         primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == False)",
         back_populates="car_low_res",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
     photos_hd = relationship(
         "PhotoModel",
         primaryjoin="and_(CarModel.id == PhotoModel.car_id, PhotoModel.is_hd == True)",
         back_populates="car_high_res",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )
     bidding_hub_history = relationship("BiddingHubHistoryModel", back_populates="car", cascade="all, delete-orphan")
     condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
@@ -115,11 +117,12 @@ class BiddingHubHistoryModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
-    date = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=func.now())
     action = Column(String, nullable=False)  # "Added", "Deleted", "Updated"
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
-    
+    comment = Column(String, nullable=True)
+
     user = relationship("UserModel", back_populates="bidding_hub_history")
     car = relationship("CarModel", back_populates="bidding_hub_history")
 

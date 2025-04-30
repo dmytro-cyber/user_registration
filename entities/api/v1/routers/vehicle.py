@@ -1,6 +1,6 @@
 import asyncio
 import logging
-from fastapi import APIRouter, Depends, Query, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.vehicle import (
     CarBaseSchema,
@@ -10,9 +10,12 @@ from schemas.vehicle import (
     PartRequestScheme,
     PartResponseScheme,
     CarCreateSchema,
+    CarFilterOptionsSchema
 )
+from models.vehicle import CarModel
+from sqlalchemy import select, func, distinct
 from core.config import Settings
-from core.dependencies import get_settings, get_token
+from core.dependencies import get_settings, get_token, get_current_user
 from db.session import get_db
 from crud.vehicle import (
     get_vehicle_by_vin,
@@ -31,6 +34,7 @@ from services.vehicle import (
     scrape_and_save_sales_history,
     car_to_dict,
 )
+from models.vehicle import BiddingHubHistoryModel
 from tasks.task import parse_and_update_car
 from typing import List, Optional, Dict
 
@@ -123,6 +127,7 @@ async def update_car_status(
     car_id: int,
     status_data: UpdateCarStatusSchema,
     db: AsyncSession = Depends(get_db),
+    current_user: Settings = Depends(get_current_user),
 ):
     logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}")
 
@@ -130,6 +135,14 @@ async def update_car_status(
     if not car:
         logger.warning(f"Car with ID {car_id} not found")
         raise HTTPException(status_code=404, detail="Car not found")
+    hub_history = BiddingHubHistoryModel(
+        car_id=car_id,
+        action=f"Status changed from {car.car_status} to {status_data.car_status}",
+        user_id=current_user.id,
+        comment=status_data.comment,
+    )
+    db.add(hub_history)
+    await db.commit()
 
     logger.info(f"Status updated for car with ID: {car_id}")
     return status_data

@@ -51,8 +51,8 @@ class UserModel(Base):
 
     def has_role(self, role_name: UserRoleEnum) -> bool:
         return self.role.name == role_name
-    
-    def role_in(self, role_names = List[UserRoleEnum]) -> bool:
+
+    def role_in(self, role_names=List[UserRoleEnum]) -> bool:
         return self.role.name in role_names
 
     @classmethod

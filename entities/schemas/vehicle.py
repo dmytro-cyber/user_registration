@@ -2,6 +2,7 @@ from typing import List, Optional
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from models.vehicle import CarStatus
+from schemas.user import UserResponseSchema
 
 
 class PhotoSchema(BaseModel):
@@ -93,6 +94,7 @@ class CarDetailResponseSchema(BaseModel):
 
 class UpdateCarStatusSchema(BaseModel):
     car_status: CarStatus
+    comment: str | None = None
 
 
 class PartBaseScheme(BaseModel):
@@ -203,6 +205,7 @@ class CarBiddinHubResponseSchema(BaseModel):
     total_investment: int | None = None
     profit_margin: int | None = None
     roi: float | None = None
+    current_bid: float | None = None
     actual_bid: float | None = None
     suggested_bid: float | None = None
     car_status: CarStatus | None = None
@@ -214,3 +217,27 @@ class CarBiddinHubListResponseSchema(BaseModel):
     vehicles: List[CarBiddinHubResponseSchema]
     total_count: int
     total_pages: int
+
+
+class BiddingHubHistorySchema(BaseModel):
+    id: int | None = None
+    action: str | None = None
+    user: UserResponseSchema | None = None
+    comment: str | None = None
+    created_at: datetime | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class BiddingHubHistoryListResponseSchema(BaseModel):
+    history: List[BiddingHubHistorySchema]
+
+
+class CarFilterOptionsSchema(BaseModel):
+    auctions: List[str] | None = []
+    auction_names: List[str] | None = []
+    makes: List[str] | None = []
+    models: List[str] | None = []
+    years: List[int] | None = []
+    mileage_range: Optional[dict] | None = {}
+    accident_count_range: Optional[dict] | None = {}
