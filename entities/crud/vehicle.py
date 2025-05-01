@@ -1,9 +1,10 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, asc, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel, CarStatus
+from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel, CarStatus, BiddingHubHistoryModel
+from models.user import UserModel, UserRoleEnum
 from schemas.vehicle import CarCreateSchema
 from fastapi import HTTPException
 import logging
@@ -83,6 +84,8 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.auction.in_(filters["auction"]))
     if "auction_name" in filters and filters["auction_name"]:
         query = query.filter(CarModel.auction_name.in_(filters["auction_name"]))
+    if "location" in filters and filters["location"]:
+        query = query.filter(CarModel.location.in_(filters["location"]))
     if "mileage_min" in filters and filters["mileage_min"] is not None:
         query = query.filter(CarModel.mileage >= filters["mileage_min"])
     if "mileage_max" in filters and filters["mileage_max"] is not None:
@@ -95,7 +98,45 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.year >= filters["min_year"])
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
-    if "bidding_hub" in filters and filters["bidding_hub"] == True:
+
+    total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+    total_pages = (total_count + page_size - 1) // page_size
+
+    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
+    vehicles = result.scalars().all()
+
+    return vehicles, total_count, total_pages
+
+
+async def get_bidding_hub_vehicles(
+    db: AsyncSession,
+    page: int,
+    page_size: int,
+    current_user: UserModel,
+    sort_by: str = "date",
+    sort_order: str = "desc"
+) -> tuple[List[CarModel], int, int]:
+    """Get vehicles in the bidding hub with pagination and sorting, including the last user who made a manipulation."""
+    
+    order_func = asc if sort_order.lower() == "asc" else desc
+
+    last_history_subquery = (
+        select(BiddingHubHistoryModel)
+        .where(BiddingHubHistoryModel.car_id == CarModel.id)
+        .order_by(BiddingHubHistoryModel.created_at.desc())
+        .limit(1)
+        .subquery()
+    )
+
+    query = (
+        select(CarModel)
+        .options(
+            selectinload(CarModel.bidding_hub_history)
+            .selectinload(BiddingHubHistoryModel.user)
+        )
+    )
+
+    if current_user.has_role(UserRoleEnum.ADMIN):
         query = query.filter(
             ~CarModel.car_status.in_(
                 [
@@ -103,6 +144,38 @@ async def get_filtered_vehicles(
                 ]
             )
         )
+    else:
+        query = query.filter(
+            ~CarModel.car_status.in_(
+                [
+                    CarStatus.NEW,
+                    CarStatus.DELETED_FROM_BIDDING_HUB,
+                ]
+            )
+        )
+
+    if sort_by == "user":
+        query = query.join(
+            last_history_subquery,
+            last_history_subquery.c.car_id == CarModel.id
+        ).join(
+            UserModel,
+            UserModel.id == last_history_subquery.c.user_id
+        )
+        query = query.order_by(order_func(UserModel.email))
+    else:
+        sort_field_mapping = {
+            "vehicle": CarModel.vehicle,
+            "auction": CarModel.auction,
+            "location": CarModel.location,
+            "date": CarModel.date,
+            "lot": CarModel.lot,
+            "avg_market_price": CarModel.avg_market_price,
+            "status": CarModel.car_status
+        }
+        sort_field = sort_field_mapping.get(sort_by)
+        if sort_field:
+            query = query.order_by(order_func(sort_field))
 
     total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
     total_pages = (total_count + page_size - 1) // page_size

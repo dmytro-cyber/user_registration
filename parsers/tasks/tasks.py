@@ -30,7 +30,7 @@ app = Celery(
 app.conf.beat_schedule = {
     "fetch-api-data-every-minute": {
         "task": "tasks.tasks.fetch_api_data",
-        "schedule": crontab(minute="*/60"),
+        "schedule": crontab(minute="*/5"),
     },
 }
 
@@ -261,6 +261,8 @@ def fetch_api_data():
             adapted_vehicle = {
                 "vin": formatted_vehicle["vin"],
                 "vehicle": formatted_vehicle["vehicle"],
+                "make": formatted_vehicle["make"],
+                "model": formatted_vehicle["model"],
                 "year": formatted_vehicle.get("year"),
                 "mileage": formatted_vehicle.get("mileage"),
                 "auction": formatted_vehicle.get("auction"),

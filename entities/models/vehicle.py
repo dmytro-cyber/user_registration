@@ -26,6 +26,8 @@ class CarModel(Base):
     vin = Column(String, unique=True, nullable=False)
     vehicle = Column(String, nullable=False)
     year = Column(Integer, nullable=True)
+    make = Column(String, nullable=True)
+    model = Column(String, nullable=True)
     mileage = Column(Integer, nullable=True, index=True)
     auction = Column(String, nullable=True)
     auction_name = Column(String, nullable=True)

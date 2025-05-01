@@ -21,8 +21,8 @@ from core.dependencies import get_current_user
 from db.session import get_db
 from crud.vehicle import (
     get_vehicle_by_id,
-    get_filtered_vehicles,
     update_vehicle_status,
+    get_bidding_hub_vehicles
 )
 from models.vehicle import BiddingHubHistoryModel
 
@@ -39,36 +39,53 @@ router = APIRouter(prefix="/bidding_hub", tags=["Bidding Hub"])
     "/",
     response_model=CarBiddinHubListResponseSchema,
     summary="Get paginated list of vehicles in bidding hub",
-    description="Retrieve a paginated list of vehicles currently in the bidding hub.",
+    description="Retrieve a paginated list of vehicles currently in the bidding hub, with optional sorting.",
 )
 async def get_bidding_hub(
     page: int = Query(1, ge=1, description="Page number (starts from 1)"),
     page_size: int = Query(10, ge=1, le=100, description="Number of vehicles per page (1 to 100)"),
+    sort_by: str = Query(
+        "date",
+        description="Field to sort by: vehicle, auction, location, date, lot, avg_market_price, user, status",
+        regex="^(vehicle|auction|location|date|lot|avg_market_price|user|status)$"
+    ),
+    sort_order: str = Query(
+        "desc",
+        description="Sort order: asc or desc",
+        regex="^(asc|desc)$"
+    ),
     current_user: Settings = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CarBiddinHubListResponseSchema:
     """
     Get paginated list of vehicles in the bidding hub.
     """
-    logger.info(f"Fetching bidding hub vehicles (page={page}, page_size={page_size}) for user_id={current_user.id}")
+    logger.info(
+        f"Fetching bidding hub vehicles (page={page}, page_size={page_size}, sort_by={sort_by}, sort_order={sort_order}) for user_id={current_user.id}"
+    )
 
     try:
-        vehicles, total_count, total_pages = await get_filtered_vehicles(
-            db, filters={"bidding_hub": True}, page=page, page_size=page_size
+        vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
+            db,
+            page=page,
+            page_size=page_size,
+            current_user=current_user,
+            sort_by=sort_by,
+            sort_order=sort_order
         )
         logger.info(f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}")
+        logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}")
+        return CarBiddinHubListResponseSchema(
+            vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
+            total_count=total_count,
+            total_pages=total_pages
+        )
     except Exception as e:
         logger.error(f"Error fetching bidding hub vehicles: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching bidding hub vehicles",
         )
-
-    return CarBiddinHubListResponseSchema(
-        vehicles=[CarBiddinHubResponseSchema.model_validate(vehicle) for vehicle in vehicles],
-        total_count=total_count,
-        total_pages=total_pages,
-    )
 
 
 @router.delete(

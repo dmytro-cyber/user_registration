@@ -56,34 +56,42 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
 
     try:
         async with db.begin():
+            # Унікальні значення для auction
             auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None))
             auctions_result = await db.execute(auction_query)
             auctions = [row[0] for row in auctions_result.fetchall()]
 
+            # Унікальні значення для auction_name
             auction_name_query = select(distinct(CarModel.auction_name)).where(CarModel.auction_name.isnot(None))
             auction_names_result = await db.execute(auction_name_query)
             auction_names = [row[0] for row in auction_names_result.fetchall()]
 
-            make_query = select(
-                distinct(func.split_part(CarModel.vehicle, " ", 1).label("make"))
-            ).where(CarModel.vehicle.isnot(None))
+            # Унікальні значення для make (тепер напряму з поля make)
+            make_query = select(distinct(CarModel.make)).where(CarModel.make.isnot(None))
             makes_result = await db.execute(make_query)
             makes = [row[0] for row in makes_result.fetchall()]
 
-            model_query = select(
-                distinct(func.split_part(CarModel.vehicle, " ", 2).label("model"))
-            ).where(CarModel.vehicle.isnot(None))
+            # Унікальні значення для model (тепер напряму з поля model)
+            model_query = select(distinct(CarModel.model)).where(CarModel.model.isnot(None))
             models_result = await db.execute(model_query)
             models = [row[0] for row in models_result.fetchall()]
 
-            year_query = select(distinct(CarModel.year)).where(CarModel.year.isnot(None))
-            years_result = await db.execute(year_query)
-            years = [row[0] for row in years_result.fetchall()]
-            
+            # Унікальні значення для location
             location_query = select(distinct(CarModel.location)).where(CarModel.location.isnot(None))
             locations_result = await db.execute(location_query)
             locations = [row[0] for row in locations_result.fetchall()]
 
+            # Діапазон для years (мін і макс)
+            year_range_query = select(func.min(CarModel.year), func.max(CarModel.year))
+            year_range_result = await db.execute(year_range_query)
+            year_min, year_max = year_range_result.fetchone()
+            year_range = (
+                {"min": year_min, "max": year_max}
+                if year_min is not None and year_max is not None
+                else None
+            )
+
+            # Діапазон для mileage
             mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage))
             mileage_range_result = await db.execute(mileage_range_query)
             mileage_min, mileage_max = mileage_range_result.fetchone()
@@ -93,6 +101,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
                 else None
             )
 
+            # Діапазон для accident_count
             accident_count_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count))
             accident_count_range_result = await db.execute(accident_count_range_query)
             accident_count_min, accident_count_max = accident_count_range_result.fetchone()
@@ -108,7 +117,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             makes=makes,
             models=models,
             locations=locations,
-            years=years,
+            years=year_range,  # Використовуємо діапазон
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
         )
@@ -128,6 +137,7 @@ async def get_cars(
     request: Request,
     auction: List[str] = Query(None, description="Auction (CoPart/IAAI)"),
     auction_name: List[str] = Query(None, description="Auction name"),
+    location: List[str] = Query(None, description="Location"),
     mileage_min: Optional[int] = Query(None, description="Min mileage"),
     mileage_max: Optional[int] = Query(None, description="Max mileage"),
     min_accident_count: Optional[int] = Query(None, description="Min accident count"),
@@ -145,6 +155,7 @@ async def get_cars(
     filters = {
         "auction": auction,
         "auction_name": auction_name,
+        "location": location,
         "mileage_min": mileage_min,
         "mileage_max": mileage_max,
         "min_accident_count": min_accident_count,

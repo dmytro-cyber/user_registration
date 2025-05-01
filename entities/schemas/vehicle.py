@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Dict
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
 from models.vehicle import CarStatus
@@ -138,6 +138,8 @@ class CarCreateSchema(BaseModel):
     vin: str
     vehicle: str
     year: int | None = None
+    make: str | None = None
+    model: str | None = None
     mileage: int | None = None
     auction: str | None = None
     auction_name: str | None = None
@@ -197,8 +199,6 @@ class CarBiddinHubResponseSchema(BaseModel):
     auction: str | None = None
     auction_name: str | None = None
     mileage: int | None = None
-    auction: str | None = None
-    auction_name: str | None = None
     date: datetime | None = None
     lot: int | None = None
     avg_market_price: int | None = None
@@ -208,9 +208,37 @@ class CarBiddinHubResponseSchema(BaseModel):
     current_bid: float | None = None
     actual_bid: float | None = None
     suggested_bid: float | None = None
+    last_user: str | None = None
     car_status: CarStatus | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_orm(cls, obj):
+        last_history = obj.bidding_hub_history[0] if obj.bidding_hub_history else None
+        last_user = (
+            f"{last_history.user.first_name} {last_history.user.last_name}"
+            if last_history and last_history.user and last_history.user.first_name and last_history.user.last_name
+            else None
+        )
+        return cls(
+            id=obj.id,
+            vehicle=obj.vehicle,
+            auction=obj.auction,
+            auction_name=obj.auction_name,
+            mileage=obj.mileage,
+            date=obj.date,
+            lot=obj.lot,
+            avg_market_price=obj.avg_market_price,
+            total_investment=obj.total_investment,
+            profit_margin=obj.profit_margin,
+            roi=obj.roi,
+            current_bid=obj.current_bid,
+            actual_bid=obj.actual_bid,
+            suggested_bid=obj.suggested_bid,
+            last_user=last_user,
+            car_status=obj.car_status
+        )
 
 
 class CarBiddinHubListResponseSchema(BaseModel):
@@ -238,10 +266,10 @@ class CarFilterOptionsSchema(BaseModel):
     auction_names: List[str] | None = []
     makes: List[str] | None = []
     models: List[str] | None = []
-    years: List[int] | None = []
+    years: Dict[str, int] | None = []
     locations: List[str] | None = []
-    mileage_range: dict | None = {}
-    accident_count_range: dict | None = {}
+    mileage_range: Dict[str, int] | None = {}
+    accident_count_range: Dict[str, int] | None = {}
 
 
 class UpdateCurrentBidSchema(BaseModel):
