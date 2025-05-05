@@ -10,7 +10,7 @@ from schemas.vehicle import (
     PartRequestScheme,
     PartResponseScheme,
     CarCreateSchema,
-    CarFilterOptionsSchema
+    CarFilterOptionsSchema,
 )
 from models.vehicle import CarModel
 from sqlalchemy import select, func, distinct
@@ -85,11 +85,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             year_range_query = select(func.min(CarModel.year), func.max(CarModel.year))
             year_range_result = await db.execute(year_range_query)
             year_min, year_max = year_range_result.fetchone()
-            year_range = (
-                {"min": year_min, "max": year_max}
-                if year_min is not None and year_max is not None
-                else None
-            )
+            year_range = {"min": year_min, "max": year_max} if year_min is not None and year_max is not None else None
 
             # Діапазон для mileage
             mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage))
@@ -208,6 +204,7 @@ async def get_car_detail(
     #     car = await scrape_and_save_sales_history(car, db, settings)
 
     logger.info(f"Returning details for car with ID: {car_id}")
+    logger.info(f"car conditon: {car.condition_assessments}")
     return await prepare_car_detail_response(car)
 
 

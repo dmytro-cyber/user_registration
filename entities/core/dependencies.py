@@ -9,6 +9,7 @@ from core.config import Settings
 from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
 from sqlalchemy.orm import selectinload
+from storages import S3StorageInterface, S3StorageClient
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -54,9 +55,19 @@ def get_jwt_auth_manager(
     )
 
 
+def get_s3_storage_client() -> S3StorageInterface:
+    settings = get_settings()
+    return S3StorageClient(
+        endpoint_url=settings.S3_STORAGE_ENDPOINT,
+        access_key=settings.S3_STORAGE_ACCESS_KEY,
+        secret_key=settings.S3_STORAGE_SECRET_KEY,
+        bucket_name=settings.S3_BUCKET_NAME
+    )
+
+
 async def get_current_user(request: Request, settings: Settings = Depends(get_settings)):
     from db.session import get_db
-    from models.user import UserModel, UserRoleModel
+    from models.user import UserModel
 
     token = request.cookies.get("access_token")
 

@@ -5,8 +5,12 @@ import logging
 import os
 import re
 import time
+import json
 from email.header import decode_header
 from typing import List, Optional, Tuple
+import base64
+from PIL import Image
+import io
 
 from dotenv import load_dotenv
 from selenium.common.exceptions import NoSuchElementException, TimeoutException
@@ -333,17 +337,33 @@ class DealerCenterScraper:
                 except Exception:
                     pass
 
-    def run_history_report(self) -> Tuple[Optional[int], Optional[str], int]:
-        """Run a vehicle history report and extract owners, odometer, and accidents data."""
-        time.sleep(5)
+    def run_history_report(self):
+        """Run a vehicle history report, extract owners, odometer, and accidents data, and capture a full-page screenshot."""
+        # Save cookies after successful login
         self._save_cookies()
-        self._wait_for_loader_to_disappear("before clicking Inventory")
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared, proceeding with clicking Inventory.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear within timeout, proceeding anyway.")
+        
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
-        self._wait_for_loader_to_disappear("after clicking Inventory")
+        # Wait for loader to disappear after clicking Inventory
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Inventory.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Inventory, proceeding anyway.")
 
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
-        self._wait_for_loader_to_disappear("after clicking Run History Report")
+        # Wait for loader to disappear after clicking Run History Report
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Run History Report.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Run History Report, proceeding anyway.")
 
+        # Added 2-second delay before searching for the VIN input field
         time.sleep(5)
         elements = self.wait.until(
             EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
@@ -352,35 +372,87 @@ class DealerCenterScraper:
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
         ).click()
-        self._wait_for_loader_to_disappear("after clicking Run")
+        # Wait for loader to disappear after clicking Run
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after clicking Run.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after clicking Run, proceeding anyway.")
 
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
         self.driver.switch_to.frame(iframe)
-        self._wait_for_loader_to_disappear("after switching to iframe")
+        # Wait for loader to disappear after switching to iframe
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after switching to iframe.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after switching to iframe, proceeding anyway.")
 
+        # Збираємо дані
         owners_value = None
         try:
             self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
             try:
                 owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
                 owners_value = int(owners_element.text)
-            except Exception:
+            except:
                 owners_value = 1
-        except Exception:
+        except:
             pass
 
         try:
             odometer_value = self.driver.find_element(
                 By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
             ).text.replace(",", "")
-        except Exception:
+        except:
             odometer_value = None
 
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
-        self.driver.switch_to.default_content()
-        self._wait_for_loader_to_disappear("after switching back to default content")
 
-        return owners_value, odometer_value, accidents_value
+        # Створюємо скріншот усієї сторінки
+        total_height = self.driver.execute_script("return document.body.scrollHeight")
+        viewport_height = self.driver.execute_script("return window.innerHeight")
+        scroll_step = viewport_height
+
+        # Збираємо скріншоти по частинах
+        screenshots = []
+        for i in range(0, total_height, scroll_step):
+            self.driver.execute_script(f"window.scrollTo(0, {i});")
+            time.sleep(0.5)  # Даємо час на рендеринг
+            screenshot = self.driver.get_screenshot_as_png()
+            screenshots.append(screenshot)
+
+        # Склеюємо скріншоти
+        images = [Image.open(io.BytesIO(screenshot)) for screenshot in screenshots]
+        total_width = max(img.width for img in images)
+        total_height = sum(img.height for img in images)
+        stitched_image = Image.new('RGB', (total_width, total_height))
+        y_offset = 0
+        for img in images:
+            stitched_image.paste(img, (0, y_offset))
+            y_offset += img.height
+
+        # Конвертуємо склеєне зображення у байти
+        screenshot_buffer = io.BytesIO()
+        stitched_image.save(screenshot_buffer, format='PNG')
+        full_screenshot = screenshot_buffer.getvalue()
+
+        self.driver.switch_to.default_content()
+        # Wait for loader to disappear after switching back to default content
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after switching back to default content.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after switching back to default content, proceeding anyway.")
+
+        # Формуємо результат
+        result = {
+            "owners": owners_value,
+            "odometer": odometer_value,
+            "accidents": accidents_value
+        }
+
+        return result, full_screenshot
 
     def get_market_data(self, odometer_value: Optional[str]) -> Tuple[
         Optional[str],
@@ -601,32 +673,47 @@ class DealerCenterScraper:
                 self.driver.session_id = None
                 self.driver_closed = True
 
-    def scrape(self) -> dict:
-        """Run the full scraping process and return the results."""
-        self.login()
-        owners, odometer, accidents = self.run_history_report()
-        retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
-        try:
-            odometer = int(odometer.replace(",", ""))
-        except AttributeError:
-            logging.error(f"Invalid odometer value: {odometer}. Defaulting to 0.")
-            odometer = 0
-        try:
-            year = int(year.replace(",", ""))
-        except AttributeError:
-            logging.error(f"Invalid year value: {year}. Defaulting to 0.")
-            year = 0
-        return {
-            "owners": owners,
-            "vehicle": f"{year} {make} {model}",
-            "mileage": odometer,
-            "accident_count": accidents,
-            "retail": retail,
-            "price": price,
-            "year": year,
-            "make": make,
-            "model": model,
-            "drivetrain": drivetrain,
-            "fuel": fuel,
-            "body_style": body_style,
-        }
+def scrape(self):
+    """Run the full scraping process and return the results with a full-page screenshot as multipart/form-data compatible data."""
+    self.login()
+    
+    # Отримуємо дані та скріншот із run_history_report
+    history_data, screenshot = self.run_history_report()
+    owners, odometer, accidents = history_data["owners"], history_data["odometer"], history_data["accidents"]
+    
+    # Отримуємо ринкові дані
+    retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
+    
+    # Перетворюємо odometer та year у числа
+    try:
+        odometer = int(odometer.replace(",", ""))
+    except AttributeError:
+        logging.error(f"Invalid odometer value: {odometer}. Defaulting to 0.")
+        odometer = 0
+    try:
+        year = int(year.replace(",", ""))
+    except AttributeError:
+        logging.error(f"Invalid year value: {year}. Defaulting to 0.")
+        year = 0
+
+    # Формуємо JSON-частину даних
+    result = {
+        "owners": owners,
+        "vehicle": f"{year} {make} {model}",
+        "mileage": odometer,
+        "accident_count": accidents,
+        "retail": retail,
+        "price": price,
+        "year": year,
+        "make": make,
+        "model": model,
+        "drivetrain": drivetrain,
+        "fuel": fuel,
+        "body_style": body_style,
+    }
+
+    # Повертаємо словник із двома частинами, готовими для multipart/form-data
+    return {
+        "data": json.dumps(result),  # JSON-рядок із даними
+        "screenshot": screenshot     # Бінарні дані скріншота
+    }

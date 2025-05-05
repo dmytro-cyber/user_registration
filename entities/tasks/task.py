@@ -7,8 +7,14 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.future import select
 from models.vehicle import CarModel
+from models.vehicle import AutoCheckModel
 from db.session import POSTGRESQL_DATABASE_URL
 from core.config import settings
+from storages import S3StorageInterface, S3StorageClient
+from datetime import datetime
+from core.dependencies import get_s3_storage_client
+import json
+from io import BytesIO
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -16,17 +22,51 @@ engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
 AsyncSessionLocal = sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
-async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
+s3_storage = get_s3_storage_client()
 
+async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
     async with AsyncSessionLocal() as db:
         try:
+            # Формуємо URL для запиту
             url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, timeout=300.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
-                response.raise_for_status()
-                data = response.json()
-                logging.info(f"Scraped data for VIN {vin}: {data}")
+            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
 
+            # Виконуємо запит до парсера
+            async with httpx.AsyncClient() as client:
+                response = await client.get(url, timeout=300.0, headers=headers)
+                response.raise_for_status()
+
+                # Перевіряємо, що відповідь у форматі multipart/form-data
+                if "multipart/form-data" not in response.headers.get("Content-Type", ""):
+                    logging.error(f"Expected multipart/form-data response, got {response.headers.get('Content-Type')}")
+                    return
+
+                # Обробляємо multipart/form-data відповідь
+                # httpx не має вбудованої підтримки multipart/form-data для парсингу,
+                # тому використовуємо бібліотеку multipart (або обробляємо вручну)
+                from multipart import parse_form_data
+
+                # Отримуємо дані з відповіді
+                boundary = response.headers["Content-Type"].split("boundary=")[1]
+                parts = parse_form_data(response.content, boundary.encode())
+
+                # Витягуємо JSON-дані
+                data = None
+                screenshot_data = None
+
+                for part in parts:
+                    if part.name == b"data":
+                        data = json.loads(part.data.decode("utf-8"))
+                        logging.info(f"Scraped data for VIN {vin}: {data}")
+                    elif part.name == b"screenshot":
+                        screenshot_data = part.data
+                        logging.info(f"Received screenshot for VIN {vin}, size: {len(screenshot_data)} bytes")
+
+                if not data:
+                    logging.error(f"No 'data' part found in response for VIN {vin}")
+                    return
+
+            # Знаходимо автомобіль у базі даних
             query = select(CarModel).where(CarModel.vin == vin)
             result = await db.execute(query)
             car = result.scalars().first()
@@ -39,13 +79,14 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                 logging.error(f"Errors in scraped data for VIN {vin}: {data.get('errors')}")
                 return
 
+            # Оновлення основних даних автомобіля
             car.owners = data.get("owners")
 
             if data.get("mileage"):
                 car.has_correct_mileage = car.mileage == data.get("mileage")
 
             car.accident_count = data.get("accident_count")
-            
+
             sum_price = data.get("price", 0) + data.get("retail", 0) + data.get("manheim", 0)
             divisor = 0
             if sum_price > 0:
@@ -55,19 +96,32 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                     divisor += 1
                 if data.get("manheim", 0):
                     divisor += 1
-            car.avg_market_price = int(sum_price / divisor)
-            car.total_investment = car.avg_market_price / 1.8
-            car.roi = (car.avg_market_price - car.total_investment) / car.total_investment * 100
+            car.avg_market_price = int(sum_price / divisor) if divisor > 0 else 0
+            car.total_investment = car.avg_market_price / 1.8 if car.avg_market_price > 0 else 0
+            car.roi = (car.avg_market_price - car.total_investment) / car.total_investment * 100 if car.total_investment > 0 else 0
+
+            if screenshot_data:
+                file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
+                screenshot_file = BytesIO(screenshot_data)
+                await s3_storage.upload_fileobj(file_key, screenshot_file)
+                screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
+
+                auto_check = AutoCheckModel(
+                    car_id=car.id,
+                    screenshot_url=screenshot_url
+                )
+                db.add(auto_check)
+            else:
+                logging.warning(f"No screenshot found in response for VIN {vin}")
 
             await db.commit()
-            logging.info(f"Successfully updated car VIN {vin} with scraped data")
+            logging.info(f"Successfully updated car VIN {vin} with scraped data and screenshot")
 
         except Exception as e:
             logging.error(f"Error in async task for car VIN {vin}: {str(e)}")
             await db.rollback()
         finally:
             await db.close()
-
 
 @app.task(name="tasks.task.parse_and_update_car")
 def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):

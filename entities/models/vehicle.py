@@ -90,8 +90,10 @@ class CarModel(Base):
     style_id = Column(Integer, nullable=True)
     transmision = Column(String, nullable=True)
     vehicle_type = Column(String, nullable=True)
+    link = Column(String, nullable=True)
 
     # Relationships
+    auto_checks = relationship("AutoCheckModel", back_populates="car")
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
     photos = relationship(
         "PhotoModel",
@@ -106,7 +108,9 @@ class CarModel(Base):
         cascade="all, delete-orphan",
     )
     bidding_hub_history = relationship("BiddingHubHistoryModel", back_populates="car", cascade="all, delete-orphan")
-    condition_assessment = relationship("ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan")
+    condition_assessments = relationship(
+        "ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan"
+    )
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
 
     @property
@@ -171,7 +175,18 @@ class ConditionAssessmentModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
-    part_name = Column(String, nullable=False)
+    type_of_damage = Column(String, nullable=True)
     issue_description = Column(String, nullable=True)
 
-    car = relationship("CarModel", back_populates="condition_assessment")
+    car = relationship("CarModel", back_populates="condition_assessments")
+
+
+class AutoCheckModel(Base):
+    __tablename__ = "auto_checks"
+
+    id = Column(Integer, primary_key=True, index=True)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False)
+    screenshot_url = Column(String, nullable=True)
+    created_at = Column(DateTime, default=func.now(), nullable=False)
+
+    car = relationship("CarModel", back_populates="auto_checks")

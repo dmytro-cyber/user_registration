@@ -93,6 +93,40 @@ services:
       - cars_and_beyond_network
 
 
+  minio:
+    image: minio/minio:latest
+    container_name: minio_cars_and_beyond
+    command: server --console-address ":9001" /data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    env_file:
+      - ./entities/.env
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - cars_and_beyond_network
+
+  minio_mc:
+    build:
+      context: .
+      dockerfile: docker/minio_mc/Dockerfile
+    container_name: minio_mc_theater
+    command: ["/bin/sh", "-c", "/commands/setup_minio.sh"]
+    depends_on:
+      minio:
+        condition: service_healthy
+    env_file:
+      - ./entities/.env
+    networks:
+      - cars_and_beyond_network
+
+
   parsers:
     restart: always
     build:
@@ -220,6 +254,8 @@ volumes:
   redis_cars_and_beyond_data:
     driver: local
   redis_1_cars_and_beyond_data:
+    driver: local
+  minio_data:
     driver: local
 
 networks:

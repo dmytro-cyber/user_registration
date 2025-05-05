@@ -40,6 +40,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "auction_date": "date",
         "lot_id": "lot",
         "seller": "seller",
+        "link": "link",
         "location": "location",
         "current_bid": "bid",
         "engine_size": "engine",
@@ -134,16 +135,15 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     # Condition Assessment
     condition_assessments = []
     if "damage_pr" in api_response:
-        condition_assessments.append(
-            {"part_name": api_response["damage_pr"], "issue_description": f"{api_response['damage_pr']} damage"}
-        )
+        condition_assessments.append({
+            "type_of_damage": "damage_pr",
+            "issue_description": api_response["damage_pr"]
+        })
     if "damage_sec" in api_response:
-        condition_assessments.append(
-            {
-                "part_name": api_response["damage_sec"],
-                "issue_description": f"{api_response['damage_sec']} secondary damage",
-            }
-        )
-    car_data["condition_assessment"] = condition_assessments
+        condition_assessments.append({
+            "type_of_damage": "damage_sec",
+            "issue_description": api_response["damage_sec"]
+        })
+    car_data["condition_assessments"] = condition_assessments
 
     return car_data

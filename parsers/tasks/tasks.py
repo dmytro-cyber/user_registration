@@ -280,9 +280,11 @@ def fetch_api_data():
                 "body_style": formatted_vehicle.get("body_style"),
                 "transmision": formatted_vehicle.get("transmision"),
                 "vehicle_type": formatted_vehicle.get("vehicle_type"),
+                "link": formatted_vehicle.get("link"),
                 "is_salvage": formatted_vehicle.get("is_salvage", False),
                 "photos": formatted_vehicle.get("photos", []),
                 "photos_hd": formatted_vehicle.get("photos_hd", []),
+                "condition_assessments": formatted_vehicle.get("condition_assessments", []),
             }
             processed_vehicles.append(adapted_vehicle)
 

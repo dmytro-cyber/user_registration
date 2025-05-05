@@ -49,7 +49,7 @@ class CarListResponseSchema(BaseModel):
 
 
 class ConditionAssessmentResponseSchema(BaseModel):
-    part_name: str | None
+    type_of_damage: str | None
     issue_description: str | None
 
 
@@ -80,11 +80,16 @@ class CarDetailResponseSchema(BaseModel):
     body_style: str | None
     interior_color: str | None
     style_id: int | None
+    date: datetime | None = None
+    lot: int | None = None
+    owners: int | None = None
+    accident_count: int | None = None
+    link: str | None = None
 
     photos: List[str] = []
 
     # condition assessment
-    condition_assessment: List[ConditionAssessmentResponseSchema] = []
+    condition_assessments: List[ConditionAssessmentResponseSchema] = []
 
     # sales history
     sales_history: List[SalesHistoryBaseSchema] = []
@@ -128,12 +133,6 @@ class PhotoSchema(BaseModel):
     car_id: Optional[int] = None
 
 
-class ConditionAssessmentSchema(BaseModel):
-    part_name: str
-    issue_description: Optional[str] = None
-    car_id: Optional[int] = None
-
-
 class CarCreateSchema(BaseModel):
     vin: str
     vehicle: str
@@ -162,6 +161,7 @@ class CarCreateSchema(BaseModel):
     suggested_bid: float | None = None
     total_investment: float | None = None
     net_profit: float | None = None
+    link: str | None = None
     profit_margin: float | None = None
     roi: float | None = None
 
@@ -190,6 +190,7 @@ class CarCreateSchema(BaseModel):
 
     photos: List[PhotoSchema] = Field(default=[], exclude=True)
     photos_hd: List[PhotoSchema] = Field(default=[], exclude=True)
+    condition_assessments: List[ConditionAssessmentResponseSchema] = Field(default=[], exclude=True)
     sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)
 
 
@@ -237,7 +238,7 @@ class CarBiddinHubResponseSchema(BaseModel):
             actual_bid=obj.actual_bid,
             suggested_bid=obj.suggested_bid,
             last_user=last_user,
-            car_status=obj.car_status
+            car_status=obj.car_status,
         )
 
 

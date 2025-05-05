@@ -8,7 +8,7 @@ router = APIRouter(prefix="/parsers", tags=["parsers"])
 
 
 @router.get(
-    "/scrape/dc",  # Видаляємо {car_vin} зі шляху
+    "/scrape/dc",
     response_model=DCResponseSchema,
     description="Scrape data from Dealer Center",
 )
@@ -26,7 +26,22 @@ async def scrape_dc(
     # , token: str = Depends(get_token)
     try:
         scraper = DealerCenterScraper(car_vin, car_name, car_year)
-        data = await asyncio.to_thread(scraper.scrape)
-        return DCResponseSchema(**data)
+        result = await asyncio.to_thread(scraper.scrape)
+        from starlette.responses import Response
+        from multipart import MultipartEncoder
+
+        boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+        encoder = MultipartEncoder(
+            fields={
+                "data": ("data", result["data"], "application/json"),
+                "screenshot": ("screenshot.png", result["screenshot"], "image/png")
+            },
+            boundary=boundary
+        )
+
+        return Response(
+            content=encoder.to_string(),
+            media_type=f"multipart/form-data; boundary={boundary}"
+    )
     except Exception as e:
         return {"error": str(e)}

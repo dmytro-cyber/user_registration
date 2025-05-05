@@ -12,18 +12,14 @@ from schemas.vehicle import (
     CarBiddinHubListResponseSchema,
     BiddingHubHistoryListResponseSchema,
     BiddingHubHistorySchema,
-    UpdateCurrentBidSchema
+    UpdateCurrentBidSchema,
 )
 from models.user import UserModel
 from schemas.user import UserResponseSchema
 from core.config import Settings
 from core.dependencies import get_current_user
 from db.session import get_db
-from crud.vehicle import (
-    get_vehicle_by_id,
-    update_vehicle_status,
-    get_bidding_hub_vehicles
-)
+from crud.vehicle import get_vehicle_by_id, update_vehicle_status, get_bidding_hub_vehicles
 from models.vehicle import BiddingHubHistoryModel
 
 logging.basicConfig(
@@ -47,13 +43,9 @@ async def get_bidding_hub(
     sort_by: str = Query(
         "date",
         description="Field to sort by: vehicle, auction, location, date, lot, avg_market_price, user, status",
-        regex="^(vehicle|auction|location|date|lot|avg_market_price|user|status)$"
+        regex="^(vehicle|auction|location|date|lot|avg_market_price|user|status)$",
     ),
-    sort_order: str = Query(
-        "desc",
-        description="Sort order: asc or desc",
-        regex="^(asc|desc)$"
-    ),
+    sort_order: str = Query("desc", description="Sort order: asc or desc", regex="^(asc|desc)$"),
     current_user: Settings = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> CarBiddinHubListResponseSchema:
@@ -66,19 +58,14 @@ async def get_bidding_hub(
 
     try:
         vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
-            db,
-            page=page,
-            page_size=page_size,
-            current_user=current_user,
-            sort_by=sort_by,
-            sort_order=sort_order
+            db, page=page, page_size=page_size, current_user=current_user, sort_by=sort_by, sort_order=sort_order
         )
         logger.info(f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}")
         logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}")
         return CarBiddinHubListResponseSchema(
             vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
             total_count=total_count,
-            total_pages=total_pages
+            total_pages=total_pages,
         )
     except Exception as e:
         logger.error(f"Error fetching bidding hub vehicles: {str(e)}")
@@ -205,20 +192,27 @@ async def get_bidding_hub_history(
         logger.info(f"Found {len(history_list)} history records for car_id={car_id}")
 
         return BiddingHubHistoryListResponseSchema(
-            history=[BiddingHubHistorySchema(
-                id=item.id,
-                action=item.action,
-                user=UserResponseSchema(
-                    email=item.user.email,
-                    first_name=item.user.first_name,
-                    last_name=item.user.last_name,
-                    phone_number=item.user.phone_number,
-                    date_of_birth=item.user.date_of_birth,
-                    role=item.user.role.name if item.user.role else None,
-                ) if item.user else None,
-                comment=item.comment,
-                created_at=item.created_at,
-                ) for item in history_list]
+            history=[
+                BiddingHubHistorySchema(
+                    id=item.id,
+                    action=item.action,
+                    user=(
+                        UserResponseSchema(
+                            email=item.user.email,
+                            first_name=item.user.first_name,
+                            last_name=item.user.last_name,
+                            phone_number=item.user.phone_number,
+                            date_of_birth=item.user.date_of_birth,
+                            role=item.user.role.name if item.user.role else None,
+                        )
+                        if item.user
+                        else None
+                    ),
+                    comment=item.comment,
+                    created_at=item.created_at,
+                )
+                for item in history_list
+            ]
         )
     except HTTPException:
         raise

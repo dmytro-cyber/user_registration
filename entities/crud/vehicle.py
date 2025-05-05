@@ -3,7 +3,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, asc, desc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
-from models.vehicle import CarModel, PhotoModel, CarSaleHistoryModel, PartModel, CarStatus, BiddingHubHistoryModel
+from models.vehicle import (
+    CarModel,
+    PhotoModel,
+    CarSaleHistoryModel,
+    PartModel,
+    CarStatus,
+    BiddingHubHistoryModel,
+    ConditionAssessmentModel,
+)
 from models.user import UserModel, UserRoleEnum
 from schemas.vehicle import CarCreateSchema
 from fastapi import HTTPException
@@ -23,9 +31,20 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos."""
     try:
-        vehicle = CarModel(**vehicle_data.dict(exclude={"photos"}))
+        vehicle = CarModel(
+            **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
+        )
         db.add(vehicle)
         await db.flush()
+        if hasattr(vehicle_data, "condition_assessments") and vehicle_data.condition_assessments:
+            for condition_assessment_data in vehicle_data.condition_assessments:
+                logger.info(f"Condition assessment data: {condition_assessment_data}")
+                condition_assessment = ConditionAssessmentModel(
+                    type_of_damage=condition_assessment_data.type_of_damage,
+                    issue_description=condition_assessment_data.issue_description,
+                    car_id=vehicle.id,
+                )
+                db.add(condition_assessment)
 
         if hasattr(vehicle_data, "photos") and vehicle_data.photos:
             for photo_data in vehicle_data.photos:
@@ -114,10 +133,10 @@ async def get_bidding_hub_vehicles(
     page_size: int,
     current_user: UserModel,
     sort_by: str = "date",
-    sort_order: str = "desc"
+    sort_order: str = "desc",
 ) -> tuple[List[CarModel], int, int]:
     """Get vehicles in the bidding hub with pagination and sorting, including the last user who made a manipulation."""
-    
+
     order_func = asc if sort_order.lower() == "asc" else desc
 
     last_history_subquery = (
@@ -128,12 +147,8 @@ async def get_bidding_hub_vehicles(
         .subquery()
     )
 
-    query = (
-        select(CarModel)
-        .options(
-            selectinload(CarModel.bidding_hub_history)
-            .selectinload(BiddingHubHistoryModel.user)
-        )
+    query = select(CarModel).options(
+        selectinload(CarModel.bidding_hub_history).selectinload(BiddingHubHistoryModel.user)
     )
 
     if current_user.has_role(UserRoleEnum.ADMIN):
@@ -155,12 +170,8 @@ async def get_bidding_hub_vehicles(
         )
 
     if sort_by == "user":
-        query = query.join(
-            last_history_subquery,
-            last_history_subquery.c.car_id == CarModel.id
-        ).join(
-            UserModel,
-            UserModel.id == last_history_subquery.c.user_id
+        query = query.join(last_history_subquery, last_history_subquery.c.car_id == CarModel.id).join(
+            UserModel, UserModel.id == last_history_subquery.c.user_id
         )
         query = query.order_by(order_func(UserModel.email))
     else:
@@ -171,7 +182,7 @@ async def get_bidding_hub_vehicles(
             "date": CarModel.date,
             "lot": CarModel.lot,
             "avg_market_price": CarModel.avg_market_price,
-            "status": CarModel.car_status
+            "status": CarModel.car_status,
         }
         sort_field = sort_field_mapping.get(sort_by)
         if sort_field:
@@ -192,7 +203,7 @@ async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]
         select(CarModel)
         .options(
             selectinload(CarModel.photos_hd),
-            selectinload(CarModel.condition_assessment),
+            selectinload(CarModel.condition_assessments),
             selectinload(CarModel.sales_history),
         )
         .filter(CarModel.id == car_id)

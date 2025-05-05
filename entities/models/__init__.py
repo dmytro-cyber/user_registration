@@ -9,4 +9,6 @@ from .vehicle import BiddingHubHistoryModel as BiddingHubHistoryModel
 from .vehicle import PhotoModel as PhotoModel
 from .vehicle import CarModel as CarModel
 from .vehicle import PartModel as PartModel
+from .vehicle import ConditionAssessmentModel as ConditionAssessmentModel
+from .vehicle import CarSaleHistoryModel as CarSaleHistoryModel
 from .filter import FilterModel as FilterModel
