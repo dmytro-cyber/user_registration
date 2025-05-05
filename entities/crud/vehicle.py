@@ -218,10 +218,10 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     if not car:
         return None
 
+    car.car_status = car_status
+
     await db.commit()
     await db.refresh(car)
-
-    car.car_status = car_status
     return car
 
 

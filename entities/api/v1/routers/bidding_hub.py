@@ -15,6 +15,7 @@ from schemas.vehicle import (
     UpdateCurrentBidSchema,
 )
 from models.user import UserModel
+from models.vehicle import CarStatus
 from schemas.user import UserResponseSchema
 from core.config import Settings
 from core.dependencies import get_current_user
@@ -92,7 +93,7 @@ async def delete_vehicle(
     logger.info(f"Deleting vehicle with car_id={car_id} from bidding hub for user_id={current_user.id}")
 
     try:
-        vehicle = await update_vehicle_status(db, car_id, "Deleted from Bidding Hub")
+        vehicle = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
         if not vehicle:
             logger.error(f"Vehicle with car_id={car_id} not found")
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
