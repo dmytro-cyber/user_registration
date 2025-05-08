@@ -202,6 +202,9 @@ async def get_cars(
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
     vehicles, total_count, total_pages = await get_filtered_vehicles(db, filters, page, page_size)
+    if not vehicles:
+        logger.info("No vehicles found with the given filters")
+        raise HTTPException(status_code=404, detail="No vehicles found")
     base_url = str(request.url.remove_query_params("page"))
     response = await prepare_response(vehicles, total_pages, page, base_url)
     logger.info(f"Returning {len(response.cars)} cars, total pages: {total_pages}")

@@ -61,7 +61,7 @@ async def get_bidding_hub(
     )
     if not vehicles:
         logger.info("No vehicles found in the bidding hub")
-        return status.HTTP_404_NOT_FOUND
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No vehicles found in the bidding hub")
     logger.info(f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}")
     logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}")
     return CarBiddinHubListResponseSchema(
