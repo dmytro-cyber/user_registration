@@ -39,7 +39,7 @@ class S3StorageClient(S3StorageInterface):
     
     async def upload_fileobj(self, file_key: str, file_obj: IO) -> None:
         try:
-            self.s3_client.upload_fileobj(file_obj, self.bucket_name, file_key)
+            self._s3_client.upload_fileobj(file_obj, self._bucket_name, file_key)
         except ClientError as e:
             raise
 

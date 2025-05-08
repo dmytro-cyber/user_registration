@@ -56,24 +56,19 @@ async def get_bidding_hub(
     logger.info(
         f"Fetching bidding hub vehicles (page={page}, page_size={page_size}, sort_by={sort_by}, sort_order={sort_order}) for user_id={current_user.id}"
     )
-
-    try:
-        vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
-            db, page=page, page_size=page_size, current_user=current_user, sort_by=sort_by, sort_order=sort_order
-        )
-        logger.info(f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}")
-        logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}")
-        return CarBiddinHubListResponseSchema(
-            vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
-            total_count=total_count,
-            total_pages=total_pages,
-        )
-    except Exception as e:
-        logger.error(f"Error fetching bidding hub vehicles: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching bidding hub vehicles",
-        )
+    vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
+        db, page=page, page_size=page_size, current_user=current_user, sort_by=sort_by, sort_order=sort_order
+    )
+    if not vehicles:
+        logger.info("No vehicles found in the bidding hub")
+        return status.HTTP_404_NOT_FOUND
+    logger.info(f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}")
+    logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}")
+    return CarBiddinHubListResponseSchema(
+        vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
+        total_count=total_count,
+        total_pages=total_pages,
+    )
 
 
 @router.delete(
@@ -92,27 +87,18 @@ async def delete_vehicle(
     """
     logger.info(f"Deleting vehicle with car_id={car_id} from bidding hub for user_id={current_user.id}")
 
-    try:
-        vehicle = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
-        if not vehicle:
-            logger.error(f"Vehicle with car_id={car_id} not found")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
-
-        hub_history = BiddingHubHistoryModel(
-            car_id=car_id,
-            action="Deleted vehicle from Bidding Hub",
-            user_id=current_user.id,
-        )
-        db.add(hub_history)
-        await db.commit()
-        logger.info(f"Successfully deleted vehicle with car_id={car_id} and logged history")
-    except Exception as e:
-        logger.error(f"Error deleting vehicle with car_id={car_id}: {str(e)}")
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error deleting vehicle from bidding hub",
-        )
+    vehicle = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
+    if not vehicle:
+        logger.error(f"Vehicle with car_id={car_id} not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+    hub_history = BiddingHubHistoryModel(
+        car_id=car_id,
+        action="Deleted vehicle from Bidding Hub",
+        user_id=current_user.id,
+    )
+    db.add(hub_history)
+    await db.commit()
+    logger.info(f"Successfully deleted vehicle with car_id={car_id} and logged history")
 
 
 @router.post(

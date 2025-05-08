@@ -216,7 +216,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     result = await db.execute(select(CarModel).where(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
-        return None
+        raise HTTPException(status_code=404, detail="Vehicle not found")
 
     car.car_status = car_status
 

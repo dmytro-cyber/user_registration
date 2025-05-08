@@ -45,7 +45,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 router = APIRouter(prefix="/vehicles")
 
 
-@router.get("autocheck/{vehicle_id}/")
+@router.get("/{vehicle_id}/autocheck/")
 async def get_autocheck(
     vehicle_id: int,
     db: AsyncSession = Depends(get_db),
@@ -60,7 +60,7 @@ async def get_autocheck(
                 logger.warning(f"AutoCheck data with ID {id} not found")
                 raise HTTPException(status_code=404, detail="AutoCheck data not found")
             logger.info(f"AutoCheck data fetched successfully for ID: {id}")
-            return result
+            return autocheck.screenshot_url
     except Exception as e:
         logger.error(f"Error fetching AutoCheck data: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal Server Error")
@@ -323,8 +323,8 @@ async def bulk_create_cars(
     else:
         logger.info("Bulk creation completed with no skipped vehicles")
 
-    for vehicle_data in vehicles:
-        if vehicle_data.vin not in skipped_vins:
-            parse_and_update_car.delay(vehicle_data.vin)
+    # for vehicle_data in vehicles:
+    #     if vehicle_data.vin not in skipped_vins:
+    #         parse_and_update_car.delay(vehicle_data.vin)
 
     return response
