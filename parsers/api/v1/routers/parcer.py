@@ -3,6 +3,12 @@ from fastapi import APIRouter, Depends, Query
 import asyncio
 from core.dependencies import get_token
 from schemas.schemas import DCResponseSchema
+import logging
+import json
+
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 router = APIRouter(prefix="/parsers", tags=["parsers"])
 
@@ -13,35 +19,14 @@ router = APIRouter(prefix="/parsers", tags=["parsers"])
     description="Scrape data from Dealer Center",
 )
 async def scrape_dc(
-    car_vin: str = Query(str, description="VIN of the car to scrape"),
-    car_name: str = Query(None, description="Name of the car"),
-    car_year: int = Query(None, description="Year of the car"),
+    car_vin: str = Query(..., description="VIN of the car to scrape"),
 ):
-    """
-    Scrape data from Dealer Center.
-
-    Args:
-        car_vin (str): VIN of the car to scrape, provided as a query parameter.
-    """
-    # , token: str = Depends(get_token)
+    logger.info(f"Starting scrape for VIN {car_vin}")
     try:
-        scraper = DealerCenterScraper(car_vin, car_name, car_year)
+        scraper = DealerCenterScraper(car_vin)
         result = await asyncio.to_thread(scraper.scrape)
-        from starlette.responses import Response
-        from multipart import MultipartEncoder
-
-        boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
-        encoder = MultipartEncoder(
-            fields={
-                "data": ("data", result["data"], "application/json"),
-                "screenshot": ("screenshot.png", result["screenshot"], "image/png")
-            },
-            boundary=boundary
-        )
-
-        return Response(
-            content=encoder.to_string(),
-            media_type=f"multipart/form-data; boundary={boundary}"
-    )
+        logger.info(f"Successfully scraped data for VIN {car_vin}")
+        return DCResponseSchema(**result)
     except Exception as e:
-        return {"error": str(e)}
+        logger.error(f"Error during scraping for VIN {car_vin}: {str(e)}", exc_info=True)
+        return DCResponseSchema(error=str(e))

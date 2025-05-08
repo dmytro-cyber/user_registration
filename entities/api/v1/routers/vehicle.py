@@ -34,7 +34,7 @@ from services.vehicle import (
     scrape_and_save_sales_history,
     car_to_dict,
 )
-from models.vehicle import BiddingHubHistoryModel
+from models.vehicle import BiddingHubHistoryModel, AutoCheckModel
 from tasks.task import parse_and_update_car
 from typing import List, Optional, Dict
 
@@ -43,6 +43,27 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 router = APIRouter(prefix="/vehicles")
+
+
+@router.get("autocheck/{vehicle_id}/")
+async def get_autocheck(
+    vehicle_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    logger.info(f"Fetching AutoCheck data for ID: {vehicle_id}")
+
+    try:
+        async with db.begin():
+            result = await db.execute(select(AutoCheckModel).where(AutoCheckModel.car_id == vehicle_id))
+            autocheck = result.scalars().first()
+            if not autocheck:
+                logger.warning(f"AutoCheck data with ID {id} not found")
+                raise HTTPException(status_code=404, detail="AutoCheck data not found")
+            logger.info(f"AutoCheck data fetched successfully for ID: {id}")
+            return result
+    except Exception as e:
+        logger.error(f"Error fetching AutoCheck data: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal Server Error")
 
 
 @router.get(
@@ -304,6 +325,6 @@ async def bulk_create_cars(
 
     # for vehicle_data in vehicles:
     #     if vehicle_data.vin not in skipped_vins:
-    #         parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
+    #         parse_and_update_car.delay(vehicle_data.vin)
 
     return response

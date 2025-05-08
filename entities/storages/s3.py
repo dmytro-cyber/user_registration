@@ -5,7 +5,8 @@ from botocore.exceptions import (
     BotoCoreError,
     NoCredentialsError,
     HTTPClientError,
-    ConnectionError
+    ConnectionError,
+    ClientError
 )
 
 from exceptions.storage import (
@@ -36,6 +37,12 @@ class S3StorageClient(S3StorageInterface):
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
         )
+    
+    async def upload_fileobj(self, file_key: str, file_obj: IO) -> None:
+        try:
+            self.s3_client.upload_fileobj(file_obj, self.bucket_name, file_key)
+        except ClientError as e:
+            raise
 
     def upload_file(self, file_name: str, file_data: Union[bytes, bytearray]) -> None:
         """
