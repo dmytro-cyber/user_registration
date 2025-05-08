@@ -1,5 +1,4 @@
-from typing import Union
-
+from typing import Union, IO
 import boto3
 from botocore.exceptions import (
     BotoCoreError,
