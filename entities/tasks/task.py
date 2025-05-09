@@ -8,6 +8,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.future import select
 from models.vehicle import CarModel
 from models.vehicle import AutoCheckModel
+from models.admin import ROIModel
 from db.session import POSTGRESQL_DATABASE_URL
 from core.config import settings
 from storages import S3StorageClient
@@ -121,9 +122,13 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                         sum_price += manheim
                         divisor += 1
                 car.avg_market_price = int(sum_price / divisor) if divisor > 0 else 0
-                car.total_investment = car.avg_market_price / 1.8 if car.avg_market_price > 0 else 0
-                car.roi = (car.avg_market_price - car.total_investment) / car.total_investment * 100 if car.total_investment > 0 else 0
+                query = select(ROIModel).order_by(ROIModel.created_at.desc())
+                result = await db.execute(query)
+                default_roi = result.scalars().first()
+                car.total_investment = (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price > 0 else 0
+                car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
                 logger.info(f"Calculated avg_market_price: {car.avg_market_price}, total_investment: {car.total_investment}, roi: {car.roi}")
+                car.predicted_profit_margin = default_roi.profit_margin if car.total_investment > 0 else 0
 
                 if screenshot_data:
                     logger.info("Processing screenshot for upload to S3")
@@ -131,7 +136,7 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                     screenshot_file = BytesIO(screenshot_data)
                     logger.info(f"Attempting to upload to S3 with endpoint: {settings.S3_STORAGE_ENDPOINT}, bucket: {settings.S3_BUCKET_NAME}, file_key: {file_key}")
                     try:
-                        await s3_storage.upload_fileobj(file_key, screenshot_file)  # Асинхронний виклик
+                        await s3_storage.upload_fileobj(file_key, screenshot_file)
                         screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                         logger.info(f"Uploaded screenshot to S3, URL: {screenshot_url}")
                     except Exception as e:

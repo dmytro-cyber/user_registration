@@ -162,50 +162,39 @@ async def get_bidding_hub_history(
     """
     logger.info(f"Fetching bidding history for car_id={car_id} by user_id={current_user.id}")
 
-    try:
-        vehicle = await get_vehicle_by_id(db, car_id)
-        if not vehicle:
-            logger.error(f"Vehicle with car_id={car_id} not found")
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+    stmt = (
+        select(BiddingHubHistoryModel)
+        .where(BiddingHubHistoryModel.car_id == car_id)
+        .options(selectinload(BiddingHubHistoryModel.user).selectinload(UserModel.role))
+        .order_by(BiddingHubHistoryModel.created_at.desc())
+    )
+    result = await db.execute(stmt)
+    history_list = result.scalars().all()
+    if not history_list:
+        logger.info(f"No bidding history found for car_id={car_id}")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle")
+    logger.info(f"Found {len(history_list)} history records for car_id={car_id}")
+    return BiddingHubHistoryListResponseSchema(
+        history=[
+            BiddingHubHistorySchema(
+                id=item.id,
+                action=item.action,
+                user=(
+                    UserResponseSchema(
+                        email=item.user.email,
+                        first_name=item.user.first_name,
+                        last_name=item.user.last_name,
+                        phone_number=item.user.phone_number,
+                        date_of_birth=item.user.date_of_birth,
+                        role=item.user.role.name if item.user.role else None,
+                    )
+                    if item.user
+                    else None
+                ),
+                comment=item.comment,
+                created_at=item.created_at,
+            )
+            for item in history_list
+        ]
+    )
 
-        stmt = (
-            select(BiddingHubHistoryModel)
-            .where(BiddingHubHistoryModel.car_id == car_id)
-            .options(selectinload(BiddingHubHistoryModel.user).selectinload(UserModel.role))
-            .order_by(BiddingHubHistoryModel.created_at.desc())
-        )
-        result = await db.execute(stmt)
-        history_list = result.scalars().all()
-        logger.info(f"Found {len(history_list)} history records for car_id={car_id}")
-
-        return BiddingHubHistoryListResponseSchema(
-            history=[
-                BiddingHubHistorySchema(
-                    id=item.id,
-                    action=item.action,
-                    user=(
-                        UserResponseSchema(
-                            email=item.user.email,
-                            first_name=item.user.first_name,
-                            last_name=item.user.last_name,
-                            phone_number=item.user.phone_number,
-                            date_of_birth=item.user.date_of_birth,
-                            role=item.user.role.name if item.user.role else None,
-                        )
-                        if item.user
-                        else None
-                    ),
-                    comment=item.comment,
-                    created_at=item.created_at,
-                )
-                for item in history_list
-            ]
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error fetching bidding history for car_id={car_id}: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching bidding history",
-        )

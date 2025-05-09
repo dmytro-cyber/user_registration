@@ -8,6 +8,7 @@ class DCResponseSchema(BaseModel):
     mileage: Optional[int] = None
     accident_count: Optional[int] = None
     retail: Optional[str] = None
+    manheim: Optional[str] = None
     price: Optional[str] = None
     year: Optional[int] = None
     make: Optional[str] = None

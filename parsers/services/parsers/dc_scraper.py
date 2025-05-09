@@ -397,12 +397,25 @@ class DealerCenterScraper:
         time.sleep(3)
         self.wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
+
+        # J.D. Power
         self.wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]"))).click()
         retail_value = self.wait.until(EC.presence_of_element_located((
             By.XPATH,
             "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"
         ))).get_attribute("aria-valuenow")
+
+        # Manheim
+        self.wait.until(EC.element_to_be_clickable(
+            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Manheim')]"))).click()
+        time.sleep(1)
+        manheim = self.wait.until(EC.presence_of_element_located((
+            By.XPATH,
+            "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]"
+        ))).text.strip().replace('$', '').replace(',', '')
+
+        # Market Data
         self.wait.until(EC.element_to_be_clickable(
             (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]"))).click()
         time.sleep(0.5)
@@ -476,7 +489,7 @@ class DealerCenterScraper:
         except NoSuchElementException:
             pass
 
-        return retail_value, price_value, year_value, make_value, model_value, drivetrain_value, fuel_value, body_style_value
+        return manheim, retail_value, price_value, year_value, make_value, model_value, drivetrain_value, fuel_value, body_style_value
 
     def close(self):
         """Close the browser driver safely."""
@@ -502,13 +515,14 @@ class DealerCenterScraper:
         """Run the full scraping process and return the results."""
         self.login()
         owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-        retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
+        manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
         return {
             "owners": owners,
             "vehicle": f"{year} {make} {model}",
             "mileage": int(odometer),
             "accident_count": accidents,
             "retail": retail,
+            "manheim": manheim,
             "price": price,
             "year": int(year),
             "make": make,
