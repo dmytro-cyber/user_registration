@@ -27,9 +27,10 @@ s3_storage = S3StorageClient(
     endpoint_url=settings.S3_STORAGE_ENDPOINT,
     access_key=settings.S3_STORAGE_ACCESS_KEY,
     secret_key=settings.S3_STORAGE_SECRET_KEY,
-    bucket_name=settings.S3_BUCKET_NAME
+    bucket_name=settings.S3_BUCKET_NAME,
 )
 logger.info("S3 storage client initialized successfully")
+
 
 async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
     logger.info(f"Starting parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
@@ -56,13 +57,15 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
 
                 # Парсимо JSON-відповідь
                 data = response.json()
-                logger.info(f"""
+                logger.info(
+                    f"""
                             aaaaaaaaaaaaaaaaaaaaaaaaaaaaa
                             {data.get('owners')}
                             {data.get('accident_count')}
                             {data.get('mileage')}
                             {data.keys()}
-                            """)
+                            """
+                )
 
                 if data.get("error"):
                     logger.error(f"Errors in scraped data for VIN {vin}: {data.get('error')}")
@@ -125,16 +128,22 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                 query = select(ROIModel).order_by(ROIModel.created_at.desc())
                 result = await db.execute(query)
                 default_roi = result.scalars().first()
-                car.total_investment = (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price > 0 else 0
+                car.total_investment = (
+                    (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price > 0 else 0
+                )
                 car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
-                logger.info(f"Calculated avg_market_price: {car.avg_market_price}, total_investment: {car.total_investment}, roi: {car.roi}")
+                logger.info(
+                    f"Calculated avg_market_price: {car.avg_market_price}, total_investment: {car.total_investment}, roi: {car.roi}"
+                )
                 car.predicted_profit_margin = default_roi.profit_margin if car.total_investment > 0 else 0
 
                 if screenshot_data:
                     logger.info("Processing screenshot for upload to S3")
                     file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
                     screenshot_file = BytesIO(screenshot_data)
-                    logger.info(f"Attempting to upload to S3 with endpoint: {settings.S3_STORAGE_ENDPOINT}, bucket: {settings.S3_BUCKET_NAME}, file_key: {file_key}")
+                    logger.info(
+                        f"Attempting to upload to S3 with endpoint: {settings.S3_STORAGE_ENDPOINT}, bucket: {settings.S3_BUCKET_NAME}, file_key: {file_key}"
+                    )
                     try:
                         await s3_storage.upload_fileobj(file_key, screenshot_file)
                         screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
@@ -143,10 +152,7 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                         logger.error(f"Failed to upload screenshot to S3 for VIN {vin}: {str(e)}")
                         raise
 
-                    auto_check = AutoCheckModel(
-                        car_id=car.id,
-                        screenshot_url=screenshot_url
-                    )
+                    auto_check = AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url)
                     db.add(auto_check)
                     logger.info(f"Added AutoCheckModel with screenshot URL for car ID: {car.id}")
                 else:
@@ -163,6 +169,7 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
         finally:
             logger.info("Closing database session")
             await db.close()
+
 
 @app.task(name="tasks.task.parse_and_update_car")
 def parse_and_update_car(vin: str):

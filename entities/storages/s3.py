@@ -1,17 +1,8 @@
 from typing import Union, IO
 import boto3
-from botocore.exceptions import (
-    BotoCoreError,
-    NoCredentialsError,
-    HTTPClientError,
-    ConnectionError,
-    ClientError
-)
+from botocore.exceptions import BotoCoreError, NoCredentialsError, HTTPClientError, ConnectionError, ClientError
 
-from exceptions.storage import (
-    S3ConnectionError,
-    S3FileUploadError
-)
+from exceptions.storage import S3ConnectionError, S3FileUploadError
 from storages import S3StorageInterface
 
 
@@ -36,7 +27,7 @@ class S3StorageClient(S3StorageInterface):
             aws_access_key_id=self._access_key,
             aws_secret_access_key=self._secret_key,
         )
-    
+
     async def upload_fileobj(self, file_key: str, file_obj: IO) -> None:
         try:
             self._s3_client.upload_fileobj(file_obj, self._bucket_name, file_key)
@@ -53,10 +44,7 @@ class S3StorageClient(S3StorageInterface):
         """
         try:
             self._s3_client.put_object(
-                Bucket=self._bucket_name,
-                Key=file_name,
-                Body=file_data,
-                ContentType="application/octet-stream"
+                Bucket=self._bucket_name, Key=file_name, Body=file_data, ContentType="application/octet-stream"
             )
         except (ConnectionError, HTTPClientError, NoCredentialsError) as e:
             raise S3ConnectionError(f"Failed to connect to S3 storage: {str(e)}") from e

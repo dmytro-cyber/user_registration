@@ -103,7 +103,9 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         link=car.link,
         photos=[photo.url for photo in car.photos_hd] if car.photos_hd else [],
         condition_assessments=[
-            ConditionAssessmentResponseSchema(type_of_damage=condition.type_of_damage, issue_description=condition.issue_description)
+            ConditionAssessmentResponseSchema(
+                type_of_damage=condition.type_of_damage, issue_description=condition.issue_description
+            )
             for condition in car.condition_assessments
         ],
         sales_history=(

@@ -1,5 +1,7 @@
 import asyncio
 import logging
+import logging.handlers
+import os
 from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from schemas.vehicle import (
@@ -38,32 +40,89 @@ from models.vehicle import BiddingHubHistoryModel, AutoCheckModel
 from tasks.task import parse_and_update_car
 from typing import List, Optional, Dict
 
-# Configure logging
-logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+# Configure logging for production environment
+logger = logging.getLogger("vehicles_router")
+logger.setLevel(logging.DEBUG)  # Set the default logging level
+
+# Define formatter for structured logging
+formatter = logging.Formatter(
+    "%(asctime)s - %(name)s - %(levelname)s - [RequestID: %(request_id)s] - [UserID: %(user_id)s] - %(message)s"
+)
+
+# Comment out file logging setup to disable writing to file
+# log_directory = "logs"
+# if not os.path.exists(log_directory):
+#     os.makedirs(log_directory)
+# file_handler = logging.handlers.RotatingFileHandler(
+#     filename="logs/vehicles.log",
+#     maxBytes=10 * 1024 * 1024,  # 10 MB
+#     backupCount=5,  # Keep up to 5 backup files
+# )
+# file_handler.setFormatter(formatter)
+# file_handler.setLevel(logging.DEBUG)
+
+# Set up console handler for debug output
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(formatter)
+console_handler.setLevel(logging.INFO)
+
+# Add handlers to the logger (only console handler is active)
+# logger.addHandler(file_handler)  # Comment out to disable file logging
+logger.addHandler(console_handler)
+
+
+# Custom filter to add context (RequestID, UserID)
+class ContextFilter(logging.Filter):
+    def filter(self, record):
+        record.request_id = getattr(record, "request_id", "N/A")
+        record.user_id = getattr(record, "user_id", "N/A")
+        return True
+
+
+logger.addFilter(ContextFilter())
 
 router = APIRouter(prefix="/vehicles")
 
 
-@router.get("/{vehicle_id}/autocheck/")
+@router.get(
+    "/{vehicle_id}/autocheck/",
+    summary="Get AutoCheck data for a vehicle",
+    description="Retrieve the AutoCheck data including screenshot URL for a specific vehicle by its ID.",
+)
 async def get_autocheck(
     vehicle_id: int,
     db: AsyncSession = Depends(get_db),
+    request: Request = None,
 ):
-    logger.info(f"Fetching AutoCheck data for ID: {vehicle_id}")
+    """
+    Retrieve AutoCheck data for a specific vehicle.
 
+    Args:
+        vehicle_id (int): The ID of the vehicle to fetch AutoCheck data for.
+        db (AsyncSession): The database session dependency.
+        request (Request, optional): The FastAPI request object for context.
+
+    Returns:
+        dict: The AutoCheck data including screenshot URL.
+
+    Raises:
+        HTTPException: 404 if AutoCheck data is not found for the given vehicle ID.
+    """
+    request_id = str(id(request))  # Generate a unique request ID
+    extra = {"request_id": request_id, "user_id": "N/A"}  # UserID is N/A for now
+    logger.info(f"Fetching AutoCheck data for ID: {vehicle_id}", extra=extra)
     try:
         async with db.begin():
             result = await db.execute(select(AutoCheckModel).where(AutoCheckModel.car_id == vehicle_id))
             autocheck = result.scalars().first()
             if not autocheck:
-                logger.warning(f"AutoCheck data with ID {id} not found")
+                logger.warning(f"AutoCheck data with ID {vehicle_id} not found", extra=extra)
                 raise HTTPException(status_code=404, detail="AutoCheck data not found")
-            logger.info(f"AutoCheck data fetched successfully for ID: {id}")
+            logger.info(f"AutoCheck data fetched successfully for ID: {vehicle_id}", extra=extra)
             return autocheck.screenshot_url
     except Exception as e:
-        logger.error(f"Error fetching AutoCheck data: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal Server Error")
+        logger.error(f"Error fetching AutoCheck data for ID {vehicle_id}: {str(e)}", extra=extra)
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
 
 
 @router.get(
@@ -73,42 +132,56 @@ async def get_autocheck(
     description="Retrieve unique values and ranges for filtering cars (e.g., auctions, makes, models, years, mileage, accident count).",
 )
 async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilterOptionsSchema:
-    logger.info("Fetching filter options for cars")
+    """
+    Retrieve unique filter options for cars.
+
+    Args:
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        CarFilterOptionsSchema: A schema containing filter options like auctions, makes, models, and ranges.
+
+    Raises:
+        HTTPException: 500 if an error occurs while fetching filter options.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info("Fetching filter options for cars", extra=extra)
 
     try:
         async with db.begin():
-            # Унікальні значення для auction
+            # Fetch unique auction values
             auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None))
             auctions_result = await db.execute(auction_query)
             auctions = [row[0] for row in auctions_result.fetchall()]
 
-            # Унікальні значення для auction_name
+            # Fetch unique auction_name values
             auction_name_query = select(distinct(CarModel.auction_name)).where(CarModel.auction_name.isnot(None))
             auction_names_result = await db.execute(auction_name_query)
             auction_names = [row[0] for row in auction_names_result.fetchall()]
 
-            # Унікальні значення для make (тепер напряму з поля make)
+            # Fetch unique make values
             make_query = select(distinct(CarModel.make)).where(CarModel.make.isnot(None))
             makes_result = await db.execute(make_query)
             makes = [row[0] for row in makes_result.fetchall()]
 
-            # Унікальні значення для model (тепер напряму з поля model)
+            # Fetch unique model values
             model_query = select(distinct(CarModel.model)).where(CarModel.model.isnot(None))
             models_result = await db.execute(model_query)
             models = [row[0] for row in models_result.fetchall()]
 
-            # Унікальні значення для location
+            # Fetch unique location values
             location_query = select(distinct(CarModel.location)).where(CarModel.location.isnot(None))
             locations_result = await db.execute(location_query)
             locations = [row[0] for row in locations_result.fetchall()]
 
-            # Діапазон для years (мін і макс)
+            # Fetch year range
             year_range_query = select(func.min(CarModel.year), func.max(CarModel.year))
             year_range_result = await db.execute(year_range_query)
             year_min, year_max = year_range_result.fetchone()
             year_range = {"min": year_min, "max": year_max} if year_min is not None and year_max is not None else None
 
-            # Діапазон для mileage
+            # Fetch mileage range
             mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage))
             mileage_range_result = await db.execute(mileage_range_query)
             mileage_min, mileage_max = mileage_range_result.fetchone()
@@ -118,7 +191,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
                 else None
             )
 
-            # Діапазон для accident_count
+            # Fetch accident_count range
             accident_count_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count))
             accident_count_range_result = await db.execute(accident_count_range_query)
             accident_count_min, accident_count_max = accident_count_range_result.fetchone()
@@ -134,22 +207,27 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             makes=makes,
             models=models,
             locations=locations,
-            years=year_range,  # Використовуємо діапазон
+            years=year_range,
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
         )
-        logger.info(f"Successfully fetched filter options: {response.dict()}")
+        logger.info(f"Successfully fetched filter options: {response.dict()}", extra=extra)
         return response
 
     except Exception as e:
-        logger.error(f"Error fetching filter options for cars: {str(e)}")
+        logger.error(f"Error fetching filter options for cars: {str(e)}", extra=extra)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching filter options",
         )
 
 
-@router.get("/", response_model=CarListResponseSchema)
+@router.get(
+    "/",
+    response_model=CarListResponseSchema,
+    summary="Get a list of cars",
+    description="Retrieve a paginated list of cars based on various filters such as auction, location, mileage, year, make, model, and VIN.",
+)
 async def get_cars(
     request: Request,
     auction: List[str] = Query(None, description="Auction (CoPart/IAAI)"),
@@ -169,6 +247,36 @@ async def get_cars(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> CarListResponseSchema:
+    """
+    Retrieve a paginated list of cars based on filters.
+
+    Args:
+        request (Request): The FastAPI request object for context.
+        auction (List[str], optional): List of auction names (e.g., CoPart, IAAI).
+        auction_name (List[str], optional): List of auction names.
+        location (List[str], optional): List of locations.
+        mileage_min (Optional[int], optional): Minimum mileage filter.
+        mileage_max (Optional[int], optional): Maximum mileage filter.
+        min_accident_count (Optional[int], optional): Minimum accident count filter.
+        max_accident_count (Optional[int], optional): Maximum accident count filter.
+        min_year (Optional[int], optional): Minimum year filter.
+        max_year (Optional[int], optional): Maximum year filter.
+        make (List[str], optional): List of car makes.
+        model (List[str], optional): List of car models.
+        vin (Optional[str], optional): VIN code to search for a specific car.
+        page (int): Page number for pagination (default: 1).
+        page_size (int): Number of items per page (default: 10, max: 100).
+        db (AsyncSession): The database session dependency.
+        settings (Settings): Application settings dependency.
+
+    Returns:
+        CarListResponseSchema: Paginated list of cars with pagination links.
+
+    Raises:
+        HTTPException: 404 if no vehicles are found.
+    """
+    request_id = str(id(request))
+    extra = {"request_id": request_id, "user_id": "N/A"}
     filters = {
         "auction": auction,
         "auction_name": auction_name,
@@ -182,68 +290,111 @@ async def get_cars(
         "make": make,
         "model": model,
     }
-    logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}")
+    logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
 
     if vin and len(vin.replace(" ", "")) == 17:
         vin = vin.replace(" ", "")
-        logger.info(f"Searching for vehicle with VIN: {vin}")
+        logger.info(f"Searching for vehicle with VIN: {vin}", extra=extra)
         async with db.begin():
             vehicle = await get_vehicle_by_vin(db, vin)
             if vehicle:
-                logger.info(f"Found vehicle with VIN: {vin}")
+                logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
                 vehicle_data = car_to_dict(vehicle)
                 validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
             else:
-                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape")
+                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
                 validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
-                logger.info(f"Scraped and saved data for VIN {vin}, returning response")
+                logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
                 await db.commit()
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
     vehicles, total_count, total_pages = await get_filtered_vehicles(db, filters, page, page_size)
     if not vehicles:
-        logger.info("No vehicles found with the given filters")
+        logger.info("No vehicles found with the given filters", extra=extra)
         raise HTTPException(status_code=404, detail="No vehicles found")
     base_url = str(request.url.remove_query_params("page"))
     response = await prepare_response(vehicles, total_pages, page, base_url)
-    logger.info(f"Returning {len(response.cars)} cars, total pages: {total_pages}")
+    logger.info(f"Returning {len(response.cars)} cars, total pages: {total_pages}", extra=extra)
     return response
 
 
-@router.get("/{car_id}/", response_model=CarDetailResponseSchema)
+@router.get(
+    "/{car_id}/",
+    response_model=CarDetailResponseSchema,
+    summary="Get detailed information for a car",
+    description="Retrieve detailed information for a specific car by its ID.",
+)
 async def get_car_detail(
     car_id: int,
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
 ) -> CarDetailResponseSchema:
-    logger.info(f"Fetching details for car with ID: {car_id}")
+    """
+    Retrieve detailed information for a specific car.
+
+    Args:
+        car_id (int): The ID of the car to fetch details for.
+        db (AsyncSession): The database session dependency.
+        settings (Settings): Application settings dependency.
+
+    Returns:
+        CarDetailResponseSchema: Detailed car information.
+
+    Raises:
+        HTTPException: 404 if the car is not found.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Fetching details for car with ID: {car_id}", extra=extra)
 
     car = await get_vehicle_by_id(db, car_id)
     if not car:
-        logger.warning(f"Car with ID {car_id} not found")
+        logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
 
     # if not car.sales_history:
     #     car = await scrape_and_save_sales_history(car, db, settings)
 
-    logger.info(f"Returning details for car with ID: {car_id}")
-    logger.info(f"car conditon: {car.condition_assessments}")
+    logger.info(f"Returning details for car with ID: {car_id}", extra=extra)
+    logger.info(f"Car condition: {car.condition_assessments}", extra=extra)
     return await prepare_car_detail_response(car)
 
 
-@router.put("/{car_id}/status/", response_model=UpdateCarStatusSchema)
+@router.put(
+    "/{car_id}/status/",
+    response_model=UpdateCarStatusSchema,
+    summary="Update car status",
+    description="Update the status of a specific car by its ID.",
+)
 async def update_car_status(
     car_id: int,
     status_data: UpdateCarStatusSchema,
     db: AsyncSession = Depends(get_db),
     current_user: Settings = Depends(get_current_user),
 ):
-    logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}")
+    """
+    Update the status of a specific car.
+
+    Args:
+        car_id (int): The ID of the car to update.
+        status_data (UpdateCarStatusSchema): The new status data.
+        db (AsyncSession): The database session dependency.
+        current_user (Settings): The current user dependency.
+
+    Returns:
+        UpdateCarStatusSchema: The updated status data.
+
+    Raises:
+        HTTPException: 404 if the car is not found.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
+    logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}", extra=extra)
 
     car = await update_vehicle_status(db, car_id, status_data.car_status)
     if not car:
-        logger.warning(f"Car with ID {car_id} not found")
+        logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
     hub_history = BiddingHubHistoryModel(
         car_id=car_id,
@@ -254,80 +405,171 @@ async def update_car_status(
     db.add(hub_history)
     await db.commit()
 
-    logger.info(f"Status updated for car with ID: {car_id}")
+    logger.info(f"Status updated for car with ID: {car_id}", extra=extra)
     return status_data
 
 
-@router.post("/{vehicle_id}/parts/", response_model=PartResponseScheme)
+@router.post(
+    "/{vehicle_id}/parts/",
+    response_model=PartResponseScheme,
+    summary="Add a part to a vehicle",
+    description="Add a new part to a specific vehicle by its ID.",
+)
 async def add_part(
     vehicle_id: int,
     part: PartRequestScheme,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info(f"Adding part for car with ID: {vehicle_id}, part: {part.dict()}")
+    """
+    Add a new part to a specific vehicle.
+
+    Args:
+        vehicle_id (int): The ID of the vehicle to add the part to.
+        part (PartRequestScheme): The part data to be added.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        PartResponseScheme: The created part data.
+
+    Raises:
+        HTTPException: 404 if the car is not found.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Adding part for car with ID: {vehicle_id}, part: {part.dict()}", extra=extra)
 
     new_part = await add_part_to_vehicle(db, vehicle_id, part.dict())
     if not new_part:
-        logger.warning(f"Car with ID {vehicle_id} not found")
+        logger.warning(f"Car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
 
-    logger.info(f"Part added for car with ID: {vehicle_id}, part ID: {new_part.id}")
+    logger.info(f"Part added for car with ID: {vehicle_id}, part ID: {new_part.id}", extra=extra)
     return new_part
 
 
-@router.put("/{vehicle_id}/parts/{part_id}/", response_model=PartResponseScheme)
+@router.put(
+    "/{vehicle_id}/parts/{part_id}/",
+    response_model=PartResponseScheme,
+    summary="Update a part of a vehicle",
+    description="Update an existing part for a specific vehicle by its ID and part ID.",
+)
 async def update_part(
     vehicle_id: int,
     part_id: int,
     part: PartRequestScheme,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info(f"Updating part with ID: {part_id} for car with ID: {vehicle_id}")
+    """
+    Update an existing part for a specific vehicle.
+
+    Args:
+        vehicle_id (int): The ID of the vehicle.
+        part_id (int): The ID of the part to update.
+        part (PartRequestScheme): The updated part data.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        PartResponseScheme: The updated part data.
+
+    Raises:
+        HTTPException: 404 if the part is not found.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Updating part with ID: {part_id} for car with ID: {vehicle_id}", extra=extra)
 
     updated_part = await update_part(db, vehicle_id, part_id, part.dict())
     if not updated_part:
-        logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found")
+        logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Part not found")
 
-    logger.info(f"Part with ID: {part_id} updated for car with ID: {vehicle_id}")
+    logger.info(f"Part with ID: {part_id} updated for car with ID: {vehicle_id}", extra=extra)
     return updated_part
 
 
-@router.delete("/{vehicle_id}/parts/{part_id}/", status_code=204)
+@router.delete(
+    "/{vehicle_id}/parts/{part_id}/",
+    status_code=204,
+    summary="Delete a part from a vehicle",
+    description="Delete an existing part from a specific vehicle by its ID and part ID.",
+)
 async def delete_part(
     vehicle_id: int,
     part_id: int,
     db: AsyncSession = Depends(get_db),
 ):
-    logger.info(f"Deleting part with ID: {part_id} for car with ID: {vehicle_id}")
+    """
+    Delete an existing part from a specific vehicle.
+
+    Args:
+        vehicle_id (int): The ID of the vehicle.
+        part_id (int): The ID of the part to delete.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        dict: Success message.
+
+    Raises:
+        HTTPException: 404 if the part is not found.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Deleting part with ID: {part_id} for car with ID: {vehicle_id}", extra=extra)
 
     success = await delete_part(db, vehicle_id, part_id)
     if not success:
-        logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found")
+        logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Part not found")
 
-    logger.info(f"Part with ID: {part_id} deleted for car with ID: {vehicle_id}")
+    logger.info(f"Part with ID: {part_id} deleted for car with ID: {vehicle_id}", extra=extra)
     return {"message": "Part deleted successfully"}
 
 
-@router.post("/bulk/", status_code=201)
+@router.post(
+    "/bulk/", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk."
+)
 async def bulk_create_cars(
     vehicles: List[CarCreateSchema],
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
 ) -> Dict:
-    logger.info(f"Starting bulk creation of {len(vehicles)} vehicles")
+    """
+    Create multiple vehicles in bulk.
 
-    skipped_vins = await bulk_save_vehicles(db, vehicles)
-    response = {"message": "Cars created successfully"}
-    if skipped_vins:
-        response["skipped_vins"] = skipped_vins
-        logger.info(f"Bulk creation completed, skipped {len(skipped_vins)} vehicles with VINs: {skipped_vins}")
-    else:
-        logger.info("Bulk creation completed with no skipped vehicles")
+    Args:
+        vehicles (List[CarCreateSchema]): List of vehicle data to create.
+        db (AsyncSession): The database session dependency.
+        token (str): Authentication token dependency.
 
-    # for vehicle_data in vehicles:
-    #     if vehicle_data.vin not in skipped_vins:
-    #         parse_and_update_car.delay(vehicle_data.vin)
+    Returns:
+        Dict: Response with success message and skipped VINs if any.
 
-    return response
+    Raises:
+        HTTPException: 500 if an error occurs during bulk creation.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Starting bulk creation of {len(vehicles)} vehicles", extra=extra)
+
+    try:
+        skipped_vins = await bulk_save_vehicles(db, vehicles)
+        response = {"message": "Cars created successfully"}
+        if skipped_vins:
+            response["skipped_vins"] = skipped_vins
+            logger.info(
+                f"Bulk creation completed, skipped {len(skipped_vins)} vehicles with VINs: {skipped_vins}", extra=extra
+            )
+        else:
+            logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
+
+        # for vehicle_data in vehicles:
+        #     if vehicle_data.vin not in skipped_vins:
+        #         parse_and_update_car.delay(vehicle_data.vin)
+
+        return response
+    except Exception as e:
+        logger.error(f"Error during bulk creation of vehicles: {str(e)}", extra=extra)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error during bulk creation",
+        )

@@ -47,7 +47,7 @@ class Settings(BaseAppSettings):
     S3_STORAGE_ACCESS_KEY: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
     S3_STORAGE_SECRET_KEY: str = os.getenv("MINIO_ROOT_PASSWORD", "some_password")
     S3_BUCKET_NAME: str = os.getenv("MINIO_STORAGE", "theater-storage")
-    
+
     @property
     def S3_STORAGE_ENDPOINT(self) -> str:
         return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
