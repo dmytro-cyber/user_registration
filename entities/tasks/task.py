@@ -71,7 +71,6 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                     logger.error(f"Errors in scraped data for VIN {vin}: {data.get('error')}")
                     return
 
-                # Декодуємо скріншот із base64, якщо він є
                 screenshot_data = None
                 if screenshot_data := data.get("screenshot"):
                     try:
@@ -81,7 +80,6 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                         logger.error(f"Failed to decode screenshot base64 for VIN {vin}: {str(e)}")
                         screenshot_data = None
 
-                # Знаходимо автомобіль у базі даних
                 logger.info(f"Querying database for car with VIN: {vin}")
                 query = select(CarModel).where(CarModel.vin == vin)
                 result = await db.execute(query)
@@ -93,7 +91,6 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
 
                 logger.info(f"Found car with VIN {vin} in database, ID: {car.id}")
 
-                # Оновлення основних даних автомобіля
                 logger.info("Updating car data in database")
                 car.owners = data.get("owners")
                 logger.info(f"Updated owners: {car.owners}")
@@ -105,7 +102,6 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
                 car.accident_count = data.get("accident_count")
                 logger.info(f"Updated accident_count: {car.accident_count}")
 
-                # Обчислення sum_price з обробкою None
                 sum_price = 0
                 price = data.get("price", 0)
                 retail = data.get("retail", 0)
@@ -172,10 +168,10 @@ async def parse_and_update_car_async(vin: str, car_name: str = None, car_engine:
 
 
 @app.task(name="tasks.task.parse_and_update_car")
-def parse_and_update_car(vin: str):
+def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
     logger.info(f"Starting Celery task parse_and_update_car for VIN: {vin}")
     try:
-        asyncio.run(parse_and_update_car_async(vin))
+        asyncio.run(parse_and_update_car_async(vin, car_name, car_engine))
         logger.info(f"Completed Celery task for VIN {vin}")
     except Exception as e:
         logger.error(f"Error in Celery task for car VIN {vin}: {str(e)}", exc_info=True)

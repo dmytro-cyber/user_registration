@@ -28,6 +28,7 @@ from crud.vehicle import (
     update_part,
     delete_part,
     bulk_save_vehicles,
+    get_parts_by_vehicle_id
 )
 from services.vehicle import (
     scrape_and_save_vehicle,
@@ -409,6 +410,41 @@ async def update_car_status(
     return status_data
 
 
+@router.get(
+    "/{vehicle_id}/parts/",
+    response_model=List[PartResponseScheme],
+    summary="Get parts for a vehicle",
+    description="Retrieve all parts for a specific vehicle by its ID.",
+)
+async def get_parts_endpoint(
+    vehicle_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retrieve all parts for a specific vehicle.
+
+    Args:
+        vehicle_id (int): The ID of the vehicle to fetch parts for.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        List[PartResponseScheme]: List of parts associated with the vehicle.
+
+    Raises:
+        HTTPException: 404 if the vehicle is not found.
+    """
+    request_id = "N/A"
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Fetching parts for vehicle with ID: {vehicle_id}", extra=extra)
+    parts = await get_parts_by_vehicle_id(db, vehicle_id)
+    if not parts:
+        logger.warning(f"Vehicle with ID {vehicle_id} not found", extra=extra)
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    logger.info(f"Found {len(parts)} parts for vehicle with ID: {vehicle_id}", extra=extra)
+    return [PartResponseScheme.model_validate(part) for part in parts]
+    
+
+
 @router.post(
     "/{vehicle_id}/parts/",
     response_model=PartResponseScheme,
@@ -453,7 +489,7 @@ async def add_part(
     summary="Update a part of a vehicle",
     description="Update an existing part for a specific vehicle by its ID and part ID.",
 )
-async def update_part(
+async def update_part_endpoint(
     vehicle_id: int,
     part_id: int,
     part: PartRequestScheme,
@@ -493,7 +529,7 @@ async def update_part(
     summary="Delete a part from a vehicle",
     description="Delete an existing part from a specific vehicle by its ID and part ID.",
 )
-async def delete_part(
+async def delete_part_endpoint(
     vehicle_id: int,
     part_id: int,
     db: AsyncSession = Depends(get_db),
@@ -564,7 +600,7 @@ async def bulk_create_cars(
 
         # for vehicle_data in vehicles:
         #     if vehicle_data.vin not in skipped_vins:
-        #         parse_and_update_car.delay(vehicle_data.vin)
+        #         parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
 
         return response
     except Exception as e:

@@ -225,6 +225,14 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     return car
 
 
+async def get_parts_by_vehicle_id(db: AsyncSession, car_id: int) -> List[PartModel]:
+    """Get parts for a vehicle by its ID."""
+    result = await db.execute(
+        select(PartModel).filter(PartModel.car_id == car_id)
+    )
+    return result.scalars().all()
+
+
 async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
     """Add a part to a vehicle."""
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
@@ -234,6 +242,9 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
 
     new_part = PartModel(**part_data, car_id=car_id)
     db.add(new_part)
+    car.parts_cost += new_part.value
+    if car.total_investment and car:
+        car.actual_bid = car.total_investment - car.parts_cost
     await db.commit()
     await db.refresh(new_part)
     return new_part
@@ -241,13 +252,23 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
 
 async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
     """Update a part for a vehicle."""
+    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    car = result.scalars().first()
+    if not car:
+        return None
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     existing_part = result.scalars().first()
     if not existing_part:
         return None
+    temp_value = existing_part.value
 
     for key, value in part_data.items():
         setattr(existing_part, key, value)
+    
+    if existing_part.value != temp_value:
+        car.parts_cost += existing_part.value - temp_value
+        if car.total_investment and car:
+            car.actual_bid = car.total_investment - car.parts_cost
 
     await db.commit()
     await db.refresh(existing_part)
@@ -256,10 +277,17 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
 
 async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
     """Delete a part for a vehicle."""
+    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    car = result.scalars().first()
+    if not car:
+        return None
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     part = result.scalars().first()
     if not part:
         return False
+    car.parts_cost -= part.value
+    if car.total_investment and car:
+        car.actual_bid = car.total_investment - car.parts_cost
 
     await db.delete(part)
     await db.commit()

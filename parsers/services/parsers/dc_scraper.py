@@ -5,6 +5,7 @@ import time
 import email
 import imaplib
 import base64
+from typing import List, Optional
 from io import BytesIO
 from PIL import Image
 from email.header import decode_header
@@ -22,6 +23,38 @@ import logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 load_dotenv()
+
+
+class OptionSelector:
+    @staticmethod
+    def select_best_match(options: List[str], reference: str) -> Optional[str]:
+        """
+        Select the best matching option from a list based on the reference string.
+
+        Args:
+            options (List[str]): List of options to choose from (e.g., ["SLT Quad Cab", "Sport Quad Cab"]).
+            reference (str): Reference string to compare against (e.g., vehicle_name or engine).
+
+        Returns:
+            str: The best matching option, or None if no options are provided.
+        """
+        if not options:
+            return None
+
+        def to_upper_set(s: str) -> set:
+            """Convert a string to a set of uppercase characters, ignoring spaces and special characters."""
+            return set(re.sub(r"[^a-zA-Z0-9]", "", s).upper())
+
+        reference_set = to_upper_set(reference)
+        differences = []
+
+        for option in options:
+            option_set = to_upper_set(option)
+            diff = len(option_set.symmetric_difference(reference_set))
+            differences.append((diff, option))
+
+        differences.sort(key=lambda x: x[0])
+        return differences[0][1]
 
 
 class GmailClient:
@@ -76,8 +109,10 @@ class GmailClient:
 
 
 class DealerCenterScraper:
-    def __init__(self, vin):
+    def __init__(self, vin, vehicle_name: str = None, engine: str = None,):
         self.vin = vin
+        self.vehicle_name = vehicle_name
+        self.engine = engine
         self.proxy_host = os.getenv("PROXY_HOST")
         self.proxy_port = os.getenv("PROXY_PORT")
         self.cookies_file = "cookies.json"
@@ -92,9 +127,9 @@ class DealerCenterScraper:
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-insecure-localhost")
         chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--headless")  # Обов’язково для контейнерів
+        chrome_options.add_argument("--headless")
         chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")  # Важливо для контейнерів
+        chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-background-timer-throttling")
@@ -330,21 +365,26 @@ class DealerCenterScraper:
 
             screenshots = []
             scroll_position = 0
+            first_loop = True
             while scroll_position < total_height:
                 self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                time.sleep(0.5)
+                if first_loop:
+                    time.sleep(1.5)
+                    first_loop = False
                 screenshot = self.driver.get_screenshot_as_png()
                 screenshot_img = Image.open(BytesIO(screenshot))
-
+                overlap = 220
+                next_position = scroll_position + viewport_height - overlap
                 crop_box = (
                     max(0, iframe_left),
                     max(0, iframe_top),
                     min(viewport_width, iframe_left + iframe_width),
-                    min(viewport_height + 200, iframe_top + iframe_height + 200)
+                    min(viewport_height, iframe_top + iframe_height)
                 )
                 cropped_img = screenshot_img.crop(crop_box)
                 screenshots.append(cropped_img)
-                next_position = scroll_position + viewport_height
+
+
                 if next_position >= total_height:
                     break
                 scroll_position = next_position
@@ -358,6 +398,15 @@ class DealerCenterScraper:
                                                                Image.Resampling.LANCZOS)
                     full_screenshot.paste(screenshot_img, (0, offset))
                     offset += screenshot_img.height
+
+                width, height = full_screenshot.size
+                crop_box = (0, 100, width, height)
+                full_screenshot = full_screenshot.crop(crop_box)
+
+                buffered = BytesIO()
+                full_screenshot.save(buffered, format="PNG")
+                screenshot_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                logging.info("Full iframe screenshot captured and cropped for history report.")
             else:
                 raise ValueError("No screenshots captured.")
 
@@ -386,7 +435,44 @@ class DealerCenterScraper:
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
         odometer_input.click()
         # self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
-        self._click_if_exists("//button[contains(., 'Next')]")
+        max_attempts = 5
+        attempts = 0
+        while attempts < max_attempts:
+            try:
+                self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'car-wrap')]")))
+                option_elements = self.driver.find_elements(
+                    By.XPATH, "//div[contains(@class, 'car-wrap')]//h6"
+                )
+                logging.info(f"fffffff: {option_elements}")
+                options = [elem.text.strip() for elem in option_elements if elem.text.strip()]
+
+                if not options:
+                    logging.info("No options found, proceeding with 'Next' button.")
+                    break
+
+                logging.info(f"Found options: {options}")
+
+                reference = self.vehicle_name if self.vehicle_name else ""
+                if self.engine:
+                    reference += f" {self.engine}"
+
+                best_option = OptionSelector.select_best_match(options, reference)
+                logging.info(f"Selected best option: {best_option}")
+
+                best_option_element = self.driver.find_element(
+                    By.XPATH,
+                    f"//div[contains(@class, 'car-wrap')]//h6[contains(text(), '{best_option}')]",
+                )
+                best_option_element.click()
+
+                self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))).click()
+
+                time.sleep(2)
+                attempts += 1
+
+            except TimeoutException:
+                logging.info("No more option selection windows found, proceeding.")
+                break
         time.sleep(2)
         odometer_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
