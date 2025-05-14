@@ -386,7 +386,7 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
             )
-        db_roi = ROIModel(**roi)
+        db_roi = ROIModel(**roi.dict(exclude_unset=True))
         db.add(db_roi)
         await db.commit()
         await db.refresh(db_roi)
