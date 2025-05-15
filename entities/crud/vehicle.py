@@ -242,7 +242,10 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
 
     new_part = PartModel(**part_data, car_id=car_id)
     db.add(new_part)
-    car.parts_cost += new_part.value
+    if car.parts_cost is None:
+        car.parts_cost = new_part.value
+    else:
+        car.parts_cost += new_part.value
     if car.total_investment and car:
         car.actual_bid = car.total_investment - car.parts_cost
     await db.commit()
