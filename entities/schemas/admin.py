@@ -33,7 +33,7 @@ class FilterResponse(FilterBase):
 
 
 class ROIBaseSchema(BaseModel):
-    roi: int
+    roi: float
 
 
 class ROICreateSchema(ROIBaseSchema):
@@ -41,9 +41,9 @@ class ROICreateSchema(ROIBaseSchema):
 
 
 class ROIResponseSchema(ROIBaseSchema):
-    id: int
+    id: int | None = None
     profit_margin: float
-    created_at: datetime | None
+    created_at: datetime | None = None
 
     class Config:
         from_attributes = True

@@ -16,6 +16,8 @@ dependencies = [
     "aio-celery (>=0.20.0,<0.21.0)",
     "pillow (>=11.2.1,<12.0.0)",
     "requests-toolbelt (>=1.0.0,<2.0.0)",
+    "beautifulsoup4 (>=4.13.4,<5.0.0)",
+    "playwright (>=1.52.0,<2.0.0)",
 ]
 
 

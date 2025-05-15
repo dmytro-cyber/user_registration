@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from typing import List
@@ -357,6 +357,83 @@ async def get_roi(db: AsyncSession = Depends(get_db)) -> ROIListResponseSchema:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching ROI records",
+        )
+
+
+@router.get("/roi/calculate", response_model=ROIResponseSchema)
+async def calculate_roi(
+    roi: float = Query(None, description="ROI value to calculate"),
+    db: AsyncSession = Depends(get_db),
+) -> ROIResponseSchema:
+    """
+    Calculate ROI based on the provided data.
+
+    Args:
+        roi (ROICreateSchema): The data for ROI calculation.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        ROIResponseSchema: The calculated ROI record.
+
+    Raises:
+        HTTPException: 400 if the ROI value is negative.
+        HTTPException: 500 if an error occurs during calculation.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info(f"Calculating ROI with roi={roi}", extra=extra)
+    try:
+        if roi < 0:
+            logger.warning(f"Invalid ROI value: {roi} (must be >= 0)", extra=extra)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
+            )
+        roi_model = ROIModel(roi=roi)
+        roi_model.validate_and_set_profit_margin("roi", roi)
+        logger.info(f"Calculated profit margin: {roi_model.profit_margin}", extra=extra)
+        return roi_model
+    except Exception as e:
+        logger.error(f"Unexpected error while calculating ROI: {str(e)}", extra=extra)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching latest ROI record",
+        )
+        
+
+@router.get("/roi/latest", response_model=ROIResponseSchema)
+async def get_latest_roi(db: AsyncSession = Depends(get_db)) -> ROIResponseSchema:
+    """
+    Get the latest ROI record.
+
+    Args:
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        ROIResponseSchema: The latest ROI record.
+
+    Raises:
+        HTTPException: 404 if no ROI records are found.
+        HTTPException: 500 if an error occurs during fetch.
+    """
+    request_id = "N/A"
+    extra = {"request_id": request_id, "user_id": "N/A"}
+    logger.info("Fetching the latest ROI record", extra=extra)
+    try:
+        result = await db.execute(select(ROIModel).order_by(ROIModel.id.desc()).limit(1))
+        roi = result.scalars().first()
+        if not roi:
+            logger.warning("No ROI records found", extra=extra)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI not found")
+        logger.info(f"Latest ROI record retrieved successfully with id={roi.id}", extra=extra)
+        return roi
+    except HTTPException as e:
+        logger.error(f"Failed to fetch latest ROI record: {str(e)}", extra=extra)
+        raise
+    except Exception as e:
+        logger.error(f"Unexpected error while fetching latest ROI record: {str(e)}", extra=extra)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching latest ROI record",
         )
 
 
