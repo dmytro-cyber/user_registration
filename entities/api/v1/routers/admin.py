@@ -388,6 +388,7 @@ async def calculate_roi(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
             )
+        roi = round(roi, 2)
         roi_model = ROIModel(roi=roi)
         roi_model.validate_and_set_profit_margin("roi", roi)
         logger.info(f"Calculated profit margin: {roi_model.profit_margin}", extra=extra)
@@ -463,6 +464,7 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
             )
+        roi.roi = round(roi.roi, 2)
         db_roi = ROIModel(**roi.dict(exclude_unset=True))
         db.add(db_roi)
         await db.commit()
