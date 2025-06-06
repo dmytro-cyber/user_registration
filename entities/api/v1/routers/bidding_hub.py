@@ -23,7 +23,7 @@ from core.config import Settings
 from core.dependencies import get_current_user
 from db.session import get_db
 from crud.vehicle import get_vehicle_by_id, update_vehicle_status, get_bidding_hub_vehicles
-from models.vehicle import BiddingHubHistoryModel
+from models.vehicle import HistoryModel
 
 # Configure logging for production environment
 logger = logging.getLogger("bidding_hub_router")
@@ -169,7 +169,7 @@ async def delete_vehicle(
         if not vehicle:
             logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
-        hub_history = BiddingHubHistoryModel(
+        hub_history = HistoryModel(
             car_id=car_id,
             action="Deleted vehicle from Bidding Hub",
             user_id=current_user.id,
@@ -229,7 +229,7 @@ async def update_current_bid(
             logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
 
-        hub_history = BiddingHubHistoryModel(
+        hub_history = HistoryModel(
             car_id=car_id,
             action=f"Updated current bid from {vehicle.current_bid} to {data.current_bid}",
             user_id=current_user.id,
@@ -282,10 +282,10 @@ async def get_bidding_hub_history(
 
     try:
         stmt = (
-            select(BiddingHubHistoryModel)
-            .where(BiddingHubHistoryModel.car_id == car_id)
-            .options(selectinload(BiddingHubHistoryModel.user).selectinload(UserModel.role))
-            .order_by(BiddingHubHistoryModel.created_at.desc())
+            select(HistoryModel)
+            .where(HistoryModel.car_id == car_id)
+            .options(selectinload(HistoryModel.user).selectinload(UserModel.role))
+            .order_by(HistoryModel.created_at.desc())
         )
         result = await db.execute(stmt)
         history_list = result.scalars().all()

@@ -42,7 +42,7 @@ class UserModel(Base):
     temp_email: Mapped[str] = mapped_column(String, nullable=True)
     _hashed_password: Mapped[str] = mapped_column(String, nullable=False)
 
-    bidding_hub_history = relationship("BiddingHubHistoryModel", back_populates="user", cascade="all, delete-orphan")
+    history = relationship("HistoryModel", back_populates="user", cascade="all, delete-orphan")
     role_id: Mapped[int] = mapped_column(ForeignKey("user_roles.id", ondelete="CASCADE"), nullable=False)
     role: Mapped["UserRoleModel"] = relationship("UserRoleModel", back_populates="users")
 

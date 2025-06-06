@@ -399,7 +399,7 @@ async def calculate_roi(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching latest ROI record",
         )
-        
+
 
 @router.get("/roi/latest", response_model=ROIResponseSchema)
 async def get_latest_roi(db: AsyncSession = Depends(get_db)) -> ROIResponseSchema:

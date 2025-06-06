@@ -4,6 +4,7 @@ from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
 from api.v1.routers.admin import router as admin_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
+from api.v1.routers.inventory import router as inventory_router
 from core.setup import create_roles, import_cars_from_csv
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -36,6 +37,7 @@ app.include_router(user_router, prefix="/api/v1", tags=["User"])
 app.include_router(vehicle_router, prefix="/api/v1", tags=["Vehicle"])
 app.include_router(admin_router, prefix="/api/v1", tags=["Admin"])
 app.include_router(bidding_hub_router, prefix="/api/v1", tags=["Bidding Hub"])
+app.include_router(inventory_router, prefix="/api/v1", tags=["Inventory"])
 
 if __name__ == "__main__":
     import uvicorn

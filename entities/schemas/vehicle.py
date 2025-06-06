@@ -216,7 +216,7 @@ class CarBiddinHubResponseSchema(BaseModel):
 
     @classmethod
     def from_orm(cls, obj):
-        last_history = obj.bidding_hub_history[0] if obj.bidding_hub_history else None
+        last_history = obj.history[0] if obj.history else None
         last_user = (
             f"{last_history.user.first_name} {last_history.user.last_name}"
             if last_history and last_history.user and last_history.user.first_name and last_history.user.last_name
@@ -276,3 +276,13 @@ class CarFilterOptionsSchema(BaseModel):
 class UpdateCurrentBidSchema(BaseModel):
     current_bid: float
     comment: str | None = None
+
+
+class InvoiceResponse(BaseModel):
+    id: int
+    part_inventory_id: int
+    file_url: Optional[str] = None
+    created_at: datetime
+
+    class Config:
+        orm_mode = True

@@ -1,11 +1,11 @@
 FROM python:3.12.3-slim
 
-# Setting environment variables for Python
+# Налаштування змінних середовища для Python
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=off
 
-# Installing dependencies for Python, Chrome, and Playwright
+# Встановлення залежностей для Python, Chrome, Playwright та Xvfb
 RUN apt update && apt install -y \
     gcc \
     libpq-dev \
@@ -37,6 +37,11 @@ RUN apt update && apt install -y \
     libxdamage1 \
     libxfixes3 \
     libxrandr2 \
+    # Залежності для Xvfb для підтримки графічних додатків у headless-режимі
+    xvfb \
+    xauth \
+    x11-utils \
+    xxd \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
     && apt update \
@@ -44,39 +49,39 @@ RUN apt update && apt install -y \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
+# Встановлення Poetry
 RUN python -m pip install --upgrade pip && \
     pip install poetry
 
-# Copy dependency files
+# Копіювання файлів залежностей
 COPY ./parsers/poetry.lock /usr/parsers/poetry/poetry.lock
 COPY ./parsers/pyproject.toml /usr/parsers/poetry/pyproject.toml
 
-# Configure Poetry to avoid creating a virtual environment
+# Налаштування Poetry для уникнення створення віртуального середовища
 RUN poetry config virtualenvs.create false
 
-# Selecting a working directory
+# Встановлення робочої директорії
 WORKDIR /usr/parsers/poetry
 
-# Install dependencies with Poetry, including Playwright
+# Встановлення залежностей з Poetry, включаючи Playwright
 RUN poetry add playwright && \
     poetry lock && \
     poetry install --no-root --only main
 
-# Install Playwright browsers
+# Встановлення браузерів для Playwright
 RUN poetry run playwright install --with-deps
 
-# Selecting a working directory
+# Встановлення робочої директорії
 WORKDIR /usr/parsers/fastapi
 
-# Copy the source code
+# Копіювання вихідного коду
 COPY ./parsers .
 
-# Copy commands
+# Копіювання команд
 COPY ./commands /commands
 
-# Ensure Unix-style line endings for scripts
+# Забезпечення Unix-стилю кінцівок рядків для скриптів
 RUN dos2unix /commands/*.sh
 
-# Add execute bit to commands files
+# Додавання біту виконання до файлів команд
 RUN chmod +x /commands/*.sh

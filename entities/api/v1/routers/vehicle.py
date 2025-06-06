@@ -37,7 +37,7 @@ from services.vehicle import (
     scrape_and_save_sales_history,
     car_to_dict,
 )
-from models.vehicle import BiddingHubHistoryModel, AutoCheckModel
+from models.vehicle import HistoryModel, AutoCheckModel
 from tasks.task import parse_and_update_car
 from typing import List, Optional, Dict
 
@@ -397,7 +397,7 @@ async def update_car_status(
     if not car:
         logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
-    hub_history = BiddingHubHistoryModel(
+    hub_history = HistoryModel(
         car_id=car_id,
         action=f"Status changed from {car.car_status} to {status_data.car_status}",
         user_id=current_user.id,

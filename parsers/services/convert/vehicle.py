@@ -135,15 +135,9 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     # Condition Assessment
     condition_assessments = []
     if "damage_pr" in api_response:
-        condition_assessments.append({
-            "type_of_damage": "damage_pr",
-            "issue_description": api_response["damage_pr"]
-        })
+        condition_assessments.append({"type_of_damage": "damage_pr", "issue_description": api_response["damage_pr"]})
     if "damage_sec" in api_response:
-        condition_assessments.append({
-            "type_of_damage": "damage_sec",
-            "issue_description": api_response["damage_sec"]
-        })
+        condition_assessments.append({"type_of_damage": "damage_sec", "issue_description": api_response["damage_sec"]})
     car_data["condition_assessments"] = condition_assessments
 
     return car_data

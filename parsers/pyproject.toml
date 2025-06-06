@@ -18,6 +18,11 @@ dependencies = [
     "requests-toolbelt (>=1.0.0,<2.0.0)",
     "beautifulsoup4 (>=4.13.4,<5.0.0)",
     "playwright (>=1.52.0,<2.0.0)",
+    "webdriver-manager (>=4.0.2,<5.0.0)",
+    "pytesseract (>=0.3.13,<0.4.0)",
+    "pyautogui (>=0.9.54,<0.10.0)",
+    "cairosvg (>=2.8.2,<3.0.0)",
+    "2captcha-python (>=1.5.1,<2.0.0)",
 ]
 
 

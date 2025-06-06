@@ -9,8 +9,11 @@ from models.vehicle import (
     CarSaleHistoryModel,
     PartModel,
     CarStatus,
-    BiddingHubHistoryModel,
+    HistoryModel,
     ConditionAssessmentModel,
+    CarInventoryStatus,
+    CarInventoryModel,
+    FeeModel
 )
 from models.user import UserModel, UserRoleEnum
 from schemas.vehicle import CarCreateSchema
@@ -140,16 +143,14 @@ async def get_bidding_hub_vehicles(
     order_func = asc if sort_order.lower() == "asc" else desc
 
     last_history_subquery = (
-        select(BiddingHubHistoryModel)
-        .where(BiddingHubHistoryModel.car_id == CarModel.id)
-        .order_by(BiddingHubHistoryModel.created_at.desc())
+        select(HistoryModel)
+        .where(HistoryModel.car_id == CarModel.id)
+        .order_by(HistoryModel.created_at.desc())
         .limit(1)
         .subquery()
     )
 
-    query = select(CarModel).options(
-        selectinload(CarModel.bidding_hub_history).selectinload(BiddingHubHistoryModel.user)
-    )
+    query = select(CarModel).options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
 
     if current_user.has_role(UserRoleEnum.ADMIN):
         query = query.filter(
@@ -220,6 +221,16 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
 
     car.car_status = car_status
 
+    if car.car_status == CarStatus.WON:
+        CarInventoryModel = CarInventoryModel(
+            car=car,
+            vehicle=car.vehicle,
+            vin=car.vin,
+            vehicle_cost=car.suggested_bid,
+            car_status=CarInventoryStatus.AWAITING_DELIVERY,
+        )
+        db.add(CarInventoryModel)
+
     await db.commit()
     await db.refresh(car)
     return car
@@ -227,9 +238,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
 
 async def get_parts_by_vehicle_id(db: AsyncSession, car_id: int) -> List[PartModel]:
     """Get parts for a vehicle by its ID."""
-    result = await db.execute(
-        select(PartModel).filter(PartModel.car_id == car_id)
-    )
+    result = await db.execute(select(PartModel).filter(PartModel.car_id == car_id))
     return result.scalars().all()
 
 
@@ -247,7 +256,7 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
     else:
         car.parts_cost += new_part.value
     if car.total_investment and car:
-        car.actual_bid = car.total_investment - car.parts_cost
+        car.suggested_bid = car.total_investment - car.parts_cost
     await db.commit()
     await db.refresh(new_part)
     return new_part
@@ -267,11 +276,11 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
 
     for key, value in part_data.items():
         setattr(existing_part, key, value)
-    
+
     if existing_part.value != temp_value:
         car.parts_cost += existing_part.value - temp_value
         if car.total_investment and car:
-            car.actual_bid = car.total_investment - car.parts_cost
+            car.suggested_bid = car.total_investment - car.parts_cost
 
     await db.commit()
     await db.refresh(existing_part)
@@ -290,7 +299,7 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
         return False
     car.parts_cost -= part.value
     if car.total_investment and car:
-        car.actual_bid = car.total_investment - car.parts_cost
+        car.suggested_bid = car.total_investment - car.parts_cost
 
     await db.delete(part)
     await db.commit()

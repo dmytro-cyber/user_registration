@@ -18,3 +18,21 @@ class DCResponseSchema(BaseModel):
     body_style: Optional[str] = None
     screenshot: Optional[str] = None  # Base64-encoded screenshot
     error: Optional[str] = None
+
+
+class UpdateCurrentBidRequestSchema(BaseModel):
+    id: int
+    url: str
+
+
+class UpdateCurrentBidResponseSchema(BaseModel):
+    id: int
+    current_bid: float | None = None
+
+
+class UpdateCurrentBidListRequestSchema(BaseModel):
+    items: list[UpdateCurrentBidRequestSchema]
+
+
+class UpdateCurrentBidListResponseSchema(BaseModel):
+    items: list[UpdateCurrentBidResponseSchema]

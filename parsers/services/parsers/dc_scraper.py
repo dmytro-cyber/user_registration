@@ -20,7 +20,7 @@ from selenium.common.exceptions import TimeoutException, NoSuchElementException
 import logging
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 load_dotenv()
 
@@ -109,7 +109,12 @@ class GmailClient:
 
 
 class DealerCenterScraper:
-    def __init__(self, vin, vehicle_name: str = None, engine: str = None,):
+    def __init__(
+        self,
+        vin,
+        vehicle_name: str = None,
+        engine: str = None,
+    ):
         self.vin = vin
         self.vehicle_name = vehicle_name
         self.engine = engine
@@ -142,11 +147,7 @@ class DealerCenterScraper:
 
         service = Service()
         try:
-            driver = uc.Chrome(
-                service=service,
-                options=chrome_options,
-                version_main=135
-            )
+            driver = uc.Chrome(service=service, options=chrome_options, version_main=135)
             logging.info("Chrome driver initialized.")
             return driver
         except Exception as e:
@@ -241,8 +242,9 @@ class DealerCenterScraper:
 
         # Очікуємо появу кнопки для запиту коду верифікації
         try:
-            self._click_if_exists("//span[contains(text(), 'Email Verification Code')]/parent::a",
-                                  fallback_id="WebMFAEmail")
+            self._click_if_exists(
+                "//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail"
+            )
             logging.info("Clicked Email Verification Code link")
         except Exception as e:
             logging.error(f"Failed to click Email Verification Code link: {str(e)}")
@@ -291,13 +293,16 @@ class DealerCenterScraper:
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         time.sleep(4)
         elements = self.wait.until(
-            EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]")))
+            EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
+        )
         elements[-1].send_keys(self.vin)
         self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))).click()
+            EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
+        ).click()
         iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
 
-        iframe_position = self.driver.execute_script("""
+        iframe_position = self.driver.execute_script(
+            """
             var iframe = arguments[0];
             var rect = iframe.getBoundingClientRect();
             return {
@@ -306,7 +311,9 @@ class DealerCenterScraper:
                 width: rect.width,
                 height: rect.height
             };
-        """, iframe)
+        """,
+            iframe,
+        )
 
         logging.info(f"iframe position and size: {iframe_position}")
 
@@ -330,12 +337,12 @@ class DealerCenterScraper:
         except:
             pass
         odometer_value = self.driver.find_element(
-            By.XPATH,
-            "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
+            By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
         ).text.replace(",", "")
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
         try:
-            total_height = self.driver.execute_script("""
+            total_height = self.driver.execute_script(
+                """
                         return Math.max(
                             document.body.scrollHeight,
                             document.body.offsetHeight,
@@ -343,21 +350,23 @@ class DealerCenterScraper:
                             document.documentElement.scrollHeight,
                             document.documentElement.offsetHeight
                         );
-                    """)
+                    """
+            )
             viewport_height = self.driver.execute_script("return window.innerHeight")
             viewport_width = self.driver.execute_script("return window.innerWidth")
 
             logging.info(
-                f"iframe Total height: {total_height}, Viewport height: {viewport_height}, Viewport width: {viewport_width}")
+                f"iframe Total height: {total_height}, Viewport height: {viewport_height}, Viewport width: {viewport_width}"
+            )
 
             if total_height == 0 or viewport_height == 0 or viewport_width == 0:
                 logging.error("Invalid dimensions for screenshot capture inside iframe.")
                 raise ValueError("Invalid dimensions for screenshot capture inside iframe.")
 
-            iframe_width = iframe_position['width']
-            iframe_height = iframe_position['height']
-            iframe_left = iframe_position['left']
-            iframe_top = iframe_position['top']
+            iframe_width = iframe_position["width"]
+            iframe_height = iframe_position["height"]
+            iframe_left = iframe_position["left"]
+            iframe_top = iframe_position["top"]
 
             if iframe_width <= 0 or iframe_height <= 0:
                 logging.error("Invalid iframe dimensions for cropping.")
@@ -379,23 +388,23 @@ class DealerCenterScraper:
                     max(0, iframe_left),
                     max(0, iframe_top),
                     min(viewport_width, iframe_left + iframe_width),
-                    min(viewport_height, iframe_top + iframe_height)
+                    min(viewport_height, iframe_top + iframe_height),
                 )
                 cropped_img = screenshot_img.crop(crop_box)
                 screenshots.append(cropped_img)
-
 
                 if next_position >= total_height:
                     break
                 scroll_position = next_position
 
             if screenshots:
-                full_screenshot = Image.new('RGB', (int(iframe_width), total_height))
+                full_screenshot = Image.new("RGB", (int(iframe_width), total_height))
                 offset = 0
                 for screenshot_img in screenshots:
                     if screenshot_img.width != iframe_width:
-                        screenshot_img = screenshot_img.resize((int(iframe_width), screenshot_img.height),
-                                                               Image.Resampling.LANCZOS)
+                        screenshot_img = screenshot_img.resize(
+                            (int(iframe_width), screenshot_img.height), Image.Resampling.LANCZOS
+                        )
                     full_screenshot.paste(screenshot_img, (0, offset))
                     offset += screenshot_img.height
 
@@ -405,14 +414,14 @@ class DealerCenterScraper:
 
                 buffered = BytesIO()
                 full_screenshot.save(buffered, format="PNG")
-                screenshot_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+                screenshot_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
                 logging.info("Full iframe screenshot captured and cropped for history report.")
             else:
                 raise ValueError("No screenshots captured.")
 
             buffered = BytesIO()
             full_screenshot.save(buffered, format="PNG")
-            screenshot_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+            screenshot_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
             logging.info("Full iframe screenshot captured for history report.")
         except Exception as e:
             logging.error(f"Failed to capture full iframe screenshot in run_history_report: {str(e)}")
@@ -425,14 +434,17 @@ class DealerCenterScraper:
     def get_market_data(self, odometer_value):
         """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
+        ).click()
         time.sleep(3)
         vin_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input")))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
+        )
         vin_input.send_keys(self.vin)
         odometer_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
+        )
         odometer_input.click()
         # self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
         max_attempts = 5
@@ -440,9 +452,7 @@ class DealerCenterScraper:
         while attempts < max_attempts:
             try:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'car-wrap')]")))
-                option_elements = self.driver.find_elements(
-                    By.XPATH, "//div[contains(@class, 'car-wrap')]//h6"
-                )
+                option_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'car-wrap')]//h6")
                 logging.info(f"fffffff: {option_elements}")
                 options = [elem.text.strip() for elem in option_elements if elem.text.strip()]
 
@@ -475,35 +485,55 @@ class DealerCenterScraper:
                 break
         time.sleep(2)
         odometer_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input")))
+            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
+        )
         odometer_input.send_keys(str(odometer_value))
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        ).click()
         # Added 2-second delay after the first "Books" click to allow page update
         time.sleep(3)
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        ).click()
 
         # J.D. Power
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]"))).click()
-        retail_value = self.wait.until(EC.presence_of_element_located((
-            By.XPATH,
-            "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"
-        ))).get_attribute("aria-valuenow")
+        self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
+            )
+        ).click()
+        retail_value = self.wait.until(
+            EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
+        ).get_attribute("aria-valuenow")
 
         # Manheim
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Manheim')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Manheim')]")
+            )
+        ).click()
         time.sleep(1)
-        manheim = self.wait.until(EC.presence_of_element_located((
-            By.XPATH,
-            "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]"
-        ))).text.strip().replace('$', '').replace(',', '')
+        manheim = (
+            self.wait.until(
+                EC.presence_of_element_located(
+                    (
+                        By.XPATH,
+                        "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]",
+                    )
+                )
+            )
+            .text.strip()
+            .replace("$", "")
+            .replace(",", "")
+        )
 
         # Market Data
-        self.wait.until(EC.element_to_be_clickable(
-            (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]"))).click()
+        self.wait.until(
+            EC.element_to_be_clickable(
+                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
+            )
+        ).click()
         time.sleep(0.5)
 
         # Create a shorter wait for the market data elements
@@ -511,19 +541,27 @@ class DealerCenterScraper:
 
         # Extract price value
         try:
-            price_tooltip_element = short_wait.until(EC.presence_of_element_located((
-                By.XPATH,
-                "//span[contains(@class, 'max-digital__risk-slider-bar-tooltip')]//span[contains(@class, 'font-weight-bold')]"
-            )))
-            price_value = price_tooltip_element.text.strip().replace('$', '').replace(',', '')
+            price_tooltip_element = short_wait.until(
+                EC.presence_of_element_located(
+                    (
+                        By.XPATH,
+                        "//span[contains(@class, 'max-digital__risk-slider-bar-tooltip')]//span[contains(@class, 'font-weight-bold')]",
+                    )
+                )
+            )
+            price_value = price_tooltip_element.text.strip().replace("$", "").replace(",", "")
         except (TimeoutException, NoSuchElementException):
             price_value = None
 
         # Wait for the main container of the market data elements to ensure the page is loaded
-        short_wait.until(EC.presence_of_element_located((
-            By.XPATH,
-            "//dc-ui-shared-ui-shared-multiselect[contains(@formcontrolname, 'year') or contains(@formcontrolname, 'make') or contains(@formcontrolname, 'model') or contains(@formcontrolname, 'driveTrain') or contains(@formcontrolname, 'fuel') or contains(@formcontrolname, 'bodyStyle')]"
-        )))
+        short_wait.until(
+            EC.presence_of_element_located(
+                (
+                    By.XPATH,
+                    "//dc-ui-shared-ui-shared-multiselect[contains(@formcontrolname, 'year') or contains(@formcontrolname, 'make') or contains(@formcontrolname, 'model') or contains(@formcontrolname, 'driveTrain') or contains(@formcontrolname, 'fuel') or contains(@formcontrolname, 'bodyStyle')]",
+                )
+            )
+        )
 
         # Extract all market data elements in one go
         year_value = None
@@ -534,48 +572,70 @@ class DealerCenterScraper:
         body_style_value = None
 
         try:
-            year_element = self.driver.find_element(By.XPATH,
-                                                    "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]")
+            year_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]",
+            )
             year_value = int(year_element.text.strip().split()[0])
         except NoSuchElementException:
             pass
 
         try:
-            make_element = self.driver.find_element(By.XPATH,
-                                                    "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='make']//div[starts-with(@id, 'tag-')]")
+            make_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='make']//div[starts-with(@id, 'tag-')]",
+            )
             make_value = make_element.text.strip()
         except NoSuchElementException:
             pass
 
         try:
-            model_element = self.driver.find_element(By.XPATH,
-                                                     "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='model']//div[starts-with(@id, 'tag-')]")
+            model_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='model']//div[starts-with(@id, 'tag-')]",
+            )
             model_value = model_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
         try:
-            drivetrain_element = self.driver.find_element(By.XPATH,
-                                                          "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='driveTrain']//div[starts-with(@id, 'tag-')]")
+            drivetrain_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='driveTrain']//div[starts-with(@id, 'tag-')]",
+            )
             drivetrain_value = drivetrain_element.text.strip()
         except NoSuchElementException:
             pass
 
         try:
-            fuel_element = self.driver.find_element(By.XPATH,
-                                                    "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='fuel']//div[starts-with(@id, 'tag-')]")
+            fuel_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='fuel']//div[starts-with(@id, 'tag-')]",
+            )
             fuel_value = fuel_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
         try:
-            body_style_element = self.driver.find_element(By.XPATH,
-                                                          "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='bodyStyle']//div[starts-with(@id, 'tag-')]")
+            body_style_element = self.driver.find_element(
+                By.XPATH,
+                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='bodyStyle']//div[starts-with(@id, 'tag-')]",
+            )
             body_style_value = body_style_element.text.strip().split()[0]
         except NoSuchElementException:
             pass
 
-        return manheim, retail_value, price_value, year_value, make_value, model_value, drivetrain_value, fuel_value, body_style_value
+        return (
+            manheim,
+            retail_value,
+            price_value,
+            year_value,
+            make_value,
+            model_value,
+            drivetrain_value,
+            fuel_value,
+            body_style_value,
+        )
 
     def close(self):
         """Close the browser driver safely."""
@@ -616,5 +676,5 @@ class DealerCenterScraper:
             "drivetrain": drivetrain,
             "fuel": fuel,
             "body_style": body_style,
-            "screenshot": screenshot_base64
+            "screenshot": screenshot_base64,
         }

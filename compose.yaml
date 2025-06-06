@@ -172,7 +172,7 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=solo"]
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=prefork"]
     env_file:
       - ./entities/.env
     environment:
@@ -227,6 +227,27 @@ services:
     networks:
       - cars_and_beyond_network
 
+
+  celery_beat_entities:
+    build: 
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: celery_beat_entities_cars_and_beyond
+    command: ["celery", "-A", "core.celery_config.app", "beat", "--loglevel=info"]
+    env_file:
+      - ./entities/.env
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+    depends_on:
+      redis_1:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
   nginx:
     build:
       context: .
@@ -257,6 +278,7 @@ volumes:
     driver: local
   minio_data:
     driver: local
+
 
 networks:
   cars_and_beyond_network:
