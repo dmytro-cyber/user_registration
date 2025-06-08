@@ -1,4 +1,4 @@
-FROM python:3.12.3-slim
+FROM python:3.12.3
 
 # Налаштування змінних середовища для Python
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -37,10 +37,11 @@ RUN apt update && apt install -y \
     libxdamage1 \
     libxfixes3 \
     libxrandr2 \
-    # Залежності для Xvfb для підтримки графічних додатків у headless-режимі
     xvfb \
     xauth \
     x11-utils \
+    xfonts-base \
+    libxtst6 \
     xxd \
     && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
     && echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google-chrome.list \
@@ -85,3 +86,8 @@ RUN dos2unix /commands/*.sh
 
 # Додавання біту виконання до файлів команд
 RUN chmod +x /commands/*.sh
+
+# Створення .Xauthority для Xvfb
+RUN mkdir -p /root && \
+    touch /root/.Xauthority && \
+    chmod 600 /root/.Xauthority

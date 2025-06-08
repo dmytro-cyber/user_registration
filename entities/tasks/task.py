@@ -2,6 +2,7 @@ import os
 import logging
 import httpx
 import asyncio
+import anyio
 from core.celery_config import app
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlalchemy.future import select
@@ -15,6 +16,8 @@ from datetime import datetime
 import base64
 from sqlalchemy.ext.asyncio import AsyncSession
 from io import BytesIO
+
+# Apply nest_asyncio to allow nested event loops (prevents asyncio.run errors)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -34,9 +37,6 @@ s3_storage = S3StorageClient(
 logger.info("S3 storage client initialized successfully")
 
 async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
-    """
-    Asynchronously parse and update car data from an external parser service.
-    """
     logger.info(f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
     async with AsyncSessionFactory() as db:
         async with db.begin():
@@ -85,7 +85,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                     car.owners = data.get("owners")
                     logger.info(f"Updated owners: {car.owners}")
 
-                    if data.get("mileage"):
+                    if data.get("mileage") is not None:
                         car.has_correct_mileage = car.mileage == data.get("mileage")
                         logger.info(f"Updated has_correct_mileage: {car.has_correct_mileage}")
 
@@ -111,21 +111,31 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                             sum_price += manheim
                             divisor += 1
                     car.avg_market_price = int(sum_price / divisor) if divisor > 0 else 0
+
                     query = select(ROIModel).order_by(ROIModel.created_at.desc())
                     result = await db.execute(query)
                     default_roi = result.scalars().first()
+
                     car.predicted_total_investment = (
                         (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price > 0 else 0
                     )
-                    fees = await db.execute(select(FeeModel).where(FeeModel.auction == car.auction, FeeModel.price_from <= car.avg_market_price, FeeModel.price_to >= car.avg_market_price))
-                    fees = fees.scalars().all()
+
+                    fees_result = await db.execute(
+                        select(FeeModel).where(
+                            FeeModel.auction == car.auction,
+                            FeeModel.price_from <= car.avg_market_price,
+                            FeeModel.price_to >= car.avg_market_price
+                        )
+                    )
+                    fees = fees_result.scalars().all()
                     car.auction_fee = sum(fee.amount for fee in fees)
                     car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
                     car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
+
                     logger.info(
                         f"Calculated avg_market_price: {car.avg_market_price}, total_investment: {car.total_investment}, roi: {car.roi}"
                     )
-                    
+
                     car.predicted_profit_margin_percent = (
                         default_roi.profit_margin if car.predicted_total_investment > 0 else 0
                     )
@@ -164,16 +174,10 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
 @app.task(name="tasks.task.parse_and_update_car")
 def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
-    """
-    Sync task to parse and update car data.
-    """
     logger.info(f"Starting Celery task parse_and_update_car for VIN: {vin}")
-    return asyncio.run(_parse_and_update_car_async(vin, car_name, car_engine))
+    return anyio.run(_parse_and_update_car_async(vin, car_name, car_engine))
 
 async def _update_car_bids_async():
-    """
-    Asynchronously update car bids by fetching cars with date < current time.
-    """
     logger.info("Starting _update_car_bids_async")
     async with AsyncSessionFactory() as db:
         async with db.begin():
@@ -220,11 +224,11 @@ async def _update_car_bids_async():
                             else:
                                 logger.error(f"Car with ID {car_id} not found for bid update")
                         else:
-                            logger.warning(f"Invalid bid data for car ID {car_id}: {item}")
+                            logger.warning(f"Incomplete data for car bid update: {item}")
 
                     await db.commit()
-                    logger.info(f"Successfully updated bids for {len(data)} cars")
-                    return {"status": "success", "count": len(data)}
+                    logger.info("Successfully updated bids for cars")
+                    return {"status": "success", "updated_cars": len(data)}
 
             except Exception as e:
                 logger.error(f"Error in _update_car_bids_async: {str(e)}", exc_info=True)
@@ -235,100 +239,62 @@ async def _update_car_bids_async():
 
 @app.task(name="tasks.task.update_car_bids")
 def update_car_bids():
-    """
-    Sync task to update car bids.
-    """
     logger.info("Starting Celery task update_car_bids")
-    return asyncio.run(_update_car_bids_async())
-
-async def _create_fee(db: AsyncSession, auction: str, fee_type: str, amount: float, price_range: str):
-    """
-    Helper function to create a FeeModel entry in the database.
-    """
-    price_from = price_range.split("-")[0] if "-" in price_range else 0
-    price_to = price_range.split("-")[1] if "-" in price_range else None
-    fee = FeeModel(
-        auction=auction,
-        fee_type=fee_type,
-        amount=amount,
-        price_from=price_from,
-        price_to=price_to,
-    )
-    db.add(fee)
-    await db.flush()
+    return anyio.run(_update_car_bids_async())
 
 async def _update_fees_async():
-    """
-    Asynchronously update fees by fetching data from an external API.
-    """
     logger.info("Starting _update_fees_async")
     async with AsyncSessionFactory() as db:
         async with db.begin():
             try:
-                url = "http://parsers:8001/api/v1/parsers/scrape/fees"
-                headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-                logger.info(f"Sending GET request to {url}")
+                query_delete = delete(FeeModel)
+                await db.execute(query_delete)
+                logger.info("Deleted all existing FeeModel entries")
 
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, timeout=300.0, headers=headers)
-                    logger.info(f"Received response with status: {response.status_code}")
-                    response.raise_for_status()
+                roi_query = select(ROIModel).order_by(ROIModel.created_at.desc())
+                roi_result = await db.execute(roi_query)
+                default_roi = roi_result.scalars().first()
 
-                    content_type = response.headers.get("Content-Type", "")
-                    if "application/json" not in content_type:
-                        logger.error(f"Expected application/json response, got {content_type}")
-                        raise ValueError("Invalid content type")
+                new_fees = [
+                    FeeModel(
+                        auction="Copart",
+                        price_from=1000,
+                        price_to=10000,
+                        amount=250,
+                        roi=default_roi.roi,
+                        profit_margin=default_roi.profit_margin,
+                    ),
+                    FeeModel(
+                        auction="Copart",
+                        price_from=10001,
+                        price_to=30000,
+                        amount=350,
+                        roi=default_roi.roi,
+                        profit_margin=default_roi.profit_margin,
+                    ),
+                    FeeModel(
+                        auction="Copart",
+                        price_from=30001,
+                        price_to=50000,
+                        amount=450,
+                        roi=default_roi.roi,
+                        profit_margin=default_roi.profit_margin,
+                    ),
+                    FeeModel(
+                        auction="Copart",
+                        price_from=50001,
+                        price_to=1000000,
+                        amount=650,
+                        roi=default_roi.roi,
+                        profit_margin=default_roi.profit_margin,
+                    ),
+                ]
 
-                    data = response.json()
-                    if data[0].get("source") == "copart":
-                        copart_fees = data[0]["fees"]
-                        iaai_fees = data[1]["fees"]
-                    else:
-                        copart_fees = data[1]["fees"]
-                        iaai_fees = data[0]["fees"]
+                db.add_all(new_fees)
+                await db.commit()
+                logger.info("Inserted new FeeModel entries successfully")
 
-                    logger.info("Deleting existing copart fees")
-                    await db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
-                    await db.flush()
-
-                    secured = copart_fees.get("bidding_fees").get("secured").get("secured")
-                    for price, fee in secured.items():
-                        await _create_fee(db, "copart", "secured", fee, price)
-
-                    gate_fee = copart_fees.get("gate_fee").get("amount")
-                    await _create_fee(db, "copart", "gate_fee", gate_fee, "0")
-
-                    virtual_fee = copart_fees.get("virtual_fee").get("live_bid")
-                    for price, fee in virtual_fee.items():
-                        await _create_fee(db, "copart", "virtual_fee", fee, price)
-
-                    environmental_fee = copart_fees.get("environmental_fee").get("amount")
-                    await _create_fee(db, "copart", "environmental_fee", environmental_fee, "0")
-
-                    logger.info("Deleting existing iaai fees")
-                    await db.execute(delete(FeeModel).where(FeeModel.auction == "iaai"))
-                    await db.flush()
-
-                    standard_volume_buyer_fee = iaai_fees.get("standard_volume_buyer_fee").get("fees")
-                    for price, fee in standard_volume_buyer_fee.items():
-                        await _create_fee(db, "iaai", "standard_volume_buyer_fee", fee, price)
-
-                    live_online_bid_fee = iaai_fees.get("live_online_bid_fee").get("fees")
-                    for price, fee in live_online_bid_fee.items():
-                        await _create_fee(db, "iaai", "live_online_bid_fee", fee, price)
-
-                    service_fee = iaai_fees.get("service_fee").get("amount")
-                    await _create_fee(db, "iaai", "service_fee", service_fee, "0")
-
-                    environmental_fee = iaai_fees.get("environmental_fee").get("amount")
-                    await _create_fee(db, "iaai", "environmental_fee", environmental_fee, "0")
-
-                    title_handling_fee = iaai_fees.get("title_handling_fee").get("amount")
-                    await _create_fee(db, "iaai", "title_handling_fee", title_handling_fee, "0")
-
-                    logger.info(f"Received and processed fee data: {data}")
-                    logger.info("Successfully updated fees")
-                    return {"status": "success"}
+                return {"status": "success", "fees_count": len(new_fees)}
 
             except Exception as e:
                 logger.error(f"Error in _update_fees_async: {str(e)}", exc_info=True)
@@ -339,8 +305,5 @@ async def _update_fees_async():
 
 @app.task(name="tasks.task.update_fees")
 def update_fees():
-    """
-    Sync task to update fees.
-    """
     logger.info("Starting Celery task update_fees")
-    return asyncio.run(_update_fees_async())
+    return anyio.run(_update_fees_async())

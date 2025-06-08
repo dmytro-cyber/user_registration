@@ -11,7 +11,6 @@ import re
 import os
 import time
 import random
-import pyautogui
 from cairosvg import svg2png
 from twocaptcha import TwoCaptcha
 
@@ -41,6 +40,7 @@ class IAABuyerFeeScraper:
         """Simulate human-like behavior with random delays, mouse movements, and scroll."""
         delay = random.uniform(1, 5)
         time.sleep(delay)
+        import pyautogui
         screen_width, screen_height = pyautogui.size()
         pyautogui.moveTo(
             random.randint(0, screen_width), random.randint(0, screen_height), duration=random.uniform(0.5, 1.5)
