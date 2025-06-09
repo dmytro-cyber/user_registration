@@ -18,11 +18,19 @@ class BaseAppSettings(BaseModel):
 
 
 class Settings(BaseAppSettings):
-    POSTGRES_USER: str = os.getenv("POSTGRES_USER", "test_user")
-    POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "test_password")
-    POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "test_host")
-    POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT", "5432"))
-    POSTGRES_DB: str = os.getenv("POSTGRES_DB", "test_db")
+    if os.getenv("ENVIERON") == "prod":
+        POSTGRES_USER: str = os.getenv("POSTGRES_USER_PROD")
+        POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD_PROD")
+        POSTGRES_HOST: str = os.getenv("POSTGRES_HOST_PROD")
+        POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT_PROD"))
+        POSTGRES_DB: str = os.getenv("POSTGRES_DB_PROD")
+    else:
+        POSTGRES_USER: str = os.getenv("POSTGRES_USER", "test_user")
+        POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "test_password")
+        POSTGRES_HOST: str = os.getenv("POSTGRES_HOST", "test_host")
+        POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT", "5432"))
+        POSTGRES_DB: str = os.getenv("POSTGRES_DB", "test_db")
+
 
     SECRET_KEY_ACCESS: str = os.getenv("SECRET_KEY_ACCESS", os.urandom(32).hex())
     SECRET_KEY_REFRESH: str = os.getenv("SECRET_KEY_REFRESH", os.urandom(32).hex())

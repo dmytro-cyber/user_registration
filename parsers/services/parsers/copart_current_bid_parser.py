@@ -4,6 +4,8 @@ from bs4 import BeautifulSoup
 import logging
 import time
 import httpx
+from schemas.schemas import UpdateCurrentBidListResponseSchema, UpdateCurrentBidRequestSchema
+import os
 
 # Configure logging with a specific format and level
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -134,20 +136,21 @@ async def process_url_copart(item_id: int, url: str):
         return item_id, None
 
 
-async def process_url_iaai(vehicle_id: int, vin: str):
+async def process_url_iaai(vehicle_id: int, lot: str):
     client = httpx.AsyncClient()
-    result = await client.get(f"https://apicar/bid{vin}")
+    result = await client.get(f"https://api.apicar.store/api/cars/current-bid?site=2&lot_id={lot}", headers={"api-key": os.getenv("APICAR_KEY")})
     return vehicle_id, result.json().get("current_bid", None)
 
 
-async def get_current_bid(urls: list[dict]):
+async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
     """
     Main function to process multiple URLs concurrently.
     """
 
     # Create tasks for all URLs
-    tasks_copart = [process_url_copart(url.get("id"), url.get("url")) for url in urls if "copart" in url.get("url")]
-    tasks_iaai = [process_url_iaai(url.get("vin")) for url in urls if "iaai" in url.get("url")]
+    logger.info(f"where tuple? type: {type(urls)}")
+    tasks_copart = [process_url_copart(url.id, url.url) for url in urls if "copart" in url.url]
+    tasks_iaai = [process_url_iaai(url.id, url.lot) for url in urls if "iaai" in url.url]
     # Run all tasks concurrently and wait for completion
     results = await asyncio.gather(*tasks_copart)
     results += await asyncio.gather(*tasks_iaai)

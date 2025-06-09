@@ -3,31 +3,32 @@ import logging
 import httpx
 import asyncio
 import anyio
+from datetime import datetime
+from io import BytesIO
+import base64
+
 from core.celery_config import app
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy.orm import selectinload
 from sqlalchemy import delete
+from sqlalchemy.exc import SQLAlchemyError
+
 from models.vehicle import CarModel, AutoCheckModel, FeeModel
 from models.admin import ROIModel
 from db.session import POSTGRESQL_DATABASE_URL
 from core.config import settings
 from storages import S3StorageClient
-from datetime import datetime
-import base64
-from sqlalchemy.ext.asyncio import AsyncSession
-from io import BytesIO
 
-# Apply nest_asyncio to allow nested event loops (prevents asyncio.run errors)
-
-# Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Create async engine and session factory
-engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
+# engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
+# AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
 
-# Initialize S3 storage client
+# def get_db():
+#     return AsyncSessionFactory()
+
 s3_storage = S3StorageClient(
     endpoint_url=settings.S3_STORAGE_ENDPOINT,
     access_key=settings.S3_STORAGE_ACCESS_KEY,
@@ -36,274 +37,177 @@ s3_storage = S3StorageClient(
 )
 logger.info("S3 storage client initialized successfully")
 
+
+async def http_get_with_retries(url: str, headers: dict = None, timeout: float = 30.0, max_retries: int = 3):
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                return response
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            logger.warning(f"HTTP GET attempt {attempt} failed: {e}")
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(2 ** attempt)
+
+
+async def http_post_with_retries(url: str, json: dict, headers: dict = None, timeout: float = 30.0, max_retries: int = 3):
+    for attempt in range(1, max_retries + 1):
+        try:
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                response = await client.post(url, json=json, headers=headers)
+                response.raise_for_status()
+                return response
+        except (httpx.RequestError, httpx.HTTPStatusError) as e:
+            logger.warning(f"HTTP POST attempt {attempt} failed: {e}")
+            if attempt == max_retries:
+                raise
+            await asyncio.sleep(2 ** attempt)
+
+
 async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
     logger.info(f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
+    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
+    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with AsyncSessionFactory() as db:
-        async with db.begin():
-            try:
-                url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
-                headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-                logger.info(f"Prepared request URL: {url} with headers: {headers}")
+        try:
+            url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
+            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
 
-                async with httpx.AsyncClient() as client:
-                    response = await client.get(url, timeout=300.0, headers=headers)
-                    logger.info(f"Received response with status: {response.status_code}")
-                    response.raise_for_status()
+            response = await http_get_with_retries(url, headers=headers, timeout=300.0)
+            data = response.json()
 
-                    content_type = response.headers.get("Content-Type", "")
-                    if "application/json" not in content_type:
-                        logger.error(f"Expected application/json response, got {content_type}")
-                        raise ValueError("Invalid content type")
+            if data.get("error"):
+                raise ValueError(f"Scraping error: {data['error']}")
 
-                    data = response.json()
+            screenshot_data = base64.b64decode(data["screenshot"]) if data.get("screenshot") else None
 
-                    if data.get("error"):
-                        logger.error(f"Errors in scraped data for VIN {vin}: {data.get('error')}")
-                        raise ValueError(f"Scraping error: {data.get('error')}")
+            query = select(CarModel).where(CarModel.vin == vin).with_for_update()
+            result = await db.execute(query)
+            car = result.scalars().first()
 
-                    screenshot_data = None
-                    if screenshot_data := data.get("screenshot"):
-                        try:
-                            screenshot_data = base64.b64decode(data["screenshot"])
-                            logger.info(f"Decoded screenshot for VIN {vin}, size: {len(screenshot_data)} bytes")
-                        except Exception as e:
-                            logger.error(f"Failed to decode screenshot base64 for VIN {vin}: {str(e)}")
-                            screenshot_data = None
+            if not car:
+                raise ValueError(f"Car with VIN {vin} not found")
 
-                    logger.info(f"Querying database for car with VIN: {vin}")
-                    query = select(CarModel).where(CarModel.vin == vin)
-                    result = await db.execute(query)
-                    car = result.scalars().first()
+            car.owners = data.get("owners")
+            if data.get("mileage") is not None:
+                car.has_correct_mileage = car.mileage == data.get("mileage")
+            car.accident_count = data.get("accident_count")
 
-                    if not car:
-                        logger.error(f"Car with VIN {vin} not found in database")
-                        raise ValueError(f"Car with VIN {vin} not found")
+            prices = [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)]
+            valid_prices = [int(float(p)) for p in prices if p]
+            car.avg_market_price = int(sum(valid_prices) / len(valid_prices)) if valid_prices else 0
 
-                    logger.info(f"Found car with VIN {vin} in database, ID: {car.id}")
+            roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
+            default_roi = roi_result.scalars().first()
 
-                    logger.info("Updating car data in database")
-                    car.owners = data.get("owners")
-                    logger.info(f"Updated owners: {car.owners}")
+            if default_roi:
+                car.predicted_total_investment = (
+                    (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price else 0
+                )
+                car.predicted_profit_margin_percent = default_roi.profit_margin
+            else:
+                car.predicted_total_investment = 0
+                car.predicted_profit_margin_percent = 0
 
-                    if data.get("mileage") is not None:
-                        car.has_correct_mileage = car.mileage == data.get("mileage")
-                        logger.info(f"Updated has_correct_mileage: {car.has_correct_mileage}")
+            fees_result = await db.execute(
+                select(FeeModel).where(
+                    FeeModel.auction == car.auction,
+                    FeeModel.price_from <= car.avg_market_price,
+                    FeeModel.price_to >= car.avg_market_price
+                )
+            )
+            fees = fees_result.scalars().all()
+            car.auction_fee = sum(fee.amount for fee in fees)
+            car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
+            car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
 
-                    car.accident_count = data.get("accident_count")
-                    logger.info(f"Updated accident_count: {car.accident_count}")
+            if screenshot_data:
+                file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
+                await s3_storage.upload_fileobj(file_key, BytesIO(screenshot_data))
+                screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
+                db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
-                    sum_price = 0
-                    price = data.get("price", 0)
-                    retail = data.get("retail", 0)
-                    manheim = data.get("manheim", 0)
-                    divisor = 0
-                    if price or retail or manheim:
-                        if price:
-                            price = int(float(price))
-                            sum_price += price
-                            divisor += 1
-                        if retail:
-                            retail = int(float(retail))
-                            sum_price += retail
-                            divisor += 1
-                        if manheim:
-                            manheim = int(float(manheim))
-                            sum_price += manheim
-                            divisor += 1
-                    car.avg_market_price = int(sum_price / divisor) if divisor > 0 else 0
+            await db.commit()
+            return {"status": "success", "vin": vin}
 
-                    query = select(ROIModel).order_by(ROIModel.created_at.desc())
-                    result = await db.execute(query)
-                    default_roi = result.scalars().first()
+        except Exception as e:
+            logger.error(f"Error updating car {vin}: {e}", exc_info=True)
+            raise
 
-                    car.predicted_total_investment = (
-                        (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price > 0 else 0
-                    )
-
-                    fees_result = await db.execute(
-                        select(FeeModel).where(
-                            FeeModel.auction == car.auction,
-                            FeeModel.price_from <= car.avg_market_price,
-                            FeeModel.price_to >= car.avg_market_price
-                        )
-                    )
-                    fees = fees_result.scalars().all()
-                    car.auction_fee = sum(fee.amount for fee in fees)
-                    car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
-                    car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
-
-                    logger.info(
-                        f"Calculated avg_market_price: {car.avg_market_price}, total_investment: {car.total_investment}, roi: {car.roi}"
-                    )
-
-                    car.predicted_profit_margin_percent = (
-                        default_roi.profit_margin if car.predicted_total_investment > 0 else 0
-                    )
-
-                    if screenshot_data:
-                        logger.info("Processing screenshot for upload to S3")
-                        file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
-                        screenshot_file = BytesIO(screenshot_data)
-                        logger.info(
-                            f"Attempting to upload to S3 with endpoint: {settings.S3_STORAGE_ENDPOINT}, bucket: {settings.S3_BUCKET_NAME}, file_key: {file_key}"
-                        )
-                        try:
-                            await s3_storage.upload_fileobj(file_key, screenshot_file)
-                            screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
-                            logger.info(f"Uploaded screenshot to S3, URL: {screenshot_url}")
-                        except Exception as e:
-                            logger.error(f"Failed to upload screenshot to S3 for VIN {vin}: {str(e)}")
-                            raise
-
-                        auto_check = AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url)
-                        db.add(auto_check)
-                        logger.info(f"Added AutoCheckModel with screenshot URL for car ID: {car.id}")
-                    else:
-                        logger.warning(f"No screenshot found in response for VIN {vin}")
-
-                    await db.commit()
-                    logger.info(f"Successfully updated car VIN {vin} with scraped data and screenshot")
-                    return {"status": "success", "vin": vin}
-
-            except Exception as e:
-                logger.error(f"Error in _parse_and_update_car_async for VIN {vin}: {str(e)}", exc_info=True)
-                raise
-            finally:
-                logger.info("Closing database session")
-                await db.close()
 
 @app.task(name="tasks.task.parse_and_update_car")
 def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
-    logger.info(f"Starting Celery task parse_and_update_car for VIN: {vin}")
-    return anyio.run(_parse_and_update_car_async(vin, car_name, car_engine))
+    return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine)
+
 
 async def _update_car_bids_async():
     logger.info("Starting _update_car_bids_async")
+    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
+    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with AsyncSessionFactory() as db:
-        async with db.begin():
-            try:
-                current_time = datetime.utcnow()
-                logger.info(f"Current time for filtering: {current_time}")
-                query = select(CarModel.id, CarModel.link).where(CarModel.date < current_time)
-                result = await db.execute(query)
-                cars = [{"id": row.id, "link": row.link} for row in result.all()]
-                logger.info(f"Found {len(cars)} cars with date < {current_time}")
+        try:
+            current_time = datetime.utcnow()
+            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.date < current_time)
+            result = await db.execute(query)
+            cars = [{"id": r.id, "url": r.link, "lot": r.lot} for r in result.all()]
 
-                if not cars:
-                    logger.info("No cars found to update bids")
-                    return {"status": "success", "count": 0}
+            if not cars:
+                return {"status": "success", "count": 0}
 
-                url = "http://parsers:8001/api/v1/parsers/scrape/current_bid"
-                headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-                payload = {"cars": cars}
-                logger.info(f"Sending POST request to {url} with payload: {payload}")
+            response = await http_post_with_retries(
+                url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
+                json={"items": cars},
+                headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
+                timeout=300.0
+            )
+            data = response.json()
 
-                async with httpx.AsyncClient() as client:
-                    response = await client.post(url, json=payload, timeout=300.0, headers=headers)
-                    logger.info(f"Received response with status: {response.status_code}")
-                    response.raise_for_status()
+            for item in data:
+                car_id, current_bid = item.get("id"), item.get("current_bid")
+                if car_id and current_bid is not None:
+                    result = await db.execute(select(CarModel).where(CarModel.id == car_id).with_for_update())
+                    car = result.scalars().first()
+                    if car:
+                        car.current_bid = int(float(current_bid))
 
-                    content_type = response.headers.get("Content-Type", "")
-                    if "application/json" not in content_type:
-                        logger.error(f"Expected application/json response, got {content_type}")
-                        raise ValueError("Invalid content type")
+            await db.commit()
+            return {"status": "success", "updated_cars": len(data)}
 
-                    data = response.json()
-                    logger.info(f"Received bid data: {data}")
+        except Exception as e:
+            logger.error(f"Error in _update_car_bids_async: {e}", exc_info=True)
+            raise
 
-                    for item in data:
-                        car_id = item.get("id")
-                        current_bid = item.get("current_bid")
-                        if car_id and current_bid is not None:
-                            query = select(CarModel).where(CarModel.id == car_id)
-                            result = await db.execute(query)
-                            car = result.scalars().first()
-                            if car:
-                                car.current_bid = int(float(current_bid))
-                                logger.info(f"Updated current_bid to {current_bid} for car ID {car_id}")
-                            else:
-                                logger.error(f"Car with ID {car_id} not found for bid update")
-                        else:
-                            logger.warning(f"Incomplete data for car bid update: {item}")
-
-                    await db.commit()
-                    logger.info("Successfully updated bids for cars")
-                    return {"status": "success", "updated_cars": len(data)}
-
-            except Exception as e:
-                logger.error(f"Error in _update_car_bids_async: {str(e)}", exc_info=True)
-                raise
-            finally:
-                logger.info("Closing database session")
-                await db.close()
 
 @app.task(name="tasks.task.update_car_bids")
 def update_car_bids():
-    logger.info("Starting Celery task update_car_bids")
-    return anyio.run(_update_car_bids_async())
+    return anyio.run(_update_car_bids_async)
 
-async def _update_fees_async():
-    logger.info("Starting _update_fees_async")
+
+async def _update_car_fees_async():
+    logger.info("Starting _update_car_fees_async")
+    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
+    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with AsyncSessionFactory() as db:
-        async with db.begin():
-            try:
-                query_delete = delete(FeeModel)
-                await db.execute(query_delete)
-                logger.info("Deleted all existing FeeModel entries")
+        try:
+            result = await db.execute(select(CarModel).options(selectinload(CarModel.fees)))
+            cars = result.scalars().all()
 
-                roi_query = select(ROIModel).order_by(ROIModel.created_at.desc())
-                roi_result = await db.execute(roi_query)
-                default_roi = roi_result.scalars().first()
+            for car in cars:
+                await db.execute(delete(FeeModel).where(FeeModel.car_id == car.id))
+                for fee in getattr(car, "fees", []):
+                    fee.car_id = car.id
+                    db.add(fee)
 
-                new_fees = [
-                    FeeModel(
-                        auction="Copart",
-                        price_from=1000,
-                        price_to=10000,
-                        amount=250,
-                        roi=default_roi.roi,
-                        profit_margin=default_roi.profit_margin,
-                    ),
-                    FeeModel(
-                        auction="Copart",
-                        price_from=10001,
-                        price_to=30000,
-                        amount=350,
-                        roi=default_roi.roi,
-                        profit_margin=default_roi.profit_margin,
-                    ),
-                    FeeModel(
-                        auction="Copart",
-                        price_from=30001,
-                        price_to=50000,
-                        amount=450,
-                        roi=default_roi.roi,
-                        profit_margin=default_roi.profit_margin,
-                    ),
-                    FeeModel(
-                        auction="Copart",
-                        price_from=50001,
-                        price_to=1000000,
-                        amount=650,
-                        roi=default_roi.roi,
-                        profit_margin=default_roi.profit_margin,
-                    ),
-                ]
+            await db.commit()
+            return {"status": "success", "count": len(cars)}
 
-                db.add_all(new_fees)
-                await db.commit()
-                logger.info("Inserted new FeeModel entries successfully")
+        except Exception as e:
+            logger.error(f"Error in _update_car_fees_async: {e}", exc_info=True)
+            raise
 
-                return {"status": "success", "fees_count": len(new_fees)}
 
-            except Exception as e:
-                logger.error(f"Error in _update_fees_async: {str(e)}", exc_info=True)
-                raise
-            finally:
-                logger.info("Closing database session")
-                await db.close()
-
-@app.task(name="tasks.task.update_fees")
-def update_fees():
-    logger.info("Starting Celery task update_fees")
-    return anyio.run(_update_fees_async())
+@app.task(name="tasks.task.update_car_fees")
+def update_car_fees():
+    return anyio.run(_update_car_fees_async)

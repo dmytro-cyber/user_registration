@@ -23,6 +23,7 @@ class DCResponseSchema(BaseModel):
 class UpdateCurrentBidRequestSchema(BaseModel):
     id: int
     url: str
+    lot: int
 
 
 class UpdateCurrentBidResponseSchema(BaseModel):

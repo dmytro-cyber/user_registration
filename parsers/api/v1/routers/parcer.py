@@ -51,9 +51,8 @@ async def scrape_current_bid(
     """
     Scrape current bid data from Copart for a list of URLs.
     """
-    logger.info(f"Starting scrape for current bid with data length: {len(data)}")
-    data = [item.dict() for item in data]
-    respose = get_current_bid(data)
+    logger.info(f"Starting scrape for current bid with data length: {len(data.items)} ")
+    respose = await get_current_bid(data.items)
     logger.info(f"Successfully scraped current bid, data length: {len(respose)}")
     return respose
 
