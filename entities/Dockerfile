@@ -24,7 +24,7 @@ RUN python -m pip install --upgrade pip && \
 COPY ./entities/poetry.lock /usr/entities/poetry/poetry.lock
 COPY ./entities/pyproject.toml /usr/entities/poetry/pyproject.toml
 COPY ./entities/alembic.ini /usr/entities/alembic/alembic.ini
-COPY ./car_data.csv /usr/entities/car_data.csv
+# COPY ./car_data.csv /usr/entities/car_data.csv
 
 # Configure Poetry to avoid creating a virtual environment
 RUN poetry config virtualenvs.create false
