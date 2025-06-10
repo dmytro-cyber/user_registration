@@ -172,3 +172,14 @@ cython_debug/
 
 # PyPI configuration file
 .pypirc
+
+# Additional
+car_data.csv
+cert.pem
+key.pem
+cookies.txt
+test.db
+screenshots
+.idea
+vin_all_response_ex.json
+iaai_response_ex.json
