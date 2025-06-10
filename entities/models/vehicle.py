@@ -138,7 +138,6 @@ class HistoryModel(Base):
     car = relationship("CarModel", back_populates="bidding_hub_history")
     car_inventory = relationship("CarInventoryModel", back_populates="history")
     part_inventory = relationship("PartInventoryModel", back_populates="history")
-    
 
 
 class PartModel(Base):
@@ -336,8 +335,10 @@ class PartInventoryModel(Base):
     supplier = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     part_status = Column(Enum(PartInventoryStatus), nullable=False, default=PartInventoryStatus.PENDING_TO_ORDER)
-    
-    invoices = relationship("InvoiceModel", back_populates="part_inventory", cascade="all, delete-orphan")  # Один до багатьох
+
+    invoices = relationship(
+        "InvoiceModel", back_populates="part_inventory", cascade="all, delete-orphan"
+    )  # Один до багатьох
     history = relationship("HistoryModel", back_populates="part_inventory", cascade="all, delete-orphan")
 
     @validates("price")
@@ -346,11 +347,14 @@ class PartInventoryModel(Base):
             raise ValueError("Cost per unit cannot be negative")
         return value
 
+
 class InvoiceModel(Base):
     __tablename__ = "invoices"
 
     id = Column(Integer, primary_key=True, index=True)
-    part_inventory_id = Column(Integer, ForeignKey("part_inventory.id", ondelete="CASCADE"), nullable=False)  # Виправлено ForeignKey
+    part_inventory_id = Column(
+        Integer, ForeignKey("part_inventory.id", ondelete="CASCADE"), nullable=False
+    )  # Виправлено ForeignKey
     file_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
 

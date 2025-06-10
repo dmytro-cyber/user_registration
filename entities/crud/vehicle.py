@@ -13,7 +13,7 @@ from models.vehicle import (
     ConditionAssessmentModel,
     CarInventoryStatus,
     CarInventoryModel,
-    FeeModel
+    FeeModel,
 )
 from models.user import UserModel, UserRoleEnum
 from schemas.vehicle import CarCreateSchema

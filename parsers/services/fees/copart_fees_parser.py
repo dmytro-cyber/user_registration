@@ -67,9 +67,7 @@ class BiddingFeeScraper(FeeScraperStrategy):
                     fees[key] = fee
             return {payment_type: fees}
 
-        return {
-            "secured": parse_table(bidding_tables[0], "secured")
-        }
+        return {"secured": parse_table(bidding_tables[0], "secured")}
 
 
 # Concrete strategy for scraping gate fee

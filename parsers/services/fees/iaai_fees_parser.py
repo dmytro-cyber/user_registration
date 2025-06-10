@@ -41,6 +41,7 @@ class IAABuyerFeeScraper:
         delay = random.uniform(1, 5)
         time.sleep(delay)
         import pyautogui
+
         screen_width, screen_height = pyautogui.size()
         pyautogui.moveTo(
             random.randint(0, screen_width), random.randint(0, screen_height), duration=random.uniform(0.5, 1.5)

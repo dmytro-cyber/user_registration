@@ -9,6 +9,7 @@ from sqlalchemy.exc import IntegrityError
 import csv
 from datetime import datetime, date
 from models.vehicle import CarModel, PartModel
+import os
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -23,7 +24,7 @@ async def create_roles():
                 new_role = UserRoleModel(name=role)
                 session.add(new_role)
 
-        result_user = await session.execute(select(UserModel).filter(UserModel.email == "admin@gmail.com"))
+        result_user = await session.execute(select(UserModel).filter(UserModel.email == os.getenv("ADMIN_EMAIL"))
         existing_user = result_user.scalars().first()
 
         if not existing_user:
@@ -33,14 +34,14 @@ async def create_roles():
             admin_role = admin_role.scalars().first()
 
             new_user = UserModel.create(
-                email="admin@gmail.com",
-                raw_password="ZXCzxc!@#123",
+                email=os.getenv("ADMIN_EMAIL"),
+                raw_password=os.getenv("ADMIN_PASSWORD"),
             )
-            new_user.first_name = "admin"
-            new_user.last_name = "admin"
-            new_user.phone_number = "admin"
-            new_user.date_of_birth = date.today()
-            new_user.role_id = admin_role.id
+            new_user.first_name = "Hansel"
+            new_user.last_name = "Castillo"
+            # new_user.phone_number = "admin"
+            # new_user.date_of_birth = date.today()
+            # new_user.role_id = admin_role.id
             session.add(new_user)
 
         await session.commit()

@@ -4,7 +4,13 @@ import os
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc
-from models.vehicle import CarInventoryModel, CarInventoryInvestmentsModel, PartInventoryModel, HistoryModel, InvoiceModel
+from models.vehicle import (
+    CarInventoryModel,
+    CarInventoryInvestmentsModel,
+    PartInventoryModel,
+    HistoryModel,
+    InvoiceModel,
+)
 from models.user import UserModel
 from core.dependencies import get_s3_storage_client
 from schemas.inventory import (
@@ -34,6 +40,7 @@ console_handler.setLevel(logging.INFO)
 # Add handlers to the logger (only console handler is active)
 logger.addHandler(console_handler)
 
+
 # Custom filter to add context (RequestID, UserID)
 class ContextFilter(logging.Filter):
     def filter(self, record):
@@ -41,9 +48,11 @@ class ContextFilter(logging.Filter):
         record.user_id = getattr(record, "user_id", "N/A")
         return True
 
+
 logger.addFilter(ContextFilter())
 
 # --- CarInventory CRUD Operations ---
+
 
 async def create_car_inventory(db: AsyncSession, inventory: CarInventoryCreate, user_id: str, request_id: str = "N/A"):
     """
@@ -68,15 +77,13 @@ async def create_car_inventory(db: AsyncSession, inventory: CarInventoryCreate, 
 
     # Create a history record
     history = HistoryModel(
-        action="Added",
-        user_id=int(user_id),
-        car_inventory_id=db_inventory.id,
-        comment=inventory.comment
+        action="Added", user_id=int(user_id), car_inventory_id=db_inventory.id, comment=inventory.comment
     )
     db.add(history)
     await db.commit()
     logger.info(f"Car inventory with ID {db_inventory.id} created successfully", extra=extra)
     return db_inventory
+
 
 async def get_car_inventory(db: AsyncSession, inventory_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
@@ -102,7 +109,10 @@ async def get_car_inventory(db: AsyncSession, inventory_id: int, user_id: str = 
         logger.info(f"Inventory with ID {inventory_id} fetched successfully", extra=extra)
     return inventory
 
-async def get_car_inventories(db: AsyncSession, skip: int = 0, limit: int = 10, user_id: str = "N/A", request_id: str = "N/A"):
+
+async def get_car_inventories(
+    db: AsyncSession, skip: int = 0, limit: int = 10, user_id: str = "N/A", request_id: str = "N/A"
+):
     """
     Retrieve a paginated list of car inventories.
 
@@ -124,7 +134,10 @@ async def get_car_inventories(db: AsyncSession, skip: int = 0, limit: int = 10, 
     logger.info(f"Returning {len(inventories)} inventories", extra=extra)
     return inventories
 
-async def update_car_inventory(db: AsyncSession, inventory_id: int, inventory: CarInventoryUpdate, user_id: str = "N/A", request_id: str = "N/A"):
+
+async def update_car_inventory(
+    db: AsyncSession, inventory_id: int, inventory: CarInventoryUpdate, user_id: str = "N/A", request_id: str = "N/A"
+):
     """
     Update a specific car inventory by its ID and log the action in history.
 
@@ -152,10 +165,7 @@ async def update_car_inventory(db: AsyncSession, inventory_id: int, inventory: C
 
         # Create a history record
         history = HistoryModel(
-            action="Updated",
-            user_id=int(user_id),
-            car_inventory_id=db_inventory.id,
-            comment=inventory.comment
+            action="Updated", user_id=int(user_id), car_inventory_id=db_inventory.id, comment=inventory.comment
         )
         db.add(history)
         await db.commit()
@@ -163,6 +173,7 @@ async def update_car_inventory(db: AsyncSession, inventory_id: int, inventory: C
     else:
         logger.error(f"Inventory with ID {inventory_id} not found for update", extra=extra)
     return db_inventory
+
 
 async def delete_car_inventory(db: AsyncSession, inventory_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
@@ -183,11 +194,7 @@ async def delete_car_inventory(db: AsyncSession, inventory_id: int, user_id: str
     db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
     if db_inventory:
         # Create a history record
-        history = HistoryModel(
-            action="Deleted",
-            user_id=int(user_id),
-            car_inventory_id=db_inventory.id
-        )
+        history = HistoryModel(action="Deleted", user_id=int(user_id), car_inventory_id=db_inventory.id)
         db.add(history)
         await db.commit()
 
@@ -198,7 +205,9 @@ async def delete_car_inventory(db: AsyncSession, inventory_id: int, user_id: str
         logger.error(f"Inventory with ID {inventory_id} not found for deletion", extra=extra)
     return db_inventory
 
+
 # --- CarInventoryInvestments CRUD Operations ---
+
 
 async def get_car_investment(db: AsyncSession, investment_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
@@ -226,7 +235,10 @@ async def get_car_investment(db: AsyncSession, investment_id: int, user_id: str 
         logger.info(f"Investment with ID {investment_id} fetched successfully", extra=extra)
     return investment
 
-async def get_car_investments_by_inventory(db: AsyncSession, inventory_id: int, user_id: str = "N/A", request_id: str = "N/A"):
+
+async def get_car_investments_by_inventory(
+    db: AsyncSession, inventory_id: int, user_id: str = "N/A", request_id: str = "N/A"
+):
     """
     Retrieve all investments for a specific car inventory.
 
@@ -249,7 +261,14 @@ async def get_car_investments_by_inventory(db: AsyncSession, inventory_id: int, 
     logger.info(f"Returning {len(investments)} investments for inventory with ID: {inventory_id}", extra=extra)
     return investments
 
-async def create_car_investment(db: AsyncSession, inventory_id: int, investment: CarInventoryInvestmentsCreate, user_id: str = "N/A", request_id: str = "N/A"):
+
+async def create_car_investment(
+    db: AsyncSession,
+    inventory_id: int,
+    investment: CarInventoryInvestmentsCreate,
+    user_id: str = "N/A",
+    request_id: str = "N/A",
+):
     """
     Create a new investment for a specific car inventory and log the action in history.
 
@@ -280,7 +299,7 @@ async def create_car_investment(db: AsyncSession, inventory_id: int, investment:
             action=f"Added investment type {investment.investment_type}",
             user_id=int(user_id),
             car_inventory_id=inventory_id,
-            comment=investment.comment
+            comment=investment.comment,
         )
         db.add(history)
         await db.commit()
@@ -289,7 +308,14 @@ async def create_car_investment(db: AsyncSession, inventory_id: int, investment:
         logger.error(f"Inventory with ID {inventory_id} not found for creating investment", extra=extra)
     return db_investment
 
-async def update_car_investment(db: AsyncSession, investment_id: int, investment: CarInventoryInvestmentsUpdate, user_id: str = "N/A", request_id: str = "N/A"):
+
+async def update_car_investment(
+    db: AsyncSession,
+    investment_id: int,
+    investment: CarInventoryInvestmentsUpdate,
+    user_id: str = "N/A",
+    request_id: str = "N/A",
+):
     """
     Update a specific investment by its ID and log the action in history.
 
@@ -322,7 +348,7 @@ async def update_car_investment(db: AsyncSession, investment_id: int, investment
             action=f"Updated investment type {db_investment.investment_type}",
             user_id=int(user_id),
             car_inventory_id=db_investment.car_inventory_id,
-            comment=investment.comment
+            comment=investment.comment,
         )
         db.add(history)
         await db.commit()
@@ -330,6 +356,7 @@ async def update_car_investment(db: AsyncSession, investment_id: int, investment
     else:
         logger.error(f"Investment with ID {investment_id} not found for update", extra=extra)
     return db_investment
+
 
 async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
@@ -356,7 +383,7 @@ async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: s
         history = HistoryModel(
             action=f"Deleted investment with ID {investment_id}",
             user_id=int(user_id),
-            car_inventory_id=car_inventory_id
+            car_inventory_id=car_inventory_id,
         )
         db.add(history)
         await db.commit()
@@ -372,7 +399,9 @@ async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: s
         logger.error(f"Investment with ID {investment_id} not found for deletion", extra=extra)
     return db_investment
 
+
 # --- PartInventory CRUD Operations ---
+
 
 async def create_part_inventory(db: AsyncSession, part: PartInventoryCreate, user_id: str, request_id: str = "N/A"):
     """
@@ -396,16 +425,12 @@ async def create_part_inventory(db: AsyncSession, part: PartInventoryCreate, use
     await db.refresh(db_part)
 
     # Create a history record
-    history = HistoryModel(
-        action="Added",
-        user_id=int(user_id),
-        part_inventory_id=db_part.id,
-        comment=part.comment
-    )
+    history = HistoryModel(action="Added", user_id=int(user_id), part_inventory_id=db_part.id, comment=part.comment)
     db.add(history)
     await db.commit()
     logger.info(f"Part inventory with ID {db_part.id} created successfully", extra=extra)
     return db_part
+
 
 async def get_part_inventory(db: AsyncSession, part_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
@@ -431,6 +456,7 @@ async def get_part_inventory(db: AsyncSession, part_id: int, user_id: str = "N/A
         logger.info(f"Part inventory with ID {part_id} fetched successfully", extra=extra)
     return db_part
 
+
 async def get_part_inventories(db: AsyncSession, user_id: str = "N/A", request_id: str = "N/A"):
     """
     Retrieve all part inventories.
@@ -451,7 +477,10 @@ async def get_part_inventories(db: AsyncSession, user_id: str = "N/A", request_i
     logger.info(f"Returning {len(parts)} part inventories", extra=extra)
     return parts
 
-async def update_part_inventory(db: AsyncSession, part_id: int, part: PartInventoryUpdate, user_id: str, request_id: str = "N/A"):
+
+async def update_part_inventory(
+    db: AsyncSession, part_id: int, part: PartInventoryUpdate, user_id: str, request_id: str = "N/A"
+):
     """
     Update a specific part inventory by its ID and log the action in history.
 
@@ -481,16 +510,12 @@ async def update_part_inventory(db: AsyncSession, part_id: int, part: PartInvent
     await db.refresh(db_part)
 
     # Create a history record
-    history = HistoryModel(
-        action="Updated",
-        user_id=int(user_id),
-        part_inventory_id=db_part.id,
-        comment=part.comment
-    )
+    history = HistoryModel(action="Updated", user_id=int(user_id), part_inventory_id=db_part.id, comment=part.comment)
     db.add(history)
     await db.commit()
     logger.info(f"Part inventory with ID {part_id} updated successfully", extra=extra)
     return db_part
+
 
 async def delete_part_inventory(db: AsyncSession, part_id: int, user_id: str, request_id: str = "N/A"):
     """
@@ -514,11 +539,7 @@ async def delete_part_inventory(db: AsyncSession, part_id: int, user_id: str, re
         return None
 
     # Create a history record
-    history = HistoryModel(
-        action="Deleted",
-        user_id=int(user_id),
-        part_inventory_id=db_part.id
-    )
+    history = HistoryModel(action="Deleted", user_id=int(user_id), part_inventory_id=db_part.id)
     db.add(history)
     await db.commit()
 
@@ -527,7 +548,10 @@ async def delete_part_inventory(db: AsyncSession, part_id: int, user_id: str, re
     logger.info(f"Part inventory with ID {part_id} deleted successfully", extra=extra)
     return {"message": "Part deleted successfully"}
 
-async def update_part_status(db: AsyncSession, part_id: int, status_update: PartInventoryStatusUpdate, user_id: str, request_id: str = "N/A"):
+
+async def update_part_status(
+    db: AsyncSession, part_id: int, status_update: PartInventoryStatusUpdate, user_id: str, request_id: str = "N/A"
+):
     """
     Update the status of a specific part inventory and log the action in history.
 
@@ -558,14 +582,17 @@ async def update_part_status(db: AsyncSession, part_id: int, status_update: Part
         action=f"Status changed from {previous_status.value} to {status_update.part_status.value}",
         user_id=int(user_id),
         part_inventory_id=db_part.id,
-        comment=status_update.comment
+        comment=status_update.comment,
     )
     db.add(history)
     await db.commit()
     logger.info(f"Status for part inventory with ID {part_id} updated successfully", extra=extra)
     return db_part
 
-async def upload_invoice(db: AsyncSession, part_id: int, file_data: bytes, file_name: str, user_id: str, request_id: str = "N/A"):
+
+async def upload_invoice(
+    db: AsyncSession, part_id: int, file_data: bytes, file_name: str, user_id: str, request_id: str = "N/A"
+):
     """
     Upload an invoice file to S3 and link it to a part inventory, logging the action in history.
 
@@ -599,14 +626,13 @@ async def upload_invoice(db: AsyncSession, part_id: int, file_data: bytes, file_
     await db.refresh(db_invoice)
 
     history = HistoryModel(
-        action=f"Invoice uploaded (ID: {db_invoice.id})",
-        user_id=int(user_id),
-        part_inventory_id=db_part.id
+        action=f"Invoice uploaded (ID: {db_invoice.id})", user_id=int(user_id), part_inventory_id=db_part.id
     )
     db.add(history)
     await db.commit()
     logger.info(f"Invoice (ID: {db_invoice.id}) uploaded for part inventory with ID {part_id}", extra=extra)
     return db_invoice
+
 
 async def delete_invoice(db: AsyncSession, invoice_id: int, user_id: str, request_id: str = "N/A"):
     """
@@ -630,12 +656,10 @@ async def delete_invoice(db: AsyncSession, invoice_id: int, user_id: str, reques
         s3_client = await get_s3_storage_client()
         s3_key = db_invoice.file_url.replace("https://my-inventory-bucket.s3.amazonaws.com/", "")
         s3_client.delete_object(Bucket="my-inventory-bucket", Key=s3_key)
-        
+
         # Create a history record
         history = HistoryModel(
-            action=f"Invoice deleted (ID: {invoice_id})",
-            user_id=int(user_id),
-            part_inventory_id=part_inventory_id
+            action=f"Invoice deleted (ID: {invoice_id})", user_id=int(user_id), part_inventory_id=part_inventory_id
         )
         db.add(history)
         await db.commit()
@@ -647,7 +671,10 @@ async def delete_invoice(db: AsyncSession, invoice_id: int, user_id: str, reques
     logger.warning(f"Invoice with ID {invoice_id} not found", extra=extra)
     return None
 
-async def update_invoice(db: AsyncSession, invoice_id: int, file_data: bytes, file_name: str, user_id: str, request_id: str = "N/A"):
+
+async def update_invoice(
+    db: AsyncSession, invoice_id: int, file_data: bytes, file_name: str, user_id: str, request_id: str = "N/A"
+):
     """
     Update an existing invoice by uploading a new file to S3 and log the action in history.
 
@@ -684,9 +711,7 @@ async def update_invoice(db: AsyncSession, invoice_id: int, file_data: bytes, fi
 
         # Create a history record
         history = HistoryModel(
-            action=f"Invoice updated (ID: {invoice_id})",
-            user_id=int(user_id),
-            part_inventory_id=part_inventory_id
+            action=f"Invoice updated (ID: {invoice_id})", user_id=int(user_id), part_inventory_id=part_inventory_id
         )
         db.add(history)
         await db.commit()

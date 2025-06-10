@@ -138,7 +138,10 @@ async def process_url_copart(item_id: int, url: str):
 
 async def process_url_iaai(vehicle_id: int, lot: str):
     client = httpx.AsyncClient()
-    result = await client.get(f"https://api.apicar.store/api/cars/current-bid?site=2&lot_id={lot}", headers={"api-key": os.getenv("APICAR_KEY")})
+    result = await client.get(
+        f"https://api.apicar.store/api/cars/current-bid?site=2&lot_id={lot}",
+        headers={"api-key": os.getenv("APICAR_KEY")},
+    )
     return vehicle_id, result.json().get("current_bid", None)
 
 
