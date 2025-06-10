@@ -1,0 +1,43 @@
+name: Deploy to AWS
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v2
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-west-1
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region us-west-1 | \
+          docker login --username AWS --password-stdin 862296132645.dkr.ecr.us-west-1.amazonaws.com
+
+      - name: Build Docker image
+        run: |
+          docker build -t cars-and-beyond-backend .
+          docker tag cars-and-beyond-backend:latest \
+            862296132645.dkr.ecr.us-west-1.amazonaws.com/cars-and-beyond-backend:latest
+
+      - name: Push to ECR
+        run: |
+          docker push 862296132645.dkr.ecr.us-west-1.amazonaws.com/cars-and-beyond-backend:latest
+
+      - name: Deploy to ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v1
+        with:
+          task-definition: ecs-task-definition.json
+          service: cars-and-beyond-service
+          cluster: cars-and-beyond-cluster
+          wait-for-service-stability: true

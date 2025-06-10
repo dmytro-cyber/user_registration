@@ -1,0 +1,218 @@
+services:
+
+  redis:
+    image: 'redis:latest'
+    container_name: redis_cars_and_beyond
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_cars_and_beyond_data:/var/lib/data
+    networks:
+      - cars_and_beyond_network
+    healthcheck:
+      test: [ "CMD", "redis-cli", "ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+
+  redis_1:
+    image: 'redis:latest'
+    container_name: redis_1_cars_and_beyond
+    ports:
+      - "6380:6380"
+    command: ["redis-server", "--port", "6380"]
+    volumes:
+      - redis_1_cars_and_beyond_data:/var/lib/data
+    networks:
+      - cars_and_beyond_network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  entities:
+    restart: always
+    build:
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: backend_cars_and_beyond
+    command: [ "/bin/bash", "/commands/run_entities_server_dev.sh" ]
+    env_file:
+      - ./entities/.env
+    environment:
+      - LOG_LEVEL=debug
+      - PYTHONPATH=/usr/entities/fastapi
+      - WATCHFILES_FORCE_POLLING=true
+    ports:
+      - "8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      # redis:
+      #   condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
+  parsers:
+    restart: always
+    build:
+      context: .
+      dockerfile: parsers/Dockerfile
+    container_name: parser_cars_and_beyond
+    command: [ "/bin/bash", "/commands/run_parsers_server_dev.sh" ]
+    env_file:
+      - ./parsers/.env
+    environment:
+      - LOG_LEVEL=debug
+      - PYTHONPATH=/usr/parsers/fastapi
+      - WATCHFILES_FORCE_POLLING=true
+    ports:
+      - "8001:8001"
+    volumes:
+      - ./parsers:/usr/parsers/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
+  migrator:
+    build:
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: alembic_migrator_cars_and_beyond
+    command: ["/bin/bash", "/commands/run_migration.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
+    env_file:
+      - ./entities/.env
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
+  celery:
+    build: 
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: celery_cars_and_beyond
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=prefork"]
+    env_file:
+      - ./entities/.env
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+    depends_on:
+      redis_1:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
+  celery_worker:
+    build: 
+      context: .
+      dockerfile: parsers/Dockerfile
+    container_name: celery_worker_cars_and_beyond
+    command: ["celery", "-A", "tasks.tasks.app", "worker", "--loglevel=info"]
+    env_file:
+      - ./parsers/.env
+    environment:
+      - PYTHONPATH=/usr/parsers/fastapi
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./parsers:/usr/parsers/fastapi
+    networks:
+      - cars_and_beyond_network
+
+  celery_beat:
+    build: 
+      context: .
+      dockerfile: parsers/Dockerfile
+    container_name: celery_beat_cars_and_beyond
+    command: ["celery", "-A", "tasks.tasks.app", "beat", "--loglevel=info"]
+    env_file:
+      - ./parsers/.env
+    environment:
+      - PYTHONPATH=/usr/parsers/fastapi
+    depends_on:
+      redis:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./parsers:/usr/parsers/fastapi
+    networks:
+      - cars_and_beyond_network
+
+
+  celery_beat_entities:
+    build: 
+      context: .
+      dockerfile: entities/Dockerfile
+    container_name: celery_beat_entities_cars_and_beyond
+    command: ["celery", "-A", "core.celery_config.app", "beat", "--loglevel=info"]
+    env_file:
+      - ./entities/.env
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+    depends_on:
+      redis_1:
+        condition: service_healthy
+      db:
+        condition: service_healthy
+    volumes:
+      - ./entities:/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+
+  nginx:
+    build:
+      context: .
+      dockerfile: docker/nginx/Dockerfile
+    container_name: nginx
+    restart: always
+    ports:
+      - "443:443"
+    volumes:
+      - ./cert.pem:/etc/nginx/certs/cert.pem:ro
+      - ./key.pem:/etc/nginx/certs/key.pem:ro
+      - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - entities
+    env_file:
+      - ./docker/nginx/.env
+    networks:
+      - cars_and_beyond_network
+
+volumes:
+  postgres_cars_and_beyond_data:
+    driver: local
+  pgadmin_cars_and_beyond_data:
+    driver: local
+  redis_cars_and_beyond_data:
+    driver: local
+  redis_1_cars_and_beyond_data:
+    driver: local
+  minio_data:
+    driver: local
+
+
+networks:
+  cars_and_beyond_network:
+    driver: bridge

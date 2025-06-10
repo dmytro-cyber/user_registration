@@ -24,6 +24,12 @@ class Settings(BaseAppSettings):
         POSTGRES_HOST: str = os.getenv("POSTGRES_HOST_PROD")
         POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT_PROD"))
         POSTGRES_DB: str = os.getenv("POSTGRES_DB_PROD")
+
+        S3_STORAGE_HOST: str = os.getenv("S3_STORAGE_HOST")
+        S3_STORAGE_PORT: int = os.getenv("S3_STORAGE_PORT")
+        S3_STORAGE_ACCESS_KEY: str = os.getenv("S3_ACCESS_KEY_ID")
+        S3_STORAGE_SECRET_KEY: str = os.getenv("S3_SECRET_ACCESS_KEY")
+        S3_BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME")
     else:
         POSTGRES_USER: str = os.getenv("POSTGRES_USER", "test_user")
         POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "test_password")
@@ -31,6 +37,11 @@ class Settings(BaseAppSettings):
         POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT", "5432"))
         POSTGRES_DB: str = os.getenv("POSTGRES_DB", "test_db")
 
+        S3_STORAGE_HOST: str = os.getenv("MINIO_HOST", "minio-theater")
+        S3_STORAGE_PORT: int = os.getenv("MINIO_PORT", 9000)
+        S3_STORAGE_ACCESS_KEY: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
+        S3_STORAGE_SECRET_KEY: str = os.getenv("MINIO_ROOT_PASSWORD", "some_password")
+        S3_BUCKET_NAME: str = os.getenv("MINIO_STORAGE", "theater-storage")
 
     SECRET_KEY_ACCESS: str = os.getenv("SECRET_KEY_ACCESS", os.urandom(32).hex())
     SECRET_KEY_REFRESH: str = os.getenv("SECRET_KEY_REFRESH", os.urandom(32).hex())
@@ -50,14 +61,10 @@ class Settings(BaseAppSettings):
 
     PARSERS_AUTH_TOKEN: str = os.getenv("PARSERS_AUTH_TOKEN")
 
-    S3_STORAGE_HOST: str = os.getenv("MINIO_HOST", "minio-theater")
-    S3_STORAGE_PORT: int = os.getenv("MINIO_PORT", 9000)
-    S3_STORAGE_ACCESS_KEY: str = os.getenv("MINIO_ROOT_USER", "minioadmin")
-    S3_STORAGE_SECRET_KEY: str = os.getenv("MINIO_ROOT_PASSWORD", "some_password")
-    S3_BUCKET_NAME: str = os.getenv("MINIO_STORAGE", "theater-storage")
-
     @property
     def S3_STORAGE_ENDPOINT(self) -> str:
+        if os.getenv("ENVIERON") == "prod":
+            return f"https://{self.S3_STORAGE_HOST}"
         return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
 
 

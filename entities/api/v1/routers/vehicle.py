@@ -28,7 +28,7 @@ from crud.vehicle import (
     update_part,
     delete_part,
     bulk_save_vehicles,
-    get_parts_by_vehicle_id
+    get_parts_by_vehicle_id,
 )
 from services.vehicle import (
     scrape_and_save_vehicle,
@@ -442,7 +442,6 @@ async def get_parts_endpoint(
         raise HTTPException(status_code=404, detail="Vehicle not found")
     logger.info(f"Found {len(parts)} parts for vehicle with ID: {vehicle_id}", extra=extra)
     return [PartResponseScheme.model_validate(part) for part in parts]
-    
 
 
 @router.post(

@@ -166,7 +166,9 @@ def fetch_api_data():
 
                 # Check if we should stop fetching (created_at < updated_at)
                 if filter_updated_at and created_at < filter_updated_at:
-                    logger.info(f"Stopping fetch for filter {filter_id}: found vehicle with created_at {created_at} earlier than updated_at {filter_updated_at}")
+                    logger.info(
+                        f"Stopping fetch for filter {filter_id}: found vehicle with created_at {created_at} earlier than updated_at {filter_updated_at}"
+                    )
                     stop_fetching = True
                     break
 
@@ -206,7 +208,9 @@ def fetch_api_data():
                 try:
                     save_response = httpx.post(save_url, json=processed_vehicles, headers=headers, timeout=10)
                     save_response.raise_for_status()
-                    logger.info(f"Successfully saved {len(processed_vehicles)} vehicles for filter {filter_id} on page {page}")
+                    logger.info(
+                        f"Successfully saved {len(processed_vehicles)} vehicles for filter {filter_id} on page {page}"
+                    )
                 except httpx.HTTPError as e:
                     logger.error(f"Failed to save vehicles for filter {filter_id} on page {page}: {e}")
                     break

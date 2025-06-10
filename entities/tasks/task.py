@@ -29,12 +29,7 @@ logger = logging.getLogger(__name__)
 # def get_db():
 #     return AsyncSessionFactory()
 
-s3_storage = S3StorageClient(
-    endpoint_url=settings.S3_STORAGE_ENDPOINT,
-    access_key=settings.S3_STORAGE_ACCESS_KEY,
-    secret_key=settings.S3_STORAGE_SECRET_KEY,
-    bucket_name=settings.S3_BUCKET_NAME,
-)
+
 logger.info("S3 storage client initialized successfully")
 
 
@@ -49,10 +44,12 @@ async def http_get_with_retries(url: str, headers: dict = None, timeout: float =
             logger.warning(f"HTTP GET attempt {attempt} failed: {e}")
             if attempt == max_retries:
                 raise
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2**attempt)
 
 
-async def http_post_with_retries(url: str, json: dict, headers: dict = None, timeout: float = 30.0, max_retries: int = 3):
+async def http_post_with_retries(
+    url: str, json: dict, headers: dict = None, timeout: float = 30.0, max_retries: int = 3
+):
     for attempt in range(1, max_retries + 1):
         try:
             async with httpx.AsyncClient(timeout=timeout) as client:
@@ -63,7 +60,7 @@ async def http_post_with_retries(url: str, json: dict, headers: dict = None, tim
             logger.warning(f"HTTP POST attempt {attempt} failed: {e}")
             if attempt == max_retries:
                 raise
-            await asyncio.sleep(2 ** attempt)
+            await asyncio.sleep(2**attempt)
 
 
 async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
@@ -115,7 +112,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 select(FeeModel).where(
                     FeeModel.auction == car.auction,
                     FeeModel.price_from <= car.avg_market_price,
-                    FeeModel.price_to >= car.avg_market_price
+                    FeeModel.price_to >= car.avg_market_price,
                 )
             )
             fees = fees_result.scalars().all()
@@ -124,6 +121,12 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
 
             if screenshot_data:
+                s3_storage = S3StorageClient(
+                    endpoint_url=settings.S3_STORAGE_ENDPOINT,
+                    access_key=settings.S3_STORAGE_ACCESS_KEY,
+                    secret_key=settings.S3_STORAGE_SECRET_KEY,
+                    bucket_name=settings.S3_BUCKET_NAME,
+                )
                 file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
                 await s3_storage.upload_fileobj(file_key, BytesIO(screenshot_data))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
@@ -160,7 +163,7 @@ async def _update_car_bids_async():
                 url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
                 json={"items": cars},
                 headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
-                timeout=300.0
+                timeout=300.0,
             )
             data = response.json()
 
