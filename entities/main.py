@@ -5,7 +5,7 @@ from api.v1.routers.vehicle import router as vehicle_router
 from api.v1.routers.admin import router as admin_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
-from core.setup import create_roles, import_cars_from_csv
+from core.setup import create_roles
 from fastapi.middleware.cors import CORSMiddleware
 
 
