@@ -25,11 +25,11 @@ class BaseAppSettings(BaseModel):
 
 class Settings(BaseAppSettings):
     if os.getenv("ENVIRON") == "prod":
-        POSTGRES_USER: str = os.getenv("POSTGRES_USER_PROD")
-        POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD_PROD")
-        POSTGRES_HOST: str = os.getenv("POSTGRES_HOST_PROD")
+        POSTGRES_USER: str = os.getenv("POSTGRES_DB_USER_PROD")
+        POSTGRES_PASSWORD: str = os.getenv("POSTGRES_DB_PASSWORD_PROD")
+        POSTGRES_HOST: str = os.getenv("POSTGRES_DB_HOST_PROD")
         POSTGRES_DB_PORT: int = int(os.getenv("POSTGRES_DB_PORT_PROD"))
-        POSTGRES_DB: str = os.getenv("POSTGRES_DB_PROD")
+        POSTGRES_DB: str = os.getenv("POSTGRES_DB_NAME_PROD")
 
         S3_STORAGE_HOST: str = os.getenv("S3_STORAGE_HOST")
         S3_STORAGE_PORT: int = os.getenv("S3_STORAGE_PORT")
