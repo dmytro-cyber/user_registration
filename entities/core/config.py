@@ -1,11 +1,18 @@
 import os
+import logging
 from pathlib import Path
 
 from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
-load_dotenv()
+# Налаштування логування
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
+load_dotenv()
 
 class BaseAppSettings(BaseModel):
     BASE_DIR: Path = Field(default_factory=lambda: Path(__file__).parent.parent)
@@ -15,7 +22,6 @@ class BaseAppSettings(BaseModel):
     )
 
     LOGIN_TIME_DAYS: int = 7
-
 
 class Settings(BaseAppSettings):
     if os.getenv("ENVIRON") == "prod":
@@ -67,5 +73,10 @@ class Settings(BaseAppSettings):
             return f"https://{self.S3_STORAGE_HOST}"
         return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        logger.info("Loaded settings:")
+        for key, value in self.dict().items():
+            logger.info(f"{key}: {value}")
 
 settings = Settings()
