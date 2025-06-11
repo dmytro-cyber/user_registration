@@ -24,7 +24,7 @@ async def create_roles():
                 new_role = UserRoleModel(name=role)
                 session.add(new_role)
 
-        result_user = await session.execute(select(UserModel).filter(UserModel.email == os.getenv("ADMIN_EMAIL")))
+        result_user = await session.execute(select(UserModel).filter(UserModel.email == os.getenv("ADMIN_USERNAME")))
         existing_user = result_user.scalars().first()
 
         if not existing_user:
@@ -34,7 +34,7 @@ async def create_roles():
             admin_role = admin_role.scalars().first()
 
             new_user = UserModel.create(
-                email=os.getenv("ADMIN_EMAIL"),
+                email=os.getenv("ADMIN_USERNAME"),
                 raw_password=os.getenv("ADMIN_PASSWORD"),
             )
             new_user.first_name = "Hansel"
