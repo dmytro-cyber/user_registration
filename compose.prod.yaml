@@ -49,11 +49,6 @@ services:
       - WATCHFILES_FORCE_POLLING=true
     ports:
       - "8000:8000"
-    # depends_on:
-    #   db:
-    #     condition: service_healthy
-      # redis:
-      #   condition: service_healthy
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
@@ -87,9 +82,6 @@ services:
       dockerfile: entities/Dockerfile
     container_name: alembic_migrator_cars_and_beyond
     command: ["/bin/bash", "/commands/run_migration.sh"]
-    # depends_on:
-    #   db:
-    #     condition: service_healthy
     volumes:
       - ./entities:/usr/entities/fastapi
     env_file:
@@ -113,8 +105,6 @@ services:
     depends_on:
       redis_1:
         condition: service_healthy
-      # db:
-      #   condition: service_healthy
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
@@ -133,8 +123,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      # db:
-      #   condition: service_healthy
     volumes:
       - ./parsers:/usr/parsers/fastapi
     networks:
@@ -153,8 +141,6 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      # db:
-      #   condition: service_healthy
     volumes:
       - ./parsers:/usr/parsers/fastapi
     networks:
@@ -174,8 +160,6 @@ services:
     depends_on:
       redis_1:
         condition: service_healthy
-      # db:
-      #   condition: service_healthy
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
@@ -201,16 +185,10 @@ services:
       - cars_and_beyond_network
 
 volumes:
-  # postgres_cars_and_beyond_data:
-  #   driver: local
-  # pgadmin_cars_and_beyond_data:
-  #   driver: local
   redis_cars_and_beyond_data:
     driver: local
   redis_1_cars_and_beyond_data:
     driver: local
-  # minio_data:
-  #   driver: local
 
 
 networks:

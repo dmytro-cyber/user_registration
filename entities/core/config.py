@@ -18,7 +18,7 @@ class BaseAppSettings(BaseModel):
 
 
 class Settings(BaseAppSettings):
-    if os.getenv("ENVIERON") == "prod":
+    if os.getenv("ENVIRON") == "prod":
         POSTGRES_USER: str = os.getenv("POSTGRES_USER_PROD")
         POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD_PROD")
         POSTGRES_HOST: str = os.getenv("POSTGRES_HOST_PROD")
@@ -63,7 +63,7 @@ class Settings(BaseAppSettings):
 
     @property
     def S3_STORAGE_ENDPOINT(self) -> str:
-        if os.getenv("ENVIERON") == "prod":
+        if os.getenv("ENVIRON") == "prod":
             return f"https://{self.S3_STORAGE_HOST}"
         return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
 
