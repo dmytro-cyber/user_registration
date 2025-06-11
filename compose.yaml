@@ -146,6 +146,8 @@ services:
       - ./parsers:/usr/parsers/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
 
   migrator:
@@ -165,6 +167,8 @@ services:
       - PYTHONPATH=/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
 
   celery:
@@ -186,6 +190,8 @@ services:
       - ./entities:/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
   celery_worker:
     build: 
@@ -206,6 +212,8 @@ services:
       - ./parsers:/usr/parsers/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
   celery_beat:
     build: 
@@ -226,6 +234,8 @@ services:
       - ./parsers:/usr/parsers/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
 
   celery_beat_entities:
@@ -247,6 +257,8 @@ services:
       - ./entities:/usr/entities/fastapi
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
   nginx:
     build:
@@ -266,6 +278,8 @@ services:
       - ./docker/nginx/.env
     networks:
       - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
 
 volumes:
   postgres_cars_and_beyond_data:
