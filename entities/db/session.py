@@ -8,7 +8,7 @@ POSTGRESQL_DATABASE_URL = (
     f"{settings.POSTGRES_HOST}:{settings.POSTGRES_DB_PORT}/{settings.POSTGRES_DB}"
 )
 
-engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
+engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True, pool_size=20, max_overflow=10, pool_timeout=30)
 SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
