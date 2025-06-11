@@ -39,9 +39,9 @@ async def create_roles():
             )
             new_user.first_name = "Hansel"
             new_user.last_name = "Castillo"
-            # new_user.phone_number = "admin"
-            # new_user.date_of_birth = date.today()
-            # new_user.role_id = admin_role.id
+            new_user.phone_number = "admin"
+            new_user.date_of_birth = date.today()
+            new_user.role_id = admin_role.id
             session.add(new_user)
 
         await session.commit()
