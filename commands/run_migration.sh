@@ -12,7 +12,7 @@ if [ ! -d "$MIGRATIONS_DIR" ]; then
     mkdir -p "$MIGRATIONS_DIR"
 fi
 
-if [ "$ENVIRONMENT" = "prod" ]; then
+if [ "$ENVIRON" = "prod" ]; then
     POSTGRES_HOST="${POSTGRES_DB_HOST_PROD}"
     POSTGRES_PORT="${POSTGRES_DB_PORT_PROD}"
     POSTGRES_USER="${POSTGRES_DB_USER_PROD}"
