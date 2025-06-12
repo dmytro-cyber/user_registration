@@ -15,3 +15,7 @@ from .admin import FilterModel as FilterModel
 from .admin import ROIModel as ROIModel
 from .vehicle import CarInventoryModel as CarInventoryModel
 from .vehicle import CarInventoryInvestmentsModel as CarInventoryInvestmentsModel
+from .vehicle import PartInventoryModel as PartInventoryModel
+from .vehicle import AutoCheckModel as AutoCheckModel
+from .vehicle import FeeModel as FeeModel
+from .vehicle import CarStatus as CarStatus

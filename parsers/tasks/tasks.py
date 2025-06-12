@@ -30,7 +30,7 @@ app = Celery(
 app.conf.beat_schedule = {
     "fetch-api-data-every-minute": {
         "task": "tasks.tasks.fetch_api_data",
-        "schedule": crontab(minute="*/60"),
+        "schedule": crontab(minute="*/1"),
     },
 }
 
@@ -53,8 +53,8 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
         "size": 30,
         "transmission": "Automatic",
         # "status": "Run & Drive",
-        "sort": "created_at",
-        "direction": "DESC",
+        # "sort": "created_at",
+        # "direction": "DESC",
         "page": page,
     }
 
@@ -135,6 +135,7 @@ def fetch_api_data():
                 response.raise_for_status()
                 api_response = response.json()
                 data = api_response.get("data", [])
+                print(f"Fetched {data}.")
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch API data for filter {filter_id} on page {page}: {e}")
                 break

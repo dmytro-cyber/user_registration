@@ -27,7 +27,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict matching CarModel fields and types.
     """
-    # Мапінг полів JSON -> CarModel
+    
     field_mapping = {
         "vin": "vin",
         "title": "vehicle",
@@ -52,6 +52,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "transmission": "transmision",
         "vehicle_type": "vehicle_type",
     }
+    print("auction_dateeeeeeeee", api_response["auction_date"])
 
     # Конвертація типів для певних полів
     type_conversions = {

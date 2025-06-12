@@ -1,6 +1,6 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, asc, desc
+from sqlalchemy import select, func, asc, desc, delete
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 from models.vehicle import (
@@ -32,61 +32,80 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
 
 
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
-    """Save a single vehicle and its photos."""
+    """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
+        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+        if existing_vehicle:
+            logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
+
+            for field, value in vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}).items():
+                setattr(existing_vehicle, field, value)
+
+            existing_photo_urls = {p.url for p in existing_vehicle.photos}
+            new_photos = []
+
+            if vehicle_data.photos:
+                for photo_data in vehicle_data.photos:
+                    if photo_data.url not in existing_photo_urls:
+                        new_photos.append(PhotoModel(url=photo_data.url, car_id=existing_vehicle.id, is_hd=False))
+
+            if vehicle_data.photos_hd:
+                for photo_data_hd in vehicle_data.photos_hd:
+                    if photo_data_hd.url not in existing_photo_urls:
+                        new_photos.append(PhotoModel(url=photo_data_hd.url, car_id=existing_vehicle.id, is_hd=True))
+
+            if new_photos:
+                db.add_all(new_photos)
+                logger.info(f"Added {len(new_photos)} new photos for VIN {vehicle_data.vin}")
+
+            await db.execute(delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id))
+            if vehicle_data.condition_assessments:
+                for assessment in vehicle_data.condition_assessments:
+                    db.add(ConditionAssessmentModel(
+                        type_of_damage=assessment.type_of_damage,
+                        issue_description=assessment.issue_description,
+                        car_id=existing_vehicle.id
+                    ))
+
+            await db.execute(delete(CarSaleHistoryModel).where(CarSaleHistoryModel.car_id == existing_vehicle.id))
+            if vehicle_data.sales_history:
+                await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
+
+            return False
+
         vehicle = CarModel(
             **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
         )
         db.add(vehicle)
         await db.flush()
-        existing_vehicle = await get_vehicle_by_vin(db, vehicle.vin)
-        if existing_vehicle:
-            logger.info(f"Vehicle with VIN {vehicle.vin} already exists. Skipping save.")
-            if not existing_vehicle.photos_hd:
-                if hasattr(vehicle_data, "photos") and vehicle_data.photos:
-                    for photo_data in vehicle_data.photos:
-                        photo = PhotoModel(url=photo_data.url, car_id=vehicle.id, is_hd=False)
-                        db.add(photo)
 
-                if hasattr(vehicle_data, "photos_hd") and vehicle_data.photos_hd:
-                    for photo_data_hd in vehicle_data.photos_hd:
-                        photo_hd = PhotoModel(url=photo_data_hd.url, car_id=vehicle.id, is_hd=True)
-                        db.add(photo_hd)
-            return False
-        if hasattr(vehicle_data, "condition_assessments") and vehicle_data.condition_assessments:
-            for condition_assessment_data in vehicle_data.condition_assessments:
-                logger.info(f"Condition assessment data: {condition_assessment_data}")
-                condition_assessment = ConditionAssessmentModel(
-                    type_of_damage=condition_assessment_data.type_of_damage,
-                    issue_description=condition_assessment_data.issue_description,
-                    car_id=vehicle.id,
-                )
-                db.add(condition_assessment)
+        if vehicle_data.condition_assessments:
+            for assessment in vehicle_data.condition_assessments:
+                db.add(ConditionAssessmentModel(
+                    type_of_damage=assessment.type_of_damage,
+                    issue_description=assessment.issue_description,
+                    car_id=vehicle.id
+                ))
 
-        if hasattr(vehicle_data, "photos") and vehicle_data.photos:
-            for photo_data in vehicle_data.photos:
-                photo = PhotoModel(url=photo_data.url, car_id=vehicle.id, is_hd=False)
-                db.add(photo)
+        if vehicle_data.photos:
+            db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
 
-        if hasattr(vehicle_data, "photos_hd") and vehicle_data.photos_hd:
-            for photo_data_hd in vehicle_data.photos_hd:
-                photo_hd = PhotoModel(url=photo_data_hd.url, car_id=vehicle.id, is_hd=True)
-                db.add(photo_hd)
+        if vehicle_data.photos_hd:
+            db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
 
-        logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}.")
-
-        if hasattr(vehicle_data, "sales_history") and vehicle_data.sales_history:
+        if vehicle_data.sales_history:
             await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
 
+        logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}")
         return True
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
             return False
-        else:
-            raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
+        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+
 
 
 async def get_vehicle_by_vin(db: AsyncSession, vin: str) -> Optional[CarModel]:
