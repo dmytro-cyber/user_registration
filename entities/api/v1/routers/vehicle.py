@@ -597,9 +597,9 @@ async def bulk_create_cars(
         else:
             logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
 
-        # for vehicle_data in vehicles:
-        #     if vehicle_data.vin not in skipped_vins:
-        #         parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
+        for vehicle_data in vehicles:
+            if vehicle_data.vin not in skipped_vins:
+                parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
 
         return response
     except Exception as e:

@@ -140,7 +140,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             raise
 
 
-@app.task(name="tasks.task.parse_and_update_car")
+@app.task(name="tasks.task.parse_and_update_car", queue="sequential")
 def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
     return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine)
 
