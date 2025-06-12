@@ -64,7 +64,7 @@ class GmailClient:
         self.password = os.getenv("SMTP_PASSWORD")
         self.imap_server = "imap.gmail.com"
 
-    def get_verification_code(self, max_wait=30, poll_interval=2):
+    def get_verification_code(self, max_wait=30, poll_interval=4):
         """Poll the inbox for the verification code with a maximum wait time."""
         start_time = time.time()
         while time.time() - start_time < max_wait:
@@ -253,7 +253,7 @@ class DealerCenterScraper:
         # Added 5-second delay before fetching the verification code
         time.sleep(5)
         gmail = GmailClient()
-        verification_code = gmail.get_verification_code(max_wait=30, poll_interval=2)
+        verification_code = gmail.get_verification_code(max_wait=30, poll_interval=4)
         if not verification_code:
             logging.error("Failed to retrieve verification code.")
             raise Exception("Failed to retrieve verification code.")
@@ -289,6 +289,7 @@ class DealerCenterScraper:
 
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
+        time.sleep(4)
         self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         time.sleep(4)
