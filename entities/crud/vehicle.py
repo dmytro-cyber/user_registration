@@ -42,6 +42,16 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         existing_vehicle = await get_vehicle_by_vin(db, vehicle.vin)
         if existing_vehicle:
             logger.info(f"Vehicle with VIN {vehicle.vin} already exists. Skipping save.")
+            if not existing_vehicle.photos_hd:
+                if hasattr(vehicle_data, "photos") and vehicle_data.photos:
+                    for photo_data in vehicle_data.photos:
+                        photo = PhotoModel(url=photo_data.url, car_id=vehicle.id, is_hd=False)
+                        db.add(photo)
+
+                if hasattr(vehicle_data, "photos_hd") and vehicle_data.photos_hd:
+                    for photo_data_hd in vehicle_data.photos_hd:
+                        photo_hd = PhotoModel(url=photo_data_hd.url, car_id=vehicle.id, is_hd=True)
+                        db.add(photo_hd)
             return False
         if hasattr(vehicle_data, "condition_assessments") and vehicle_data.condition_assessments:
             for condition_assessment_data in vehicle_data.condition_assessments:
