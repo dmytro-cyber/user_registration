@@ -147,7 +147,7 @@ class DealerCenterScraper:
 
         service = Service()
         try:
-            driver = uc.Chrome(service=service, options=chrome_options, version_main=135)
+            driver = uc.Chrome(service=service, options=chrome_options)
             logging.info("Chrome driver initialized.")
             return driver
         except Exception as e:
