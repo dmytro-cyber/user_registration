@@ -121,7 +121,6 @@ async def get_bidding_hub(
         logger.info(
             f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}", extra=extra
         )
-        logger.info(f"user_first_name: {vehicles[0].bidding_hub_history[0].user.first_name}", extra=extra)
         return CarBiddinHubListResponseSchema(
             vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
             total_count=total_count,

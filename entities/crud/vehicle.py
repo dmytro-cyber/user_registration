@@ -172,63 +172,64 @@ async def get_bidding_hub_vehicles(
     sort_order: str = "desc",
 ) -> tuple[List[CarModel], int, int]:
     """Get vehicles in the bidding hub with pagination and sorting, including the last user who made a manipulation."""
+    async with db as session:
 
-    order_func = asc if sort_order.lower() == "asc" else desc
+        order_func = asc if sort_order.lower() == "asc" else desc
 
-    last_history_subquery = (
-        select(HistoryModel)
-        .where(HistoryModel.car_id == CarModel.id)
-        .order_by(HistoryModel.created_at.desc())
-        .limit(1)
-        .subquery()
-    )
+        last_history_subquery = (
+            select(HistoryModel)
+            .where(HistoryModel.car_id == CarModel.id)
+            .order_by(HistoryModel.created_at.desc())
+            .limit(1)
+            .subquery()
+        )
 
-    query = select(CarModel).options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
+        query = select(CarModel).options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
 
-    if current_user.has_role(UserRoleEnum.ADMIN):
-        query = query.filter(
-            ~CarModel.car_status.in_(
-                [
-                    CarStatus.NEW,
-                ]
+        if current_user.has_role(UserRoleEnum.ADMIN):
+            query = query.filter(
+                ~CarModel.car_status.in_(
+                    [
+                        CarStatus.NEW,
+                    ]
+                )
             )
-        )
-    else:
-        query = query.filter(
-            ~CarModel.car_status.in_(
-                [
-                    CarStatus.NEW,
-                    CarStatus.DELETED_FROM_BIDDING_HUB,
-                ]
+        else:
+            query = query.filter(
+                ~CarModel.car_status.in_(
+                    [
+                        CarStatus.NEW,
+                        CarStatus.DELETED_FROM_BIDDING_HUB,
+                    ]
+                )
             )
-        )
 
-    if sort_by == "user":
-        query = query.join(last_history_subquery, last_history_subquery.c.car_id == CarModel.id).join(
-            UserModel, UserModel.id == last_history_subquery.c.user_id
-        )
-        query = query.order_by(order_func(UserModel.email))
-    else:
-        sort_field_mapping = {
-            "vehicle": CarModel.vehicle,
-            "auction": CarModel.auction,
-            "location": CarModel.location,
-            "date": CarModel.date,
-            "lot": CarModel.lot,
-            "avg_market_price": CarModel.avg_market_price,
-            "status": CarModel.car_status,
-        }
-        sort_field = sort_field_mapping.get(sort_by)
-        if sort_field:
-            query = query.order_by(order_func(sort_field))
+        if sort_by == "user":
+            query = query.join(last_history_subquery, last_history_subquery.c.car_id == CarModel.id).join(
+                UserModel, UserModel.id == last_history_subquery.c.user_id
+            )
+            query = query.order_by(order_func(UserModel.email))
+        else:
+            sort_field_mapping = {
+                "vehicle": CarModel.vehicle,
+                "auction": CarModel.auction,
+                "location": CarModel.location,
+                "date": CarModel.date,
+                "lot": CarModel.lot,
+                "avg_market_price": CarModel.avg_market_price,
+                "status": CarModel.car_status,
+            }
+            sort_field = sort_field_mapping.get(sort_by)
+            if sort_field:
+                query = query.order_by(order_func(sort_field))
 
-    total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
-    total_pages = (total_count + page_size - 1) // page_size
+        total_count = await session.scalar(select(func.count()).select_from(query.subquery()))
+        total_pages = (total_count + page_size - 1) // page_size
 
-    result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
-    vehicles = result.scalars().all()
+        result = await session.execute(query.offset((page - 1) * page_size).limit(page_size))
+        vehicles = result.scalars().all()
 
-    return vehicles, total_count, total_pages
+        return vehicles, total_count, total_pages
 
 
 async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]:
