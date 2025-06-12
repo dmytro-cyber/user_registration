@@ -135,8 +135,6 @@ services:
     depends_on:
       redis_1:
         condition: service_healthy
-      db:
-        condition: service_healthy
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
