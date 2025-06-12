@@ -104,21 +104,21 @@ def fetch_api_data():
     # Process each filter
     for filter_data in filters:
         filter_id = filter_data.get("id")
-        filter_updated_at_str = filter_data.get("updated_at")
+        # filter_updated_at_str = filter_data.get("updated_at")
 
-        # Parse filter's updated_at to datetime (if it exists)
-        filter_updated_at = None
-        if filter_updated_at_str:
-            try:
-                # Assume the database updated_at is in UTC if no timezone is specified
-                if "Z" in filter_updated_at_str:
-                    filter_updated_at_str = filter_updated_at_str.replace("Z", "+00:00")
-                else:
-                    filter_updated_at_str = f"{filter_updated_at_str}+00:00"
-                filter_updated_at = datetime.fromisoformat(filter_updated_at_str)
-            except ValueError as e:
-                logger.error(f"Invalid updated_at format for filter {filter_id}: {e}")
-                continue
+        # # Parse filter's updated_at to datetime (if it exists)
+        # filter_updated_at = None
+        # if filter_updated_at_str:
+        #     try:
+        #         # Assume the database updated_at is in UTC if no timezone is specified
+        #         if "Z" in filter_updated_at_str:
+        #             filter_updated_at_str = filter_updated_at_str.replace("Z", "+00:00")
+        #         else:
+        #             filter_updated_at_str = f"{filter_updated_at_str}+00:00"
+        #         filter_updated_at = datetime.fromisoformat(filter_updated_at_str)
+        #     except ValueError as e:
+        #         logger.error(f"Invalid updated_at format for filter {filter_id}: {e}")
+        #         continue
 
         page = 1
         first_created_at = None
@@ -165,12 +165,12 @@ def fetch_api_data():
                     first_created_at = created_at
 
                 # Check if we should stop fetching (created_at < updated_at)
-                if filter_updated_at and created_at < filter_updated_at:
-                    logger.info(
-                        f"Stopping fetch for filter {filter_id}: found vehicle with created_at {created_at} earlier than updated_at {filter_updated_at}"
-                    )
-                    stop_fetching = True
-                    break
+                # if filter_updated_at and created_at < filter_updated_at:
+                #     logger.info(
+                #         f"Stopping fetch for filter {filter_id}: found vehicle with created_at {created_at} earlier than updated_at {filter_updated_at}"
+                #     )
+                #     stop_fetching = True
+                #     break
 
                 # Format and adapt vehicle data
                 formatted_vehicle = format_car_data(vehicle)
@@ -185,7 +185,7 @@ def fetch_api_data():
                     "lot": formatted_vehicle.get("lot"),
                     "seller": formatted_vehicle.get("seller"),
                     "location": formatted_vehicle.get("location"),
-                    "bid": formatted_vehicle.get("bid"),
+                    "current_bid": formatted_vehicle.get("current_bid"),
                     "engine": formatted_vehicle.get("engine"),
                     "has_keys": formatted_vehicle.get("has_keys"),
                     "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
@@ -218,16 +218,16 @@ def fetch_api_data():
             page += 1
 
         # Update the filter's updated_at with the first created_at value (if we fetched any data)
-        if first_created_at:
-            update_url = f"http://entities:8000/api/v1/admin/filters/{filter_id}/timestamp"
-            # Convert first_created_at to ISO 8601 string with Z
-            update_payload = {"updated_at": first_created_at.isoformat().replace("+00:00", "Z")}
-            try:
-                update_response = httpx.patch(update_url, json=update_payload, headers=headers, timeout=10)
-                update_response.raise_for_status()
-                logger.info(f"Updated filter {filter_id} with new updated_at: {first_created_at}")
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to update filter {filter_id} with new updated_at: {e}")
+        # if first_created_at:
+        #     update_url = f"http://entities:8000/api/v1/admin/filters/{filter_id}/timestamp"
+        #     # Convert first_created_at to ISO 8601 string with Z
+        #     update_payload = {"updated_at": first_created_at.isoformat().replace("+00:00", "Z")}
+        #     try:
+        #         update_response = httpx.patch(update_url, json=update_payload, headers=headers, timeout=10)
+        #         update_response.raise_for_status()
+        #         logger.info(f"Updated filter {filter_id} with new updated_at: {first_created_at}")
+        #     except httpx.HTTPError as e:
+        #         logger.error(f"Failed to update filter {filter_id} with new updated_at: {e}")
 
     logger.info("Finished processing all filters.")
     return "Finished processing all filters."

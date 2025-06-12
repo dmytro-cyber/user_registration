@@ -313,7 +313,7 @@ async def get_cars(
     vehicles, total_count, total_pages = await get_filtered_vehicles(db, filters, page, page_size)
     if not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
-        raise HTTPException(status_code=404, detail="No vehicles found")
+        return CarListResponseSchema(cars=[], page_links={}, last=True)
     base_url = str(request.url.remove_query_params("page"))
     response = await prepare_response(vehicles, total_pages, page, base_url)
     logger.info(f"Returning {len(response.cars)} cars, total pages: {total_pages}", extra=extra)
@@ -561,7 +561,7 @@ async def delete_part_endpoint(
 
 
 @router.post(
-    "/bulk/", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk."
+    "/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk."
 )
 async def bulk_create_cars(
     vehicles: List[CarCreateSchema],
@@ -597,9 +597,9 @@ async def bulk_create_cars(
         else:
             logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
 
-        # for vehicle_data in vehicles:
-        #     if vehicle_data.vin not in skipped_vins:
-        #         parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
+        for vehicle_data in vehicles:
+            if vehicle_data.vin not in skipped_vins:
+                parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
 
         return response
     except Exception as e:

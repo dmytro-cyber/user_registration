@@ -26,7 +26,7 @@ class CarBaseSchema(BaseModel):
     has_keys: bool | None
     predicted_roi: float | None
     predicted_profit_margin: float | None
-    bid: float | None
+    current_bid: float | None
     suggested_bid: float | None
     location: str | None
     photos: List[str]
@@ -155,15 +155,11 @@ class CarCreateSchema(BaseModel):
     has_correct_accidents: bool = False
     has_correct_mileage: bool = False
 
-    bid: float | None = None
+    current_bid: float | None = None
     actual_bid: float | None = None
     price_sold: float | None = None
     suggested_bid: float | None = None
-    total_investment: float | None = None
-    net_profit: float | None = None
     link: str | None = None
-    profit_margin: float | None = None
-    roi: float | None = None
 
     parts_cost: float | None = None
     maintenance: float | None = None
@@ -176,8 +172,6 @@ class CarCreateSchema(BaseModel):
 
     engine: float | None = None
     has_keys: bool = False
-    predicted_roi: float | None = None
-    predicted_profit_margin: float | None = None
 
     engine_cylinder: int | None = None
     drive_type: str | None = None

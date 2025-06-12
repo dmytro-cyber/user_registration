@@ -39,6 +39,10 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         )
         db.add(vehicle)
         await db.flush()
+        existing_vehicle = await get_vehicle_by_vin(db, vehicle.vin)
+        if existing_vehicle:
+            logger.info(f"Vehicle with VIN {vehicle.vin} already exists. Skipping save.")
+            return False
         if hasattr(vehicle_data, "condition_assessments") and vehicle_data.condition_assessments:
             for condition_assessment_data in vehicle_data.condition_assessments:
                 logger.info(f"Condition assessment data: {condition_assessment_data}")
