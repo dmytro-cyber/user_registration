@@ -187,7 +187,7 @@ def fetch_api_data():
                 "lot": formatted_vehicle.get("lot"),
                 "seller": formatted_vehicle.get("seller"),
                 "location": formatted_vehicle.get("location"),
-                "bid": formatted_vehicle.get("bid"),
+                "current_bid": formatted_vehicle.get("current_bid"),
                 "engine": formatted_vehicle.get("engine"),
                 "has_keys": formatted_vehicle.get("has_keys"),
                 "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
