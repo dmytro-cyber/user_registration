@@ -54,11 +54,11 @@ class ConditionAssessmentResponseSchema(BaseModel):
 
 
 class SalesHistoryBaseSchema(BaseModel):
-    date: datetime
-    source: str
-    lot_number: int
-    final_bid: int
-    status: str
+    date: datetime | None = None
+    source: str | None = None
+    lot_number: int | None = None
+    final_bid: int | None = None
+    status: str | None = None
 
 
 class CarDetailResponseSchema(BaseModel):
