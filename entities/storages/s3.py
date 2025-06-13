@@ -59,3 +59,14 @@ class S3StorageClient(S3StorageInterface):
         :return: The full URL to access the file.
         """
         return f"{self._endpoint_url}/{self._bucket_name}/{file_name}"
+
+    def delete_file(self, file_name: str) -> None:
+        """
+        Deletes a file from the S3-compatible storage.
+
+        :param file_name: The name of the file to be deleted.
+        """
+        try:
+            self._s3_client.delete_object(Bucket=self._bucket_name, Key=file_name)
+        except ClientError as e:
+            raise S3ConnectionError(f"Failed to delete file from S3 storage: {str(e)}") from e

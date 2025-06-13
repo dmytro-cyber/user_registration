@@ -256,14 +256,14 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     car.car_status = car_status
 
     if car.car_status == CarStatus.WON:
-        CarInventoryModel = CarInventoryModel(
+        car_inventory_model = CarInventoryModel(
             car=car,
             vehicle=car.vehicle,
             vin=car.vin,
             vehicle_cost=car.suggested_bid,
             car_status=CarInventoryStatus.AWAITING_DELIVERY,
         )
-        db.add(CarInventoryModel)
+        db.add(car_inventory_model)
 
     await db.commit()
     await db.refresh(car)

@@ -210,7 +210,7 @@ class CarBiddinHubResponseSchema(BaseModel):
 
     @classmethod
     def from_orm(cls, obj):
-        last_history = obj.history[0] if obj.history else None
+        last_history = obj.bidding_hub_history[0] if obj.bidding_hub_history else None
         last_user = (
             f"{last_history.user.first_name} {last_history.user.last_name}"
             if last_history and last_history.user and last_history.user.first_name and last_history.user.last_name
@@ -225,9 +225,9 @@ class CarBiddinHubResponseSchema(BaseModel):
             date=obj.date,
             lot=obj.lot,
             avg_market_price=obj.avg_market_price,
-            total_investment=obj.total_investment,
-            profit_margin=obj.profit_margin,
-            roi=obj.roi,
+            total_investment=obj.predicted_total_investments,
+            profit_margin=obj.predicted_profit_margin,
+            roi=obj.predicted_roi,
             current_bid=obj.current_bid,
             actual_bid=obj.actual_bid,
             suggested_bid=obj.suggested_bid,

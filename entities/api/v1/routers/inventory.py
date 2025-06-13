@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc
+from sqlalchemy.orm import selectinload
 from typing import List, Optional
 from crud.inventory import (
     get_car_inventories,
@@ -239,7 +240,7 @@ async def delete_investment(
 
 
 @router.post("/parts/", response_model=PartInventoryResponse)
-async def create_part_inventory(
+async def post_part_inventory(
     part: PartInventoryCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -249,6 +250,7 @@ async def create_part_inventory(
     # Fetch the latest history record for fullname
     result = await db.execute(
         select(HistoryModel)
+        .options(selectinload(HistoryModel.user))
         .where(HistoryModel.part_inventory_id == db_part.id)
         .order_by(desc(HistoryModel.created_at))
         .limit(1)
@@ -258,7 +260,7 @@ async def create_part_inventory(
     if latest_history and latest_history.user:
         fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
 
-    return PartInventoryResponse(**db_part.__dict__, fullname=fullname, comment=part.comment)
+    return PartInventoryResponse(**db_part.__dict__, fullname=fullname)
 
 
 @router.get("/parts/", response_model=List[PartInventoryResponse])
@@ -267,6 +269,7 @@ async def get_part_inventory_endpoint(db: AsyncSession = Depends(get_db), curren
     for part in parts:
         result = await db.execute(
             select(HistoryModel)
+            .options(selectinload(HistoryModel.user))
             .where(HistoryModel.part_inventory_id == part.id)
             .order_by(desc(HistoryModel.created_at))
             .limit(1)
@@ -288,6 +291,7 @@ async def get_part_inventory_by_id(
 
     result = await db.execute(
         select(HistoryModel)
+        .options(selectinload(HistoryModel.user))
         .where(HistoryModel.part_inventory_id == db_part.id)
         .order_by(desc(HistoryModel.created_at))
         .limit(1)
@@ -301,7 +305,7 @@ async def get_part_inventory_by_id(
 
 
 @router.put("/parts/{part_id}", response_model=PartInventoryResponse)
-async def update_part_inventory(
+async def put_update_part_inventory(
     part_id: int,
     part: PartInventoryUpdate,
     db: AsyncSession = Depends(get_db),
@@ -313,6 +317,7 @@ async def update_part_inventory(
 
     result = await db.execute(
         select(HistoryModel)
+        .options(selectinload(HistoryModel.user))
         .where(HistoryModel.part_inventory_id == db_part.id)
         .order_by(desc(HistoryModel.created_at))
         .limit(1)
@@ -322,11 +327,11 @@ async def update_part_inventory(
     if latest_history and latest_history.user:
         fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
 
-    return PartInventoryResponse(**db_part.__dict__, fullname=fullname, comment=part.comment)
+    return PartInventoryResponse(**db_part.__dict__, fullname=fullname)
 
 
 @router.delete("/parts/{part_id}", response_model=dict)
-async def delete_part_inventory(
+async def delete_part_inventory_endpoint(
     part_id: int,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
@@ -351,6 +356,7 @@ async def update_part_status_endpoint(
 
     result = await db.execute(
         select(HistoryModel)
+        .options(selectinload(HistoryModel.user))
         .where(HistoryModel.part_inventory_id == db_part.id)
         .order_by(desc(HistoryModel.created_at))
         .limit(1)
@@ -360,7 +366,7 @@ async def update_part_status_endpoint(
     if latest_history and latest_history.user:
         fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
 
-    return PartInventoryResponse(**db_part.__dict__, fullname=fullname, comment=status_update.comment)
+    return PartInventoryResponse(**db_part.__dict__, fullname=fullname)
 
 
 @router.post("/parts/{part_id}/invoice", response_model=InvoiceResponse)

@@ -115,6 +115,7 @@ async def get_bidding_hub(
         vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
             db, page=page, page_size=page_size, current_user=current_user, sort_by=sort_by, sort_order=sort_order
         )
+        print(vehicles)
         if not vehicles:
             logger.info("No vehicles found in the bidding hub", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No vehicles found in the bidding hub")

@@ -243,7 +243,7 @@ class CarInventoryModel(Base):
 
     net_profit = Column(Float, nullable=True)
 
-    vehicle_cost = Column(Float, nullable=False)
+    vehicle_cost = Column(Float, nullable=True)
     parts_cost = Column(Float, nullable=True)
     maintenance = Column(Float, nullable=True)
     auction_fee = Column(Float, nullable=True)
@@ -262,7 +262,7 @@ class CarInventoryModel(Base):
     history = relationship("HistoryModel", back_populates="car_inventory", cascade="all, delete-orphan")
 
     @validates("vin")
-    def validate_and_set_stock(self, value):
+    def validate_and_set_stock(self, key, value):
         if value is not None:
             self.stock = value[-6:]
         return value
@@ -335,6 +335,7 @@ class PartInventoryModel(Base):
     supplier = Column(String, nullable=False)
     price = Column(Float, nullable=False)
     part_status = Column(Enum(PartInventoryStatus), nullable=False, default=PartInventoryStatus.PENDING_TO_ORDER)
+    comment = Column(String, nullable=True)
 
     invoices = relationship(
         "InvoiceModel", back_populates="part_inventory", cascade="all, delete-orphan"

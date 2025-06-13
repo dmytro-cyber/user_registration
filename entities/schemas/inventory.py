@@ -8,7 +8,7 @@ from models.vehicle import CarInventoryStatus, CarInventoryInvestmentsType, Part
 class CarInventoryBase(BaseModel):
     vehicle: str = Field(..., min_length=1)
     vin: str = Field(..., min_length=17, max_length=17)
-    vehicle_cost: float = Field(..., ge=0)
+    vehicle_cost: Optional[float] = Field(None, ge=0)
     parts_cost: Optional[float] = Field(None, ge=0)
     maintenance: Optional[float] = Field(None, ge=0)
     auction_fee: Optional[float] = Field(None, ge=0)
@@ -42,10 +42,10 @@ class CarInventoryResponse(CarInventoryBase):
     purchase_date: datetime
     stock: str
     net_profit: Optional[float]
-    total_investments: float
-    roi: float
-    profit_margin_percent: float
-    investments: List["CarInventoryInvestmentsResponse"]
+    total_investments: float = Field(None)
+    roi: float = Field(None)
+    profit_margin_percent: float = Field(None)
+    investments: List["CarInventoryInvestmentsResponse"] = Field(None)
     comment: Optional[str] = None  # Додано поле для коментаря
 
 
