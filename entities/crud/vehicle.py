@@ -259,6 +259,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     car.car_status = car_status
 
     if car.car_status == CarStatus.WON:
+        result = await db.execute(select(HistoryModel).where(HistoryModel.car_id == car_id))
         car_inventory_model = CarInventoryModel(
             car=car,
             vehicle=car.vehicle,
@@ -267,6 +268,10 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
             car_status=CarInventoryStatus.AWAITING_DELIVERY,
         )
         db.add(car_inventory_model)
+        await db.refresh(car_inventory_model)
+        for history in result.scalars().all():
+            history.car_inventory_id = car_inventory_model.id
+            db.add(history)
 
     await db.commit()
     await db.refresh(car)

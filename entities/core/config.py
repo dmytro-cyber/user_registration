@@ -73,10 +73,4 @@ class Settings(BaseAppSettings):
             return f"https://{self.S3_STORAGE_HOST}"
         return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        logger.info("Loaded settings:")
-        for key, value in self.dict().items():
-            logger.info(f"{key}: {value}")
-
 settings = Settings()

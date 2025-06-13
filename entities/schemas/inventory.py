@@ -22,19 +22,19 @@ class CarInventoryBase(BaseModel):
 
 
 class CarInventoryCreate(CarInventoryBase):
-    comment: Optional[str] = Field(None, min_length=1)
+    comment: str | None = None
 
 
 class CarInventoryUpdate(CarInventoryBase):
     vehicle: Optional[str] = Field(None, min_length=1)
     vin: Optional[str] = Field(None, min_length=17, max_length=17)
     car_status: Optional[CarInventoryStatus] = None
-    comment: Optional[str] = Field(None, min_length=1)
+    comment: str | None = None
 
 
 class CarInventoryUpdateStatus(BaseModel):
     status: CarInventoryStatus
-    comment: Optional[str] = Field(None, min_length=1)
+    comment: str | None = None
 
 
 class CarInventoryResponse(CarInventoryBase):
@@ -46,7 +46,7 @@ class CarInventoryResponse(CarInventoryBase):
     roi: float = Field(None)
     profit_margin_percent: float = Field(None)
     investments: List["CarInventoryInvestmentsResponse"] = Field(None)
-    comment: Optional[str] = None  # Додано поле для коментаря
+    comment: str | None = None
 
 
 class CarInventoryInvestmentsBase(BaseModel):
@@ -61,7 +61,7 @@ class CarInventoryInvestmentsBase(BaseModel):
 
 
 class CarInventoryInvestmentsCreate(CarInventoryInvestmentsBase):
-    comment: Optional[str] = Field(None, min_length=1)
+    comment: str | None = None
 
 
 class CarInventoryInvestmentsUpdate(CarInventoryInvestmentsBase):
@@ -70,14 +70,14 @@ class CarInventoryInvestmentsUpdate(CarInventoryInvestmentsBase):
     cost: Optional[float] = Field(None, ge=0)
     payment_method: Optional[str] = Field(None, min_length=1)
     investment_type: Optional[CarInventoryInvestmentsType] = None
-    comment: Optional[str] = Field(None, min_length=1)
+    comment: str | None = None
 
 
 class CarInventoryInvestmentsResponse(CarInventoryInvestmentsBase):
     id: int
     date: datetime
     car_inventory_id: int
-    comment: Optional[str] = None  # Додано поле для коментаря
+    comment: str | None = None
 
 
 class PartInventoryCreate(BaseModel):
@@ -85,7 +85,7 @@ class PartInventoryCreate(BaseModel):
     part_description: str
     supplier: str
     price: float
-    comment: Optional[str] = None
+    comment: str | None = None
 
     @validator("price")
     def validate_price(cls, value):
@@ -99,7 +99,7 @@ class PartInventoryUpdate(BaseModel):
     part_description: Optional[str] = None
     supplier: Optional[str] = None
     price: Optional[float] = None
-    comment: Optional[str] = None
+    comment: str | None = None
 
     @validator("price")
     def validate_price(cls, value):
@@ -117,7 +117,7 @@ class PartInventoryResponse(BaseModel):
     part_status: PartInventoryStatus
     invoices: List["InvoiceResponse"] = []
     fullname: Optional[str] = None
-    comment: Optional[str] = None
+    comment: str | None = None
 
     class Config:
         orm_mode = True
@@ -141,7 +141,7 @@ class HistoryResponse(BaseModel):
     car_id: Optional[int] = None
     car_inventory_id: Optional[int] = None
     part_inventory_id: Optional[int] = None
-    comment: Optional[str] = None
+    comment: str | None = None
 
     class Config:
         orm_mode = True
@@ -149,4 +149,4 @@ class HistoryResponse(BaseModel):
 
 class PartInventoryStatusUpdate(BaseModel):
     part_status: PartInventoryStatus
-    comment: Optional[str] = None
+    comment: str | None = None
