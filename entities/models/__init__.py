@@ -18,4 +18,3 @@ from .vehicle import CarInventoryInvestmentsModel as CarInventoryInvestmentsMode
 from .vehicle import PartInventoryModel as PartInventoryModel
 from .vehicle import AutoCheckModel as AutoCheckModel
 from .vehicle import FeeModel as FeeModel
-from .vehicle import CarStatus as CarStatus
