@@ -12,9 +12,9 @@ from fastapi.middleware.cors import CORSMiddleware
 app = FastAPI(title="My Async FastAPI Project")
 
 
-@app.on_event("startup")
-async def on_startup():
-    await create_roles()
+# @app.on_event("startup")
+# async def on_startup():
+#     await create_roles()
 
 
 app.add_middleware(
