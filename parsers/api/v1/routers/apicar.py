@@ -1,51 +1,56 @@
-from services.parsers.dc_scraper import DealerCenterScraper
-from fastapi import APIRouter, Depends, Query
-import asyncio
-from core.dependencies import get_token
-import httpx
 import os
 import json
+import logging
+from datetime import datetime
+import asyncio
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Query
+import httpx
+
+from services.parsers.dc_scraper import DealerCenterScraper
 from services.convert.vehicle import format_car_data
-
 from schemas.schemas import DCResponseSchema
+from core.dependencies import get_token
 
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()
+    ]
+)
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["apicar"])
-
 
 @router.get(
     "/apicar/get/{car_vin}",
     description="Get data from apicar",
 )
-async def scrape_dc(car_vin: str):
+async def get_sales_history(car_vin: str):
     """
     Get data from apicar.
     """
-    # url = f"https://api.apicar.store/api/car/vin/all?vin={car_vin}"
-    # print("Fetching data from API...")
-    # try:
-    #     response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
-    #     response.raise_for_status()
-    #     data = response.json()
-    # except httpx.HTTPError as e:
-    #     print(f"Failed to fetch API data: {e}")
-    #     return None
-    # result = format_car_data(data[0])
-    file_path = os.path.join("vin_all_response_ex.json")
-
-    with open(file_path, "r") as file:
-        data = json.load(file)
-
-    vehicle = data[0]
-    if not vehicle:
-        print("No 'data' key found in JSON")
+    logger.info(f"Received request to fetch sales history for VIN: {car_vin}")
+    
+    url = f"https://api.apicar.store/api/sale-histories/vin?vin={car_vin}"
+    logger.debug(f"Fetching data from URL: {url}")
+    
+    try:
+        response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
+        response.raise_for_status()
+        data = response.json()
+        logger.info(f"API response received: {json.dumps(data, indent=2)}")
+    except httpx.HTTPError as e:
+        logger.error(f"Failed to fetch API data for VIN {car_vin}: {e}")
         return None
 
-    print(f"Formatting vehicle with VIN: {vehicle.get('vin')}")
-    formatted_vehicle = format_car_data(vehicle)
+
+    formatted_vehicle = format_car_data(data.get("data"))
     adapted_vehicle = {
         "vin": formatted_vehicle["vin"],
-        "vehicle": formatted_vehicle["vehicle"],
+        "vehicle": formatted_vehicle.get("vehicle"),
         "year": formatted_vehicle.get("year"),
         "mileage": formatted_vehicle.get("mileage"),
         "auction": formatted_vehicle.get("auction"),
@@ -67,5 +72,7 @@ async def scrape_dc(car_vin: str):
         "photos": formatted_vehicle.get("photos", []),
         "sales_history": formatted_vehicle.get("sales_history", []),
     }
+    logger.info(f"SALESSSSS {adapted_vehicle.get('sales_history')}")
 
+    logger.info(f"Successfully processed data for VIN {car_vin}")
     return adapted_vehicle

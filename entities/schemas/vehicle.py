@@ -54,11 +54,11 @@ class ConditionAssessmentResponseSchema(BaseModel):
 
 
 class SalesHistoryBaseSchema(BaseModel):
-    date: datetime
-    source: str
-    lot_number: int
-    final_bid: int
-    status: str
+    date: datetime | None = None
+    source: str | None = None
+    lot_number: int | None = None
+    final_bid: int | None = None
+    status: str | None = None
 
 
 class CarDetailResponseSchema(BaseModel):
@@ -135,7 +135,7 @@ class PhotoSchema(BaseModel):
 
 class CarCreateSchema(BaseModel):
     vin: str
-    vehicle: str
+    vehicle: str | None = None
     year: int | None = None
     make: str | None = None
     model: str | None = None
@@ -150,10 +150,10 @@ class CarCreateSchema(BaseModel):
 
     accident_count: int | None = None
 
-    has_correct_vin: bool = False
-    has_correct_owners: bool = False
-    has_correct_accidents: bool = False
-    has_correct_mileage: bool = False
+    has_correct_vin: None | bool = False
+    has_correct_owners: None | bool = False
+    has_correct_accidents: None | bool = False
+    has_correct_mileage: None | bool = False
 
     current_bid: float | None = None
     actual_bid: float | None = None
@@ -171,7 +171,7 @@ class CarCreateSchema(BaseModel):
     parts_needed: str | None = None
 
     engine: float | None = None
-    has_keys: bool = False
+    has_keys: None | bool = False
 
     engine_cylinder: int | None = None
     drive_type: str | None = None

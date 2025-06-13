@@ -28,7 +28,10 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
     """Save sales history for a vehicle."""
     for history_data in sale_history_data:
         sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
+        if not sales_history.source:
+            sales_history.source = "Unknown"
         db.add(sales_history)
+        await db.commit()
 
 
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
