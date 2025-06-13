@@ -1,21 +1,31 @@
+import os
+import json
+import logging
 from datetime import datetime
 from typing import Dict, Any
 
+# Налаштування логування
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler()  # Вивід до консолі
+        # Додайте logging.FileHandler('data_processing.log') для логування у файл, якщо потрібно
+    ]
+)
+logger = logging.getLogger(__name__)
 
 def str_to_bool(value: str) -> bool:
     """Convert 'Yes'/'No' string to boolean."""
     return value.lower() == "yes"
 
-
 def is_salvage_from_document(document: str) -> bool:
     """Convert document field to boolean is_salvage."""
     return document.lower() == "salvage"
 
-
 def parse_auction_date(date_str: str) -> datetime:
     """Parse ISO 8601 date string to datetime."""
     return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-
 
 def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -27,7 +37,9 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict matching CarModel fields and types.
     """
-    
+    logger.info("Starting to format car data from API response")
+    logger.info(f"API response: {api_response}")
+
     field_mapping = {
         "vin": "vin",
         "title": "vehicle",
@@ -52,9 +64,8 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "transmission": "transmision",
         "vehicle_type": "vehicle_type",
     }
-    print("auction_dateeeeeeeee", api_response["auction_date"])
+    logger.info(f"some log")
 
-    # Конвертація типів для певних полів
     type_conversions = {
         "date": parse_auction_date,
         "bid": float,
@@ -63,7 +74,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "is_salvage": is_salvage_from_document,
     }
 
-    # Створюємо словник для CarModel
     car_data = {}
 
     # Зіставлення полів із конвертацією типів
@@ -71,57 +81,53 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         if api_field in api_response:
             value = api_response[api_field]
             if value is not None:
-                # Застосовуємо конвертацію типу, якщо потрібно
-                if model_field in type_conversions:
-                    car_data[model_field] = type_conversions[model_field](value)
-                else:
-                    car_data[model_field] = value
+                try:
+                    if model_field in type_conversions:
+                        car_data[model_field] = type_conversions[model_field](value)
+                        logger.debug(f"Converted {model_field} from {value} to {car_data[model_field]}")
+                    else:
+                        car_data[model_field] = value
+                        logger.debug(f"Set {model_field} to {value}")
+                except (ValueError, TypeError) as e:
+                    logger.warning(f"Failed to convert {model_field} from {value}: {e}")
+                    car_data[model_field] = value  # Зберігаємо як є у випадку помилки
 
     # Обов’язкові поля та значення за замовчуванням
     car_data.setdefault("has_correct_vin", False)
     car_data.setdefault("has_correct_owners", False)
     car_data.setdefault("has_correct_accidents", False)
     car_data.setdefault("has_correct_mileage", False)
+    logger.debug("Set default values for required fields")
+    logger.info(f"some log")
 
     # Поля, які відсутні у JSON
     optional_fields = [
-        "owners",
-        "accident_count",
-        "actual_bid",
-        "price_sold",
-        "suggested_bid",
-        "total_investment",
-        "net_profit",
-        "profit_margin",
-        "roi",
-        "parts_cost",
-        "maintenance",
-        "auction_fee",
-        "transportation",
-        "labor",
-        "parts_needed",
-        "predicted_roi",
-        "predicted_profit_margin",
-        "interior_color",
-        "style_id",
+        "owners", "accident_count", "actual_bid", "price_sold", "suggested_bid",
+        "total_investment", "net_profit", "profit_margin", "roi", "parts_cost",
+        "maintenance", "auction_fee", "transportation", "labor", "parts_needed",
+        "predicted_roi", "predicted_profit_margin", "interior_color", "style_id",
     ]
     for field in optional_fields:
         car_data.setdefault(field, None)
+    logger.debug(f"Set default None for optional fields: {optional_fields}")
 
     # Обробка is_salvage
     if "document" in api_response:
         car_data["is_salvage"] = is_salvage_from_document(api_response["document"])
+        logger.debug(f"Set is_salvage to {car_data['is_salvage']} based on document")
 
     # Відношення
-    car_data["parts"] = []  # Немає даних у JSON
-    car_data["sales_history"] = []  # Немає даних у JSON
+    car_data["parts"] = []
+    car_data["sales_history"] = []
+    logger.debug("Initialized parts and sales_history as empty lists")
 
     # Photos
     car_data["photos"] = [{"url": url} for url in api_response.get("link_img_small", [])]
     car_data["photos_hd"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
+    logger.debug(f"Processed photos: {len(car_data['photos'])} small, {len(car_data['photos_hd'])} HD")
 
     # Sales history
-    if "sale_history" in api_response:
+    if api_response.get("sale_history"):
         car_data["sales_history"] = [
             {
                 "date": parse_auction_date(item["sale_date"]),
@@ -132,6 +138,9 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
             }
             for item in api_response["sale_history"]
         ]
+        logger.info(f"Processed {len(car_data['sales_history'])} sales history entries")
+    else:
+        logger.info("No sales history found in API response")
 
     # Condition Assessment
     condition_assessments = []
@@ -140,5 +149,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     if "damage_sec" in api_response:
         condition_assessments.append({"type_of_damage": "damage_sec", "issue_description": api_response["damage_sec"]})
     car_data["condition_assessments"] = condition_assessments
+    logger.debug(f"Processed {len(condition_assessments)} condition assessments")
 
+    logger.info("Successfully formatted car data")
     return car_data

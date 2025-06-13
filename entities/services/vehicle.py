@@ -124,6 +124,7 @@ async def scrape_and_save_sales_history(car: CarModel, db: AsyncSession, setting
         response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{car.vin}")
         response.raise_for_status()
         result = CarCreateSchema.model_validate(response.json())
+        logger.info(f"Successfully scraped sales history data {result.sales_history}")
         await save_sale_history(result.sales_history, car.id, db)
 
         updated_car = await get_vehicle_by_id(db, car.id)
