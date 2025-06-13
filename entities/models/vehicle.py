@@ -169,7 +169,7 @@ class CarSaleHistoryModel(Base):
     id = Column(Integer, primary_key=True, index=True)
     car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
     date = Column(DateTime, nullable=False)
-    source = Column(String, nullable=False)
+    source = Column(String, nullable=True)
     lot_number = Column(Integer, nullable=False)
     final_bid = Column(Integer, nullable=True)
     status = Column(String, nullable=True)  # "Sold" or "No Sale"
