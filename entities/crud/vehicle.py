@@ -1,3 +1,4 @@
+from datetime import datetime, time, timezone
 from typing import List, Dict, Any, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, asc, desc, delete
@@ -132,7 +133,15 @@ async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], page: int, page_size: int
 ) -> tuple[List[CarModel], int, int]:
     """Get filtered vehicles with pagination."""
-    query = select(CarModel).options(selectinload(CarModel.photos))
+
+    today = datetime.now(timezone.utc).date()
+    today_naive = datetime.combine(today, time.min)
+
+    query = (
+        select(CarModel)
+        .options(selectinload(CarModel.photos))
+        .filter(CarModel.date >= today_naive)
+    )
 
     if "make" in filters and filters["make"]:
         query = query.filter(CarModel.make.in_(filters["make"]))
