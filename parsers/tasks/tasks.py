@@ -135,7 +135,6 @@ def fetch_api_data():
                 response.raise_for_status()
                 api_response = response.json()
                 data = api_response.get("data", [])
-                print(f"Fetched {data}.")
             except httpx.HTTPError as e:
                 logger.error(f"Failed to fetch API data for filter {filter_id} on page {page}: {e}")
                 break

@@ -38,7 +38,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         Dict matching CarModel fields and types.
     """
     logger.info("Starting to format car data from API response")
-    logger.info(f"API response: {api_response}")
 
     field_mapping = {
         "vin": "vin",
@@ -76,7 +75,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
 
     car_data = {}
 
-    # Зіставлення полів із конвертацією типів
     for api_field, model_field in field_mapping.items():
         if api_field in api_response:
             value = api_response[api_field]
@@ -92,7 +90,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
                     logger.warning(f"Failed to convert {model_field} from {value}: {e}")
                     car_data[model_field] = value  # Зберігаємо як є у випадку помилки
 
-    # Обов’язкові поля та значення за замовчуванням
     car_data.setdefault("has_correct_vin", False)
     car_data.setdefault("has_correct_owners", False)
     car_data.setdefault("has_correct_accidents", False)
@@ -100,7 +97,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     logger.debug("Set default values for required fields")
     logger.info(f"some log")
 
-    # Поля, які відсутні у JSON
     optional_fields = [
         "owners", "accident_count", "actual_bid", "price_sold", "suggested_bid",
         "total_investment", "net_profit", "profit_margin", "roi", "parts_cost",
@@ -111,22 +107,18 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         car_data.setdefault(field, None)
     logger.debug(f"Set default None for optional fields: {optional_fields}")
 
-    # Обробка is_salvage
     if "document" in api_response:
         car_data["is_salvage"] = is_salvage_from_document(api_response["document"])
         logger.debug(f"Set is_salvage to {car_data['is_salvage']} based on document")
 
-    # Відношення
     car_data["parts"] = []
     car_data["sales_history"] = []
     logger.debug("Initialized parts and sales_history as empty lists")
 
-    # Photos
     car_data["photos"] = [{"url": url} for url in api_response.get("link_img_small", [])]
     car_data["photos_hd"] = [{"url": url} for url in api_response.get("link_img_hd", [])]
     logger.debug(f"Processed photos: {len(car_data['photos'])} small, {len(car_data['photos_hd'])} HD")
 
-    # Sales history
     if api_response.get("sale_history"):
         car_data["sales_history"] = [
             {
@@ -138,9 +130,9 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
             }
             for item in api_response["sale_history"]
         ]
-        logger.info(f"Processed {len(car_data['sales_history'])} sales history entries")
+        logger.debug(f"Processed {len(car_data['sales_history'])} sales history entries")
     else:
-        logger.info("No sales history found in API response")
+        logger.debug("No sales history found in API response")
 
     # Condition Assessment
     condition_assessments = []

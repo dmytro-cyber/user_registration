@@ -29,10 +29,12 @@ router = APIRouter(prefix="/parsers", tags=["parsers"])
 )
 async def scrape_dc(
     car_vin: str = Query(..., description="VIN of the car to scrape"),
+    car_name: str = Query(None, description="Name of the car (optional)"),
+    car_engine: str = Query(None, description="Engine type of the car (optional)"),
 ):
     logger.info(f"Starting scrape for VIN {car_vin}")
     try:
-        scraper = DealerCenterScraper(car_vin)
+        scraper = DealerCenterScraper(car_vin, car_name=car_name, car_engine=car_engine)
         result = await asyncio.to_thread(scraper.scrape)
         logger.info(f"Successfully scraped data for VIN {car_vin}")
         return DCResponseSchema(**result)

@@ -23,10 +23,11 @@ from crud.inventory import (
     upload_invoice,
     delete_invoice,
     update_part_status,
-    create_car_inventory,  # Додано імпорт
+    create_car_inventory,
 )
+from models.user import UserModel
 from schemas.inventory import (
-    CarInventoryCreate,  # Додано імпорт
+    CarInventoryCreate,
     CarInventoryUpdate,
     CarInventoryUpdateStatus,
     CarInventoryResponse,
@@ -40,6 +41,11 @@ from schemas.inventory import (
     PartInventoryStatusUpdate,
     InvoiceResponse,
 )
+from schemas.vehicle import (
+    BiddingHubHistoryListResponseSchema,
+    BiddingHubHistorySchema,
+)
+from schemas.user import UserResponseSchema
 from models.vehicle import PartInventoryModel, HistoryModel
 from models.user import UserModel
 from db.session import get_db
@@ -67,13 +73,16 @@ async def read_inventories(
     for inventory in inventories:
         result = await db.execute(
             select(HistoryModel)
+            .options(selectinload(HistoryModel.user))
             .where(HistoryModel.car_inventory_id == inventory.id)
             .order_by(desc(HistoryModel.created_at))
             .limit(1)
         )
         latest_history = result.scalars().first()
-        comment = latest_history.comment if latest_history else None
-        responses.append(CarInventoryResponse(**inventory.__dict__, comment=comment))
+        fullname = None
+        if latest_history and latest_history.user:
+            fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
+        responses.append(CarInventoryResponse(**inventory.__dict__, fullname=fullname))
     return responses
 
 
@@ -421,3 +430,149 @@ async def get_invoices_by_part_id(
 
     invoices = db_part.invoices
     return invoices
+
+
+@router.get(
+    "vehicles/history/{car_inventory_id}",
+    response_model=BiddingHubHistoryListResponseSchema,
+    summary="Get bidding hub history for a vehicle",
+    description="Retrieve the bidding hub history for a vehicle by its ID, including full user details, ordered by creation date (descending).",
+)
+async def get_car_inventory_history(
+    car_inventory_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BiddingHubHistoryListResponseSchema:
+    """
+    Get bidding hub history for a vehicle by ID, including full user details.
+
+    Args:
+        car_inventory_id (int): The ID of the vehicle to fetch history for.
+        current_user (Settings): The currently authenticated user.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        BiddingHubHistoryListResponseSchema: The history of bidding actions for the vehicle.
+
+    Raises:
+        HTTPException: 404 if no bidding history is found for the vehicle.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
+
+    try:
+        stmt = (
+            select(HistoryModel)
+            .where(HistoryModel.car_inventory_id == car_inventory_id)
+            .options(selectinload(HistoryModel.user).selectinload(UserModel.role))
+            .order_by(HistoryModel.created_at.desc())
+        )
+        result = await db.execute(stmt)
+        history_list = result.scalars().all()
+        if not history_list:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle"
+            )
+        return BiddingHubHistoryListResponseSchema(
+            history=[
+                BiddingHubHistorySchema(
+                    id=item.id,
+                    action=item.action,
+                    user=(
+                        UserResponseSchema(
+                            email=item.user.email,
+                            first_name=item.user.first_name,
+                            last_name=item.user.last_name,
+                            phone_number=item.user.phone_number,
+                            date_of_birth=item.user.date_of_birth,
+                            role=item.user.role.name if item.user.role else None,
+                        )
+                        if item.user
+                        else None
+                    ),
+                    comment=item.comment,
+                    created_at=item.created_at,
+                )
+                for item in history_list
+            ]
+        )
+    except HTTPException as e:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching bidding history",
+        )
+        
+
+@router.get(
+    "vehicles/history/{part_inventory_id}",
+    response_model=BiddingHubHistoryListResponseSchema,
+    summary="Get bidding hub history for a vehicle",
+    description="Retrieve the bidding hub history for a vehicle by its ID, including full user details, ordered by creation date (descending).",
+)
+async def get_part_inventory_history(
+    part_inventory_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> BiddingHubHistoryListResponseSchema:
+    """
+    Get bidding hub history for a vehicle by ID, including full user details.
+
+    Args:
+        part_inventory_id (int): The ID of the vehicle to fetch history for.
+        current_user (Settings): The currently authenticated user.
+        db (AsyncSession): The database session dependency.
+
+    Returns:
+        BiddingHubHistoryListResponseSchema: The history of bidding actions for the vehicle.
+
+    Raises:
+        HTTPException: 404 if no bidding history is found for the vehicle.
+    """
+    request_id = "N/A"  # No request object available here
+    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
+
+    try:
+        stmt = (
+            select(HistoryModel)
+            .where(HistoryModel.part_inventory_id == part_inventory_id)
+            .options(selectinload(HistoryModel.user).selectinload(UserModel.role))
+            .order_by(HistoryModel.created_at.desc())
+        )
+        result = await db.execute(stmt)
+        history_list = result.scalars().all()
+        if not history_list:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle"
+            )
+        return BiddingHubHistoryListResponseSchema(
+            history=[
+                BiddingHubHistorySchema(
+                    id=item.id,
+                    action=item.action,
+                    user=(
+                        UserResponseSchema(
+                            email=item.user.email,
+                            first_name=item.user.first_name,
+                            last_name=item.user.last_name,
+                            phone_number=item.user.phone_number,
+                            date_of_birth=item.user.date_of_birth,
+                            role=item.user.role.name if item.user.role else None,
+                        )
+                        if item.user
+                        else None
+                    ),
+                    comment=item.comment,
+                    created_at=item.created_at,
+                )
+                for item in history_list
+            ]
+        )
+    except HTTPException as e:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error fetching bidding history",
+        )

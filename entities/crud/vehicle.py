@@ -277,6 +277,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
             car_status=CarInventoryStatus.AWAITING_DELIVERY,
         )
         db.add(car_inventory_model)
+        await db.commit()
         await db.refresh(car_inventory_model)
         for history in result.scalars().all():
             history.car_inventory_id = car_inventory_model.id

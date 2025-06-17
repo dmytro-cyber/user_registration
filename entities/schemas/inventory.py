@@ -46,7 +46,7 @@ class CarInventoryResponse(CarInventoryBase):
     roi: float = Field(None)
     profit_margin_percent: float = Field(None)
     investments: List["CarInventoryInvestmentsResponse"] = Field(None)
-    comment: str | None = None
+    fullname: Optional[str] = None
 
 
 class CarInventoryInvestmentsBase(BaseModel):
