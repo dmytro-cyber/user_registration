@@ -85,6 +85,7 @@ class CarDetailResponseSchema(BaseModel):
     owners: int | None = None
     accident_count: int | None = None
     link: str | None = None
+    location: str | None = None
 
     photos: List[str] = []
 
