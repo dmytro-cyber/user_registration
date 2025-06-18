@@ -37,7 +37,27 @@ class CarInventoryUpdateStatus(BaseModel):
     comment: str | None = None
 
 
-class CarInventoryResponse(CarInventoryBase):
+class CarInventoryResponse(BaseModel):
+    stock: str
+    vehicle: str = Field(..., min_length=1)
+    vin: str = Field(..., min_length=17, max_length=17)
+    
+    purchase_date: datetime
+    
+    net_profit: Optional[float]
+    total_investments: float = Field(None)
+    roi: float = Field(None)
+    profit_margin_percent: float = Field(None)
+    total_investments: float = Field(None)
+    fullname: Optional[str] = None
+    id: int
+    car_id: int
+
+    class Config:
+        orm_mode = True
+
+
+class CarInventoryDetailResponse(CarInventoryBase):
     id: int
     purchase_date: datetime
     stock: str
@@ -47,6 +67,10 @@ class CarInventoryResponse(CarInventoryBase):
     profit_margin_percent: float = Field(None)
     investments: List["CarInventoryInvestmentsResponse"] = Field(None)
     fullname: Optional[str] = None
+    car_id: int
+
+    class Config:
+        orm_mode = True
 
 
 class CarInventoryInvestmentsBase(BaseModel):
