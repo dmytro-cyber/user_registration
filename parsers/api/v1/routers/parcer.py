@@ -14,6 +14,10 @@ from schemas.schemas import (
 )
 import logging
 import json
+from concurrent.futures import ThreadPoolExecutor
+
+router = APIRouter()
+executor = ThreadPoolExecutor()
 
 
 logger = logging.getLogger(__name__)
@@ -69,8 +73,9 @@ async def scrape_fees():
     logger.info("Starting scrape for fees")
     try:
         # Placeholder for actual fee scraping logic
-        copart_fees = await scrape_copart_fees()
-        iaai_fees = await scrape_iaai_fees()
+        loop = asyncio.get_running_loop()
+        copart_fees = await loop.run_in_executor(executor, scrape_copart_fees)
+        iaai_fees = await loop.run_in_executor(executor, scrape_iaai_fees)
         fees = {"copart": copart_fees, "iaai": iaai_fees}  # Example data
         logger.info("Successfully scraped fees")
         return {"fees": fees}

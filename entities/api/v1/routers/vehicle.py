@@ -4,6 +4,7 @@ import logging.handlers
 import os
 from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 from schemas.vehicle import (
     CarBaseSchema,
     CarListResponseSchema,
@@ -15,6 +16,7 @@ from schemas.vehicle import (
     CarFilterOptionsSchema,
 )
 from models.vehicle import CarModel
+from models.user import UserModel
 from sqlalchemy import select, func, distinct
 from core.config import Settings
 from core.dependencies import get_settings, get_token, get_current_user
@@ -243,10 +245,12 @@ async def get_cars(
     make: List[str] = Query(None, description="Make"),
     model: List[str] = Query(None, description="Model"),
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
+    liked: bool = Query(False, description="Filter by liked cars"),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
+    current_user: UserModel = Depends(get_current_user)
 ) -> CarListResponseSchema:
     """
     Retrieve a paginated list of cars based on filters.
@@ -290,6 +294,8 @@ async def get_cars(
         "max_year": max_year,
         "make": make,
         "model": model,
+        "liked": liked,
+        "user_id": current_user.id if current_user else None,
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
 
@@ -610,3 +616,34 @@ async def bulk_create_cars(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error during bulk creation",
         )
+
+
+@router.post("/cars/{car_id}/like-toggle")
+async def toggle_like(
+    car_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    car_result = await db.execute(select(CarModel).where(CarModel.id == car_id))
+    car = car_result.scalar_one_or_none()
+
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    user_result = await db.execute(
+        select(UserModel)
+        .options(selectinload(UserModel.liked_cars))
+        .where(UserModel.id == current_user.id)
+    )
+    user = user_result.scalar_one()
+
+    if car in user.liked_cars:
+        user.liked_cars.remove(car)
+        await db.commit()
+        return {"detail": "Unliked"}
+    else:
+        user.liked_cars.append(car)
+        await db.commit()
+        return {"detail": "Liked"}
+
+

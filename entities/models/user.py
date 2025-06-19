@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timedelta, timezone, date
 from typing import List
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Enum, Date
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Enum, Date, Column, Table
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from models import Base
@@ -30,6 +30,14 @@ class UserRoleModel(Base):
         return f"<UserRoleModel(id={self.id}, name={self.name})>"
 
 
+user_likes = Table(
+    "user_likes",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("car_id", Integer, ForeignKey("cars.id"), primary_key=True),
+)
+
+
 class UserModel(Base):
     __tablename__ = "users"
 
@@ -45,6 +53,7 @@ class UserModel(Base):
     history = relationship("HistoryModel", back_populates="user", cascade="all, delete-orphan")
     role_id: Mapped[int] = mapped_column(ForeignKey("user_roles.id", ondelete="CASCADE"), nullable=False)
     role: Mapped["UserRoleModel"] = relationship("UserRoleModel", back_populates="users")
+    liked_cars = relationship("CarModel", secondary=user_likes, back_populates="liked_by")
 
     def __repr__(self):
         return f"<UserModel(id={self.id}, email={self.email})>"
@@ -85,3 +94,12 @@ class UserModel(Base):
     @validates("email")
     def validate_email(self, key, value):
         return validators.validate_email(value.lower())
+
+
+user_likes = Table(
+    "user_likes",
+    Base.metadata,
+    Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
+    Column("car_id", Integer, ForeignKey("cars.id"), primary_key=True),
+    extend_existing=True,
+)

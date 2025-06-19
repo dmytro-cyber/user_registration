@@ -16,7 +16,7 @@ from models.vehicle import (
     CarInventoryModel,
     FeeModel,
 )
-from models.user import UserModel, UserRoleEnum
+from models.user import UserModel, UserRoleEnum, user_likes
 from schemas.vehicle import CarCreateSchema
 from fastapi import HTTPException
 import logging
@@ -165,6 +165,13 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.year >= filters["min_year"])
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
+    if "liked" in filters and filters["liked"]:
+        user_id = filters.get("user_id")
+        if user_id is not None:
+            query = query.join(user_likes, CarModel.id == user_likes.c.car_id)
+            query = query.filter(user_likes.c.user_id == user_id)
+        else:
+            raise ValueError("user_id is required when filtering by liked=True")
 
     total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
     total_pages = (total_count + page_size - 1) // page_size

@@ -211,6 +211,6 @@ async def _update_car_fees_async():
             raise
 
 
-@app.task(name="tasks.task.update_car_fees")
+@app.task(name="tasks.task.update_fees")
 def update_car_fees():
     return anyio.run(_update_car_fees_async)

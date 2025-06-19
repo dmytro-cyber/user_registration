@@ -50,6 +50,7 @@ class CarInventoryResponse(BaseModel):
     profit_margin_percent: float = Field(None)
     total_investments: float = Field(None)
     fullname: Optional[str] = None
+    car_status: str = Field(..., min_length=1)
     id: int
     car_id: int
 

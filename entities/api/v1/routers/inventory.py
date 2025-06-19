@@ -40,6 +40,7 @@ from schemas.inventory import (
     HistoryResponse,
     PartInventoryStatusUpdate,
     InvoiceResponse,
+    CarInventoryDetailResponse
 )
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
@@ -86,7 +87,7 @@ async def read_inventories(
     return responses
 
 
-@router.get("/vehicles/{inventory_id}", response_model=CarInventoryResponse)
+@router.get("/vehicles/{inventory_id}", response_model=CarInventoryDetailResponse)
 async def read_inventory(
     inventory_id: int, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
 ):
@@ -102,7 +103,7 @@ async def read_inventory(
     )
     latest_history = result.scalars().first()
     comment = latest_history.comment if latest_history else None
-    return CarInventoryResponse(**inventory.__dict__, comment=comment)
+    return CarInventoryDetailResponse(**inventory.__dict__, comment=comment)
 
 
 @router.put("/vehicles/{inventory_id}", response_model=CarInventoryResponse)

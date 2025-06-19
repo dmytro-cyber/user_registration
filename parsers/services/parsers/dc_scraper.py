@@ -17,6 +17,7 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 import undetected_chromedriver as uc
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.common.action_chains import ActionChains
 import logging
 
 # Configure logging
@@ -118,8 +119,8 @@ class DealerCenterScraper:
         self.vin = vin
         self.vehicle_name = vehicle_name
         self.engine = engine
-        # self.proxy_host = os.getenv("PROXY_HOST")
-        # self.proxy_port = os.getenv("PROXY_PORT")
+        self.proxy_host = os.getenv("PROXY_HOST")
+        self.proxy_port = os.getenv("PROXY_PORT")
         self.cookies_file = "cookies.json"
         self.driver = self._init_driver()
         self.wait = WebDriverWait(self.driver, 10)  # Reduced default timeout to 10 seconds
@@ -128,7 +129,7 @@ class DealerCenterScraper:
     def _init_driver(self):
         """Initialize the Chrome driver with specified options."""
         chrome_options = Options()
-        # chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
+        chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-insecure-localhost")
         chrome_options.add_argument("--disable-web-security")
@@ -287,10 +288,38 @@ class DealerCenterScraper:
                 except:
                     pass
 
+    from selenium.webdriver.common.action_chains import ActionChains
+    from selenium.webdriver.support import expected_conditions as EC
+    from selenium.webdriver.common.by import By
+
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
         time.sleep(4)
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
+        try:
+            # Очікуємо наявності батьківського елемента меню
+            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
+            # Наводимо мишу на батьківський елемент для розгортання меню
+            ActionChains(self.driver).move_to_element(drawer_element).perform()
+            time.sleep(1)  # Додаємо затримку для розгортання
+
+            # Очікуємо, поки елемент "Inventory" стане видимим
+            inventory_element = self.wait.until(
+                EC.visibility_of_element_located((By.XPATH, "//li[@aria-label='Inventory']"))
+            )
+            # Наводимо мишу безпосередньо на елемент "Inventory"
+            ActionChains(self.driver).move_to_element(inventory_element).perform()
+            time.sleep(0.5)  # Коротка затримка для стабільності
+
+            # Клікаємо на елемент "Inventory" після розгортання
+            inventory_element.click()
+        except Exception as e:
+            logging.error(f"Failed to interact with Inventory menu: {str(e)}")
+            # Логування розмітки для діагностики
+            with open("page_source.html", "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+            logging.info("Page source saved to page_source.html")
+            raise
+
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         time.sleep(4)
         elements = self.wait.until(
@@ -312,7 +341,7 @@ class DealerCenterScraper:
                 width: rect.width,
                 height: rect.height
             };
-        """,
+            """,
             iframe,
         )
 
@@ -434,11 +463,34 @@ class DealerCenterScraper:
 
     def get_market_data(self, odometer_value):
         """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
-        self.wait.until(EC.element_to_be_clickable((By.XPATH, "//div[contains(text(),'Inventory')]"))).click()
+        try:
+            # Очікуємо наявності батьківського елемента меню
+            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
+            # Наводимо мишу на батьківський елемент для розгортання меню
+            ActionChains(self.driver).move_to_element(drawer_element).perform()
+            time.sleep(1)  # Затримка для розгортання меню
+
+            # Очікуємо, поки елемент "Inventory" стане видимим
+            inventory_element = self.wait.until(
+                EC.visibility_of_element_located((By.XPATH, "//li[@aria-label='Inventory']"))
+            )
+            # Наводимо мишу на елемент "Inventory"
+            ActionChains(self.driver).move_to_element(inventory_element).perform()
+            time.sleep(0.5)  # Коротка затримка для стабільності
+
+            # Клікаємо на елемент "Inventory"
+            inventory_element.click()
+        except Exception as e:
+            logging.error(f"Failed to interact with Inventory menu: {str(e)}")
+            with open("page_source.html", "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+            logging.info("Page source saved to page_source.html")
+            raise
+
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
         ).click()
-        time.sleep(3)
+        time.sleep(4)
         vin_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
         )
@@ -447,15 +499,14 @@ class DealerCenterScraper:
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
         )
         odometer_input.click()
-        # self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]")))
         max_attempts = 5
         attempts = 0
         while attempts < max_attempts:
             try:
                 self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'car-wrap')]")))
                 option_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'car-wrap')]//h6")
-                logging.info(f"fffffff: {option_elements}")
                 options = [elem.text.strip() for elem in option_elements if elem.text.strip()]
+                options.append("automatic")
 
                 if not options:
                     logging.info("No options found, proceeding with 'Next' button.")
@@ -478,69 +529,128 @@ class DealerCenterScraper:
 
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))).click()
 
-                time.sleep(2)
                 attempts += 1
 
             except TimeoutException:
                 logging.info("No more option selection windows found, proceeding.")
                 break
+
+        # Додатковий етап: обробка чекбокса
+        try:
+            # Очікуємо наявності чекбокса
+            checkbox_element = WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located(
+                    (By.XPATH, "//input[@type='checkbox' and contains(@class, 'k-checkbox')]"))
+            )
+            # Перевіряємо, чи чекбокс видимий і клікабельний
+            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(checkbox_element))
+            # Клікаємо по чекбоксу, якщо він ще не позначений
+            if not checkbox_element.is_selected():
+                checkbox_element.click()
+                logging.info("Checkbox selected.")
+            else:
+                logging.info("Checkbox is already selected.")
+
+            # Очікуємо і натискаємо кнопку "Next" після чекбокса
+            next_button = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))
+            )
+            next_button.click()
+            logging.info("Clicked 'Next' after checkbox.")
+            time.sleep(2)  # Затримка для завантаження наступної сторінки
+
+        except TimeoutException:
+            logging.info("No checkbox or 'Next' button found after car options, proceeding.")
+        except Exception as e:
+            logging.error(f"Failed to handle checkbox or 'Next' button: {str(e)}")
+            with open("page_source.html", "w", encoding="utf-8") as f:
+                f.write(self.driver.page_source)
+            logging.info("Page source saved to page_source.html")
+
         time.sleep(2)
         odometer_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
         )
         odometer_input.send_keys(str(odometer_value))
-        self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
-        ).click()
-        # Added 2-second delay after the first "Books" click to allow page update
-        time.sleep(3)
+        odometer_input.click()
+        time.sleep(5)
+
+        # Дочекатися зникнення оверлея перед кліком на "Books"
+        WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
+
+        # self.wait.until(
+        #     EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
+        # ).click()
+        # time.sleep(3)
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
         ).click()
 
-        # J.D. Power
+        # Дочекатися зникнення оверлея перед кліком на "J.D. Power"
+        WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
+
         self.wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
             )
         ).click()
+        time.sleep(1)
+        try:
+            self.wait.until(
+                EC.element_to_be_clickable(
+                    (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
+                )
+            ).click()
+        except:
+            logging.info("No J.D. Power option selected, proceeding.")
+        logging.info("Clicked 'J.D. Power' button.")
         retail_value = self.wait.until(
             EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
         ).get_attribute("aria-valuenow")
 
-        # Manheim
+        try:
+            WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
+        except:
+            logging.info("k-overlay elements not found, proceeding.")
+
         self.wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Manheim')]")
             )
         ).click()
         time.sleep(1)
-        manheim = (
-            self.wait.until(
-                EC.presence_of_element_located(
-                    (
-                        By.XPATH,
-                        "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]",
+        try:
+            logging.info("Clicked 'Manheim' button.")
+            time.sleep(1)
+            manheim = (
+                self.wait.until(
+                    EC.presence_of_element_located(
+                        (
+                            By.XPATH,
+                            "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]",
+                        )
                     )
                 )
-            )
-            .text.strip()
-            .replace("$", "")
-            .replace(",", "")
-        )
+                .text.strip()
+                .replace("$", "")
+                .replace(",", "")
+            ) or None
+        except:
+            manheim = None
 
-        # Market Data
+        # # Дочекатися зникнення оверлея перед кліком на "Market Data"
+        # WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
+
         self.wait.until(
             EC.element_to_be_clickable(
                 (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
             )
         ).click()
+        logging.info("Clicked 'Market Data' button.")
         time.sleep(0.5)
 
-        # Create a shorter wait for the market data elements
-        short_wait = WebDriverWait(self.driver, 5)  # Reduced timeout to 5 seconds
+        short_wait = WebDriverWait(self.driver, 5)
 
-        # Extract price value
         try:
             price_tooltip_element = short_wait.until(
                 EC.presence_of_element_located(
@@ -554,7 +664,6 @@ class DealerCenterScraper:
         except (TimeoutException, NoSuchElementException):
             price_value = None
 
-        # Wait for the main container of the market data elements to ensure the page is loaded
         short_wait.until(
             EC.presence_of_element_located(
                 (
@@ -564,7 +673,6 @@ class DealerCenterScraper:
             )
         )
 
-        # Extract all market data elements in one go
         year_value = None
         make_value = None
         model_value = None
@@ -679,3 +787,14 @@ class DealerCenterScraper:
             "body_style": body_style,
             "screenshot": screenshot_base64,
         }
+
+
+if __name__ == "__main__":
+    vin = "1B7GL2AN81S127838"
+    name = "2001 DODGE DAKOTA SLT/SPORT"
+    engine = "4.7l v-8 235hp"
+    dc = DealerCenterScraper(vin = vin, vehicle_name = name, engine = engine)
+    result = dc.scrape()
+    for k, v in result.items():
+        if len(str(v)) < 100:
+            print(f"{k}: {v}")

@@ -3,6 +3,7 @@ from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from models import Base
 import enum
+from models.user import user_likes
 
 
 class RecommendationStatus(enum.Enum):
@@ -115,6 +116,7 @@ class CarModel(Base):
         "ConditionAssessmentModel", back_populates="car", cascade="all, delete-orphan"
     )
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
+    liked_by = relationship("UserModel", secondary=user_likes, back_populates="liked_cars")
 
     @property
     def engine_and_cylinder(self) -> str:

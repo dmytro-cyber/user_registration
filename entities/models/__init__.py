@@ -5,6 +5,7 @@ Base = declarative_base()
 from .user import UserModel as UserModel
 from .user import UserRoleModel as UserRoleModel
 from .user import UserRoleEnum as UserRoleEnum
+from .user import user_likes as user_likes
 from .vehicle import HistoryModel as HistoryModel
 from .vehicle import PhotoModel as PhotoModel
 from .vehicle import CarModel as CarModel
@@ -19,3 +20,5 @@ from .vehicle import PartInventoryModel as PartInventoryModel
 from .vehicle import AutoCheckModel as AutoCheckModel
 from .vehicle import FeeModel as FeeModel
 from .vehicle import CarStatus as CarStatus
+
+
