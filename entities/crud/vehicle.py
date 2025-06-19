@@ -15,6 +15,7 @@ from models.vehicle import (
     CarInventoryStatus,
     CarInventoryModel,
     FeeModel,
+    RecommendationStatus,
 )
 from models.user import UserModel, UserRoleEnum, user_likes
 from schemas.vehicle import CarCreateSchema
@@ -27,6 +28,12 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 
 async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: int, db: AsyncSession) -> None:
     """Save sales history for a vehicle."""
+    if len(sale_history_data) >= 3:
+        logger.debug(f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase.")
+        car = get_vehicle_by_id(db, car_id)
+        car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
+        db.add(car)
+        await db.commit()
     for history_data in sale_history_data:
         sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
         if not sales_history.source:

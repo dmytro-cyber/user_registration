@@ -38,7 +38,7 @@ async def scrape_dc(
 ):
     logger.info(f"Starting scrape for VIN {car_vin}")
     try:
-        scraper = DealerCenterScraper(car_vin, car_name=car_name, car_engine=car_engine)
+        scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
         result = await asyncio.to_thread(scraper.scrape)
         logger.info(f"Successfully scraped data for VIN {car_vin}")
         return DCResponseSchema(**result)

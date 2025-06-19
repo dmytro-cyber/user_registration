@@ -62,11 +62,22 @@ class IAABuyerFeeScraper:
             html_path = f"captcha_debug_html_attempt_{attempt + 1}.html"
             self.page.screenshot(path=screenshot_path)
             logger.info(f"Saved screenshot as {screenshot_path} for debugging.")
-            with open(html_path, "w", encoding="utf-8") as f:
-                f.write(self.page.content())
-            logger.info(f"Saved HTML as {html_path} for debugging.")
 
-            # Extended selectors for hCaptcha detection
+            # Detect and switch to the main iframe
+            captcha_iframe = self.page.query_selector('#main-iframe')
+            if captcha_iframe:
+                self.page.frame(captcha_iframe)
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(self.page.content())
+                logger.info(f"Saved iframe HTML as {html_path} for debugging.")
+                # Switch back to main frame
+                self.page.frames()[0]  # Back to main content
+            else:
+                with open(html_path, "w", encoding="utf-8") as f:
+                    f.write(self.page.content())
+                logger.info(f"Saved main page HTML as {html_path} for debugging (no iframe found).")
+
+            # Extended selectors for hCaptcha detection (run within the iframe context if switched)
             captcha_detected = self.page.evaluate(
                 """() => {
                     const selectors = [

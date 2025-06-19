@@ -30,6 +30,9 @@ class CarBaseSchema(BaseModel):
     suggested_bid: float | None
     location: str | None
     photos: List[str]
+    has_correct_mileage: bool = True
+    has_correct_vin: bool = True
+    recomendation_status: str = "RECOMMENDED"
 
     model_config = ConfigDict(from_attributes=True)
 

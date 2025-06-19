@@ -71,6 +71,7 @@ async def get_sales_history(car_vin: str):
         "is_salvage": formatted_vehicle.get("is_salvage", False),
         "photos": formatted_vehicle.get("photos", []),
         "sales_history": formatted_vehicle.get("sales_history", []),
+        "current_bid": formatted_vehicle.get("current_bid", 0),
     }
     logger.info(f"SALESSSSS {adapted_vehicle.get('sales_history')}")
 

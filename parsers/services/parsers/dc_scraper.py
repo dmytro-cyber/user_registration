@@ -490,7 +490,7 @@ class DealerCenterScraper:
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
         ).click()
-        time.sleep(4)
+        time.sleep(5)
         vin_input = self.wait.until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
         )

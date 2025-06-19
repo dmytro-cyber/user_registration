@@ -14,7 +14,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy import delete
 from sqlalchemy.exc import SQLAlchemyError
 
-from models.vehicle import CarModel, AutoCheckModel, FeeModel
+from models.vehicle import CarModel, AutoCheckModel, FeeModel, RecommendationStatus
 from models.admin import ROIModel
 from db.session import POSTGRESQL_DATABASE_URL
 from core.config import settings
@@ -91,9 +91,12 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             if data.get("mileage") is not None:
                 car.has_correct_mileage = car.mileage == data.get("mileage")
             car.accident_count = data.get("accident_count")
+            car.recommendation_status = RecommendationStatus.RECOMMENDED if car.accident_count <= 2 or car.has_correct_mileage else RecommendationStatus.NOT_RECOMMENDED
 
             prices = [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)]
-            valid_prices = [int(float(p)) for p in prices if p]
+            for price in prices:
+                logger.info(f"Price found for {vin}: {price}")
+            valid_prices = [int(p.split(".")[0]) for p in prices if p]
             car.avg_market_price = int(sum(valid_prices) / len(valid_prices)) if valid_prices else 0
 
             roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
@@ -101,24 +104,25 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             if default_roi:
                 car.predicted_total_investment = (
-                    (car.avg_market_price * 100) / (100 - default_roi.roi) if car.avg_market_price else 0
+                    car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
             else:
                 car.predicted_total_investment = 0
                 car.predicted_profit_margin_percent = 0
 
-            fees_result = await db.execute(
-                select(FeeModel).where(
-                    FeeModel.auction == car.auction,
-                    FeeModel.price_from <= car.avg_market_price,
-                    FeeModel.price_to >= car.avg_market_price,
-                )
-            )
-            fees = fees_result.scalars().all()
-            car.auction_fee = sum(fee.amount for fee in fees)
-            car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
-            car.predicted_roi = default_roi.roi if car.total_investment > 0 else 0
+            # fees_result = await db.execute(
+            #     select(FeeModel).where(
+            #         FeeModel.auction == car.auction,
+            #         FeeModel.price_from <= car.avg_market_price,
+            #         FeeModel.price_to >= car.avg_market_price,
+            #     )
+            # )
+            # fees = fees_result.scalars().all()
+            # car.auction_fee = sum(fee.amount for fee in fees)
+            # car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
+            car.suggested_bid = int(car.predicted_total_investment)
+            car.predicted_roi = default_roi.roi if car.predicted_total_investment > 0 else 0
 
             if screenshot_data:
                 s3_storage = S3StorageClient(
@@ -140,8 +144,9 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             raise
 
 
-@app.task(name="tasks.task.parse_and_update_car", queue="sequential")
+@app.task(name="tasks.task.parse_and_update_car")
 def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
+    logger.info(f"Scheduling parse_and_update_car for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
     return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine)
 
 
@@ -183,9 +188,9 @@ async def _update_car_bids_async():
             raise
 
 
-@app.task(name="tasks.task.update_car_bids")
-def update_car_bids():
-    return anyio.run(_update_car_bids_async)
+# @app.task(name="tasks.task.update_car_bids")
+# def update_car_bids():
+#     return anyio.run(_update_car_bids_async)
 
 
 async def _update_car_fees_async():

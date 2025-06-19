@@ -10,7 +10,7 @@ app.conf.task_queues = {
 
 app.conf.task_routes = {
     "tasks.task.parse_and_update_car": {"queue": "car_parsing_queue"},
-    "tasks.task.update_car_bids": {"queue": "car_parsing_queue"},
+    # "tasks.task.update_car_bids": {"queue": "car_parsing_queue"},
 }
 
 app.conf.task_track_started = True

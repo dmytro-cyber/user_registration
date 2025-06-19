@@ -363,8 +363,6 @@ async def get_car_detail(
     if not car.sales_history:
         car = await scrape_and_save_sales_history(car, db, settings)
 
-    car = await get_vehicle_by_id(db, car_id)
-
     logger.info(f"Returning details for car with ID: {car_id}", extra=extra)
     logger.info(f"Car condition: {car.condition_assessments}", extra=extra)
     return await prepare_car_detail_response(car)
@@ -605,9 +603,10 @@ async def bulk_create_cars(
         else:
             logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
 
-        # for vehicle_data in vehicles:
-        #     if vehicle_data.vin not in skipped_vins:
-        #         parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
+        for vehicle_data in vehicles:
+            if vehicle_data.vin not in skipped_vins:
+                logger.info(f"Scheduling parse_and_update_car for VIN: {vehicle_data.vin}", extra=extra)
+                parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
 
         return response
     except Exception as e:

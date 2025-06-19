@@ -1,11 +1,9 @@
 FROM python:3.12.3
 
-# Налаштування змінних середовища для Python
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 ENV PIP_NO_CACHE_DIR=off
 
-# Встановлення залежностей для Python, Chrome, Playwright та Xvfb
 RUN apt update && apt install -y \
     gcc \
     libpq-dev \
@@ -17,7 +15,10 @@ RUN apt update && apt install -y \
     fonts-liberation \
     libappindicator3-1 \
     xdg-utils \
-    # Додаткові залежності для Playwright
+    tesseract-ocr \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libgdk-pixbuf2.0-dev \
     libasound2 \
     libatk-bridge2.0-0 \
     libatk1.0-0 \
@@ -50,44 +51,32 @@ RUN apt update && apt install -y \
     && apt clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Встановлення Poetry
 RUN python -m pip install --upgrade pip && \
     pip install poetry
 
-# Копіювання файлів залежностей
 COPY ./parsers/poetry.lock /usr/parsers/poetry/poetry.lock
 COPY ./parsers/pyproject.toml /usr/parsers/poetry/pyproject.toml
 
-# Налаштування Poetry для уникнення створення віртуального середовища
 RUN poetry config virtualenvs.create false
 
-# Встановлення робочої директорії
 WORKDIR /usr/parsers/poetry
 
-# Встановлення залежностей з Poetry, включаючи Playwright
 RUN poetry add playwright && \
     poetry lock && \
     poetry install --no-root --only main
 
-# Встановлення браузерів для Playwright
 RUN poetry run playwright install --with-deps
 
-# Встановлення робочої директорії
 WORKDIR /usr/parsers/fastapi
 
-# Копіювання вихідного коду
 COPY ./parsers .
 
-# Копіювання команд
 COPY ./commands /commands
 
-# Забезпечення Unix-стилю кінцівок рядків для скриптів
 RUN dos2unix /commands/*.sh
 
-# Додавання біту виконання до файлів команд
 RUN chmod +x /commands/*.sh
 
-# Створення .Xauthority для Xvfb
 RUN mkdir -p /root && \
     touch /root/.Xauthority && \
     chmod 600 /root/.Xauthority
