@@ -119,8 +119,8 @@ class DealerCenterScraper:
         self.vin = vin
         self.vehicle_name = vehicle_name
         self.engine = engine
-        self.proxy_host = os.getenv("PROXY_HOST")
-        self.proxy_port = os.getenv("PROXY_PORT")
+        # self.proxy_host = os.getenv("PROXY_HOST")
+        # self.proxy_port = os.getenv("PROXY_PORT")
         self.cookies_file = "cookies.json"
         self.driver = self._init_driver()
         self.wait = WebDriverWait(self.driver, 10)  # Reduced default timeout to 10 seconds
@@ -129,7 +129,7 @@ class DealerCenterScraper:
     def _init_driver(self):
         """Initialize the Chrome driver with specified options."""
         chrome_options = Options()
-        chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
+        # chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
         chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--allow-insecure-localhost")
         chrome_options.add_argument("--disable-web-security")
