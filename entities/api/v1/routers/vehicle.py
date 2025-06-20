@@ -214,7 +214,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
         )
-        logger.info(f"Successfully fetched filter options: {response.dict()}", extra=extra)
+        logger.info(f"Successfully fetched filter options")
         return response
 
     except Exception as e:
