@@ -23,6 +23,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
+
   redis_1:
     image: 'redis:latest'
     container_name: redis_1_cars_and_beyond
@@ -74,6 +75,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
+
   parsers:
     restart: always
     build:
@@ -101,6 +103,7 @@ services:
         max-size: "10m"
         max-file: "3"
 
+
   migrator:
     build:
       context: .
@@ -122,6 +125,7 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
 
   celery:
     build: 
@@ -147,6 +151,26 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # celery_car_parser:
+  #   build: 
+  #     context: .
+  #     dockerfile: entities/Dockerfile
+  #   container_name: celery_car_parser
+  #   command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "--concurrency=1", "-Q", "sequential", "--pool=prefork"]
+  #   env_file:
+  #     - ./entities/.env
+  #   environment:
+  #     - PYTHONPATH=/usr/entities/fastapi
+  #   depends_on:
+  #     redis_1:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./entities:/usr/entities/fastapi
+  #   networks:
+  #     - cars_and_beyond_network
+  #   dns:
+  #     - 8.8.8.8
 
   celery_worker:
     build: 
@@ -248,3 +272,14 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+volumes:
+  redis_cars_and_beyond_data:
+    driver: local
+  redis_1_cars_and_beyond_data:
+    driver: local
+
+
+networks:
+  cars_and_beyond_network:
+    driver: bridge
