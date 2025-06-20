@@ -193,27 +193,27 @@ services:
     dns:
       - 8.8.8.8
 
-  celery_car_parser:
-    build: 
-      context: .
-      dockerfile: entities/Dockerfile
-    container_name: celery_car_parser
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "--concurrency=1", "-Q", "sequential", "--pool=prefork"]
-    env_file:
-      - ./entities/.env
-    environment:
-      - PYTHONPATH=/usr/entities/fastapi
-    depends_on:
-      redis_1:
-        condition: service_healthy
-      db:
-        condition: service_healthy
-    volumes:
-      - ./entities:/usr/entities/fastapi
-    networks:
-      - cars_and_beyond_network
-    dns:
-      - 8.8.8.8
+  # celery_car_parser:
+  #   build: 
+  #     context: .
+  #     dockerfile: entities/Dockerfile
+  #   container_name: celery_car_parser
+  #   command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "--concurrency=1", "-Q", "sequential", "--pool=prefork"]
+  #   env_file:
+  #     - ./entities/.env
+  #   environment:
+  #     - PYTHONPATH=/usr/entities/fastapi
+  #   depends_on:
+  #     redis_1:
+  #       condition: service_healthy
+  #     db:
+  #       condition: service_healthy
+  #   volumes:
+  #     - ./entities:/usr/entities/fastapi
+  #   networks:
+  #     - cars_and_beyond_network
+  #   dns:
+  #     - 8.8.8.8
 
 
   celery_worker:
