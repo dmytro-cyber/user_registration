@@ -136,16 +136,26 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
     return db_vehicle
 
 
+from sqlalchemy import case, literal_column
+
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], page: int, page_size: int
-) -> tuple[List[CarModel], int, int]:
-    """Get filtered vehicles with pagination."""
+) -> tuple[List[dict], int, int]:
+    """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
 
+    user_id = filters["user_id"]
+
+    liked_expr = case(
+        (user_likes.c.user_id == user_id, True),
+        else_=False
+    ).label("liked")
+
     query = (
-        select(CarModel)
+        select(CarModel, liked_expr)
+        .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
         .options(selectinload(CarModel.photos))
         .filter(CarModel.date >= today_naive)
     )
@@ -172,21 +182,22 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.year >= filters["min_year"])
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
-    if "liked" in filters and filters["liked"]:
-        user_id = filters.get("user_id")
-        if user_id is not None:
-            query = query.join(user_likes, CarModel.id == user_likes.c.car_id)
-            query = query.filter(user_likes.c.user_id == user_id)
-        else:
-            raise ValueError("user_id is required when filtering by liked=True")
 
-    total_count = await db.scalar(select(func.count()).select_from(query.subquery()))
+    subq = query.subquery()
+    total_count = await db.scalar(select(func.count()).select_from(subq))
     total_pages = (total_count + page_size - 1) // page_size
 
     result = await db.execute(query.offset((page - 1) * page_size).limit(page_size))
-    vehicles = result.scalars().all()
+    rows = result.all()
 
-    return vehicles, total_count, total_pages
+    vehicles_with_liked = []
+    for car, liked in rows:
+        vehicle_dict = car.__dict__.copy()
+        vehicle_dict["liked"] = bool(liked)
+        vehicles_with_liked.append(vehicle_dict)
+
+    return vehicles_with_liked, total_count, total_pages
+
 
 
 async def get_bidding_hub_vehicles(
