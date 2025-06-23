@@ -148,7 +148,7 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], page: int, page_size: int
-) -> tuple[List[dict], int, int]:
+) -> tuple[List[CarModel], int, int]:
     """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
@@ -202,9 +202,8 @@ async def get_filtered_vehicles(
 
     vehicles_with_liked = []
     for car, liked in rows:
-        vehicle_dict = car.__dict__.copy()
-        vehicle_dict["liked"] = bool(liked)
-        vehicles_with_liked.append(vehicle_dict)
+        car.liked = bool(liked)
+        vehicles_with_liked.append(car)
 
     return vehicles_with_liked, total_count, total_pages
 

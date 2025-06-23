@@ -118,6 +118,15 @@ class CarModel(Base):
     )
     sales_history = relationship("CarSaleHistoryModel", back_populates="car", cascade="all, delete-orphan")
     liked_by = relationship("UserModel", secondary=user_likes, back_populates="liked_cars")
+    _liked = None
+
+    @property
+    def liked(self):
+        return self._liked
+
+    @liked.setter
+    def liked(self, value):
+        self._liked = value
 
     @property
     def engine_and_cylinder(self) -> str:
