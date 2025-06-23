@@ -68,11 +68,11 @@ async def prepare_response(
     validated_cars = []
     for car in vehicles:
         try:
-            car_data = car_to_dict(car)
-            validated_car = CarBaseSchema.model_validate(car_data)
+            # car_data = car_to_dict(car)
+            validated_car = CarBaseSchema.model_validate(car)
             validated_cars.append(validated_car)
         except Exception as e:
-            logger.error(f"Failed to validate car VIN {car.vin}: {str(e)}")
+            logger.error(f"Failed to validate car VIN {car.get("vin", None)}: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Validation error for car VIN {car.vin}: {str(e)}")
 
     page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
