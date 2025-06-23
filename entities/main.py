@@ -24,7 +24,7 @@ app.add_middleware(
         "https://localhost:5173",
         "https://127.0.0.1:5173",
         "https://cars-beyond-git-dev-mykola-bals-projects.vercel.app",
-        "https://cars-beyond.vercel.app"
+        "https://cars-beyond.vercel.app",
     ],
     allow_credentials=True,
     allow_methods=["*"],

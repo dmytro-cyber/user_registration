@@ -41,9 +41,9 @@ class CarInventoryResponse(BaseModel):
     stock: str
     vehicle: str = Field(..., min_length=1)
     vin: str = Field(..., min_length=17, max_length=17)
-    
+
     purchase_date: datetime
-    
+
     net_profit: Optional[float]
     total_investments: float = Field(None)
     roi: float = Field(None)

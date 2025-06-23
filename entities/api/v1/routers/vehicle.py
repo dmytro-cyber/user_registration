@@ -250,7 +250,7 @@ async def get_cars(
     page_size: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
-    current_user: UserModel = Depends(get_current_user)
+    current_user: UserModel = Depends(get_current_user),
 ) -> CarListResponseSchema:
     """
     Retrieve a paginated list of cars based on filters.
@@ -566,9 +566,7 @@ async def delete_part_endpoint(
     return {"message": "Part deleted successfully"}
 
 
-@router.post(
-    "/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk."
-)
+@router.post("/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk.")
 async def bulk_create_cars(
     vehicles: List[CarCreateSchema],
     db: AsyncSession = Depends(get_db),
@@ -606,7 +604,9 @@ async def bulk_create_cars(
         for vehicle_data in vehicles:
             if vehicle_data.vin not in skipped_vins:
                 logger.info(f"Scheduling parse_and_update_car for VIN: {vehicle_data.vin}", extra=extra)
-                parse_and_update_car.delay(vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine)
+                parse_and_update_car.delay(
+                    vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine, vehicle_data.mileage
+                )
 
         return response
     except Exception as e:
@@ -630,9 +630,7 @@ async def toggle_like(
         raise HTTPException(status_code=404, detail="Car not found")
 
     user_result = await db.execute(
-        select(UserModel)
-        .options(selectinload(UserModel.liked_cars))
-        .where(UserModel.id == current_user.id)
+        select(UserModel).options(selectinload(UserModel.liked_cars)).where(UserModel.id == current_user.id)
     )
     user = user_result.scalar_one()
 
@@ -644,5 +642,3 @@ async def toggle_like(
         user.liked_cars.append(car)
         await db.commit()
         return {"detail": "Liked"}
-
-

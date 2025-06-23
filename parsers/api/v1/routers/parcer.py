@@ -35,16 +35,27 @@ async def scrape_dc(
     car_vin: str = Query(..., description="VIN of the car to scrape"),
     car_name: str = Query(None, description="Name of the car (optional)"),
     car_engine: str = Query(None, description="Engine type of the car (optional)"),
+    only_history: bool = Query(False, description="If true, only scrape history data"),
 ):
     logger.info(f"Starting scrape for VIN {car_vin}")
-    try:
-        scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
-        result = await asyncio.to_thread(scraper.scrape)
-        logger.info(f"Successfully scraped data for VIN {car_vin}")
-        return DCResponseSchema(**result)
-    except Exception as e:
-        logger.error(f"Error during scraping for VIN {car_vin}: {str(e)}", exc_info=True)
-        return DCResponseSchema(error=str(e))
+    if only_history:
+        try:
+            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+            result = await asyncio.to_thread(scraper.scrape_only_history)
+            logger.info(f"Successfully scraped data for VIN {car_vin}")
+            return DCResponseSchema(**result)
+        except Exception as e:
+            logger.error(f"Error during scraping for VIN {car_vin}: {str(e)}", exc_info=True)
+            return DCResponseSchema(error=str(e))
+    else:
+        try:
+            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+            result = await asyncio.to_thread(scraper.scrape)
+            logger.info(f"Successfully scraped data for VIN {car_vin}")
+            return DCResponseSchema(**result)
+        except Exception as e:
+            logger.error(f"Error during scraping for VIN {car_vin}: {str(e)}", exc_info=True)
+            return DCResponseSchema(error=str(e))
 
 
 @router.post(
@@ -75,8 +86,8 @@ async def scrape_fees():
         # Placeholder for actual fee scraping logic
         loop = asyncio.get_running_loop()
         copart_fees = await loop.run_in_executor(executor, scrape_copart_fees)
-        iaai_fees = await loop.run_in_executor(executor, scrape_iaai_fees)
-        fees = {"copart": copart_fees, "iaai": iaai_fees}  # Example data
+        # iaai_fees = await loop.run_in_executor(executor, scrape_iaai_fees)
+        fees = {"copart": copart_fees}  # Example data
         logger.info("Successfully scraped fees")
         return {"fees": fees}
     except Exception as e:

@@ -29,7 +29,9 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(
 async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: int, db: AsyncSession) -> None:
     """Save sales history for a vehicle."""
     if len(sale_history_data) >= 3:
-        logger.debug(f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase.")
+        logger.debug(
+            f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase."
+        )
         car = get_vehicle_by_id(db, car_id)
         car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
         db.add(car)
@@ -49,7 +51,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         if existing_vehicle:
             logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
 
-            for field, value in vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}).items():
+            for field, value in vehicle_data.dict(
+                exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
+            ).items():
                 setattr(existing_vehicle, field, value)
 
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
@@ -69,14 +73,18 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                 db.add_all(new_photos)
                 logger.info(f"Added {len(new_photos)} new photos for VIN {vehicle_data.vin}")
 
-            await db.execute(delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id))
+            await db.execute(
+                delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
+            )
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
-                    db.add(ConditionAssessmentModel(
-                        type_of_damage=assessment.type_of_damage,
-                        issue_description=assessment.issue_description,
-                        car_id=existing_vehicle.id
-                    ))
+                    db.add(
+                        ConditionAssessmentModel(
+                            type_of_damage=assessment.type_of_damage,
+                            issue_description=assessment.issue_description,
+                            car_id=existing_vehicle.id,
+                        )
+                    )
 
             await db.execute(delete(CarSaleHistoryModel).where(CarSaleHistoryModel.car_id == existing_vehicle.id))
             if vehicle_data.sales_history:
@@ -92,11 +100,13 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
 
         if vehicle_data.condition_assessments:
             for assessment in vehicle_data.condition_assessments:
-                db.add(ConditionAssessmentModel(
-                    type_of_damage=assessment.type_of_damage,
-                    issue_description=assessment.issue_description,
-                    car_id=vehicle.id
-                ))
+                db.add(
+                    ConditionAssessmentModel(
+                        type_of_damage=assessment.type_of_damage,
+                        issue_description=assessment.issue_description,
+                        car_id=vehicle.id,
+                    )
+                )
 
         if vehicle_data.photos:
             db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
@@ -116,7 +126,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
-
 
 
 async def get_vehicle_by_vin(db: AsyncSession, vin: str) -> Optional[CarModel]:
@@ -144,11 +153,7 @@ async def get_filtered_vehicles(
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
 
-    query = (
-        select(CarModel)
-        .options(selectinload(CarModel.photos))
-        .filter(CarModel.date >= today_naive)
-    )
+    query = select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.date >= today_naive)
 
     if "make" in filters and filters["make"]:
         query = query.filter(CarModel.make.in_(filters["make"]))

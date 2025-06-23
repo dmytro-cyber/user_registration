@@ -63,13 +63,30 @@ async def http_post_with_retries(
             await asyncio.sleep(2**attempt)
 
 
-async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None):
-    logger.info(f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
+async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None, mileage: int = None):
+    logger.info(
+        f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}, mileage: {mileage}"
+    )
     engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    AsyncSessionFactory = sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
     async with AsyncSessionFactory() as db:
         try:
-            url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
+            # Перевірка наявності автомобіля в базі
+            current_date = datetime.utcnow().date()
+            query = select(CarModel).where(
+                func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
+                CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
+                func.date(CarModel.created_at) == current_date,
+            )
+            result = await db.execute(query)
+            existing_car = result.scalars().first()
+
+            # Формування URL для запиту до API
+            only_history = "true" if existing_car else "false"
+            url = (
+                f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
+                f"&only_history={only_history}"
+            )
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
 
             response = await http_get_with_retries(url, headers=headers, timeout=300.0)
@@ -91,13 +108,32 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             if data.get("mileage") is not None:
                 car.has_correct_mileage = car.mileage == data.get("mileage")
             car.accident_count = data.get("accident_count")
-            car.recommendation_status = RecommendationStatus.RECOMMENDED if car.accident_count <= 2 or car.has_correct_mileage else RecommendationStatus.NOT_RECOMMENDED
+            car.recommendation_status = (
+                RecommendationStatus.RECOMMENDED
+                if car.accident_count <= 2 or car.has_correct_mileage
+                else RecommendationStatus.NOT_RECOMMENDED
+            )
 
-            prices = [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)]
-            for price in prices:
-                logger.info(f"Price found for {vin}: {price}")
-            valid_prices = [int(p.split(".")[0]) for p in prices if p]
-            car.avg_market_price = int(sum(valid_prices) / len(valid_prices)) if valid_prices else 0
+            car.avg_market_price = (
+                existing_car.avg_market_price
+                if existing_car
+                else (
+                    int(
+                        sum(
+                            [
+                                int(p.split(".")[0])
+                                for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)]
+                                if p
+                            ]
+                        )
+                        / len([p for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)] if p])
+                        if [p for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)] if p]
+                        else [0]
+                    )
+                    if not existing_car
+                    else existing_car.avg_market_price
+                )
+            )
 
             roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
             default_roi = roi_result.scalars().first()
@@ -111,6 +147,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 car.predicted_total_investment = 0
                 car.predicted_profit_margin_percent = 0
 
+            # Закоментований блок (заготовка, як просили)
             # fees_result = await db.execute(
             #     select(FeeModel).where(
             #         FeeModel.auction == car.auction,
@@ -145,9 +182,9 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
 
 @app.task(name="tasks.task.parse_and_update_car")
-def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None):
+def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None, mileage: int = None):
     logger.info(f"Scheduling parse_and_update_car for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
-    return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine)
+    return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine, mileage)
 
 
 async def _update_car_bids_async():

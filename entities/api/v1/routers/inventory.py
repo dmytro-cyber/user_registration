@@ -40,7 +40,7 @@ from schemas.inventory import (
     HistoryResponse,
     PartInventoryStatusUpdate,
     InvoiceResponse,
-    CarInventoryDetailResponse
+    CarInventoryDetailResponse,
 )
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
@@ -504,7 +504,7 @@ async def get_car_inventory_history(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error fetching bidding history",
         )
-        
+
 
 @router.get(
     "vehicles/history/{part_inventory_id}",
