@@ -10,8 +10,8 @@ import base64
 from core.celery_config import app
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload
-from sqlalchemy import delete
+from sqlalchemy.orm import selectinload, sessionmaker
+from sqlalchemy import delete, func
 from sqlalchemy.exc import SQLAlchemyError
 
 from models.vehicle import CarModel, AutoCheckModel, FeeModel, RecommendationStatus
