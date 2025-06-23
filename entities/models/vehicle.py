@@ -88,7 +88,7 @@ class CarModel(Base):
     transmision = Column(String, nullable=True)
     vehicle_type = Column(String, nullable=True)
     link = Column(String, nullable=True)
-    created_at = Column(DateTime, nullable=False, default=func.now())
+    created_at = Column(DateTime, nullable=True, default=func.now())
 
     inventory = relationship(
         "CarInventoryModel",
