@@ -13,9 +13,9 @@ from tasks.task import _update_car_fees_async
 app = FastAPI(title="My Async FastAPI Project")
 
 
-@app.on_event("startup")
-async def on_startup():
-    await create_roles()
+# @app.on_event("startup")
+# async def on_startup():
+#     await create_roles()
 
 
 @app.on_event("startup")
