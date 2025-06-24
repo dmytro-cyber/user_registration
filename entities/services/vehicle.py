@@ -69,6 +69,7 @@ async def prepare_response(
     for car in vehicles:
         try:
             car_data = car_to_dict(car)
+            car_data["liked"] = car.liked
             validated_car = CarBaseSchema.model_validate(car_data)
             validated_cars.append(validated_car)
         except Exception as e:
