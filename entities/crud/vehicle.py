@@ -48,7 +48,7 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
-        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
         if existing_vehicle:
             logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
 
@@ -156,7 +156,7 @@ async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -
 
 async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optional[CarModel]:
     """Save a vehicle to the database if it doesn't already exist."""
-    existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+    existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
     if existing_vehicle:
         return None
 
