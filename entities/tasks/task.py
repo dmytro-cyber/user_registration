@@ -247,7 +247,7 @@ async def _update_car_fees_async():
     async with AsyncSessionFactory() as db:
         try:
             # Perform HTTP request to the endpoint
-            async with httpx.AsyncClient(timeout=30) as client:
+            async with httpx.AsyncClient(timeout=60) as client:
                 response = await client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
                 response.raise_for_status()  # Raise an exception for bad status codes
                 fees_data = response.json()["fees"]["copart"]["fees"]
