@@ -33,10 +33,10 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         logger.debug(
             f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase."
         )
-        car = get_vehicle_by_id(db, car_id)
+        car = await get_vehicle_by_id(db, car_id)
         car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
         db.add(car)
-        await db.commit()
+        await db.flush()
     for history_data in sale_history_data:
         sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
         if not sales_history.source:
