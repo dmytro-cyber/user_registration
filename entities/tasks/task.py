@@ -147,18 +147,26 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 car.predicted_total_investment = 0
                 car.predicted_profit_margin_percent = 0
 
-            # Закоментований блок (заготовка, як просили)
-            # fees_result = await db.execute(
-            #     select(FeeModel).where(
-            #         FeeModel.auction == car.auction,
-            #         FeeModel.price_from <= car.avg_market_price,
-            #         FeeModel.price_to >= car.avg_market_price,
-            #     )
-            # )
-            # fees = fees_result.scalars().all()
-            # car.auction_fee = sum(fee.amount for fee in fees)
-            # car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
-            car.suggested_bid = int(car.predicted_total_investment)
+            fees_result = await db.execute(
+                select(FeeModel).where(
+                    FeeModel.auction == car.auction,
+                    FeeModel.price_from <= car.avg_market_price,
+                    FeeModel.price_to >= car.avg_market_price,
+                )
+            )
+            fees = fees_result.scalars().all()
+
+            # Calculate auction_fee considering percentage-based fees
+            car.auction_fee = 0
+            for fee in fees:
+                if fee.percent:
+                    # Calculate percentage-based fee
+                    car.auction_fee += (fee.amount / 100) * car.predicted_total_investment
+                else:
+                    # Add fixed fee
+                    car.auction_fee += fee.amount
+
+            car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
             car.predicted_roi = default_roi.roi if car.predicted_total_investment > 0 else 0
 
             if screenshot_data:
@@ -230,29 +238,76 @@ async def _update_car_bids_async():
 #     return anyio.run(_update_car_bids_async)
 
 
+# Asynchronous function to update fees
 async def _update_car_fees_async():
     logger.info("Starting _update_car_fees_async")
     engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
     AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
+    
     async with AsyncSessionFactory() as db:
         try:
-            result = await db.execute(select(CarModel).options(selectinload(CarModel.fees)))
-            cars = result.scalars().all()
+            # Perform HTTP request to the endpoint
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
+                response.raise_for_status()  # Raise an exception for bad status codes
+                fees_data = response.json()["fees"]["copart"]["fees"]
 
-            for car in cars:
-                await db.execute(delete(FeeModel).where(FeeModel.car_id == car.id))
-                for fee in getattr(car, "fees", []):
-                    fee.car_id = car.id
-                    db.add(fee)
+            # Delete all existing fees for auction 'copart'
+            await db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
+            logger.info("Deleted all existing fees for auction 'copart'")
 
+            # Process different types of fees from the response
+            fee_mappings = {
+                "bidding_fees": fees_data["bidding_fees"]["secured"]["secured"],
+                "gate_fee": {"amount": fees_data["gate_fee"]["amount"]},
+                "virtual_bid_fee": {k: v for k, v in fees_data["virtual_bid_fee"]["live_bid"].items()},
+                "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]}
+            }
+
+            for fee_type, fee_values in fee_mappings.items():
+                if isinstance(fee_values, dict):  # Check if fee_values is a dictionary
+                    for price_range, amount_str in fee_values.items():
+                        amount = float(amount_str)
+                        is_percent = False
+
+                        # Logic to determine if the amount is a percentage
+                        if fee_type == "bidding_fees" and price_range == "0.00+" and 0 < amount < 10:
+                            is_percent = True  # Assume 5.75 is a percentage
+
+                        if "-" in price_range:  # Price range (e.g., "0.00-49.99")
+                            price_from, price_to = map(float, price_range.replace("+", "").split("-"))
+                        else:  # Single value or "0.00+"
+                            price_from = float(15000) if price_range != "0.00+" else 0.0
+                            price_to = 10000000
+
+                        fee = FeeModel(
+                            auction="copart",
+                            fee_type=fee_type,
+                            amount=amount,
+                            percent=is_percent,
+                            price_from=price_from,
+                            price_to=price_to
+                        )
+                        db.add(fee)
+                        logger.info(f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}")
+
+            # Commit changes to the database
             await db.commit()
-            return {"status": "success", "count": len(cars)}
+            logger.info("Committed new fees for auction 'copart'")
 
+            return {"status": "success", "count": len(fee_mappings)}
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"HTTP error fetching fees: {e}", exc_info=True)
+            raise
         except Exception as e:
             logger.error(f"Error in _update_car_fees_async: {e}", exc_info=True)
+            await db.rollback()
             raise
 
-
+# Celery task
 @app.task(name="tasks.task.update_fees")
 def update_car_fees():
     return anyio.run(_update_car_fees_async)
+
+

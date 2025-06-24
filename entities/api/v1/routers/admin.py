@@ -3,9 +3,11 @@ from fastapi.responses import JSONResponse
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import delete
+from models.vehicle import FeeModel
 from typing import List
 from datetime import datetime
-
+import re
 from models.admin import FilterModel, ROIModel
 from schemas.admin import (
     FilterCreate,
@@ -485,20 +487,107 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
 
 
 @router.post("/upload-iaai-fees")
-async def proxy_upload(file1: UploadFile = File(...), file2: UploadFile = File(...)):
+async def proxy_upload(
+    high_volume: UploadFile = File(...),
+    internet_bid: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db)  # Використовуйте існуючу сесію
+):
     try:
+        # Perform HTTP request to the external endpoint
         async with httpx.AsyncClient(timeout=30) as client:
             files = {
-                "file1": (file1.filename, await file1.read(), file1.content_type),
-                "file2": (file2.filename, await file2.read(), file2.content_type),
+                "high_volume": (high_volume.filename, await high_volume.read(), high_volume.content_type),
+                "internet_bid": (internet_bid.filename, await internet_bid.read(), internet_bid.content_type),
             }
+            response = await client.post("http://parsers:8001/api/v1/parsers/scrape/iaai/fees", files=files)
 
-            response = await client.post("http://parsers:8001/api/v1/parsers/svrape/iaai/fees", files=files)
+            # Log response for debugging
+            logger.info(f"Response from external service: status={response.status_code}, body={response.text}")
+
+            # Extract the response directly
+            data = response.json()
+            fees_data = data["fees"]
+
+            # Update fees in the database using the provided session
+            try:
+                # Delete all existing fees for auction 'iaai'
+                await db.execute(delete(FeeModel).where(FeeModel.auction == "iaai"))
+                logger.info("Deleted all existing fees for auction 'iaai'")
+
+                # Process different types of fees from the response
+                fee_mappings = {
+                    "high_volume_buyer_fees": fees_data["high_volume_buyer_fees"]["fees"],
+                    "internet_bid_buyer_fees": fees_data["internet_bid_buyer_fees"]["fees"],
+                    "service_fee": {"amount": fees_data["service_fee"]["amount"]},
+                    "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
+                    "title_handling_fee": {"amount": fees_data["title_handling_fee"]["amount"]}
+                }
+
+                for fee_type, fee_values in fee_mappings.items():
+                    if isinstance(fee_values, dict):
+                        if fee_type in ["service_fee", "environmental_fee", "title_handling_fee"]:
+                            # Handle fixed fees
+                            amount = float(fee_values["amount"])
+                            fee = FeeModel(
+                                auction="iaai",
+                                fee_type=fee_type,
+                                amount=amount,
+                                percent=False,
+                                price_from=None,
+                                price_to=None
+                            )
+                            db.add(fee)
+                            logger.info(f"Added fee: type={fee_type}, amount={amount}, percent=False, range=None-None")
+                        else:
+                            # Handle fees with price ranges
+                            for price_range, amount_str in fee_values.items():
+                                # Extract numeric value and handle percentage case
+                                is_percent = False
+                                amount = amount_str
+                                if isinstance(amount_str, str) and "%" in amount_str:
+                                    is_percent = True
+                                    # Use regex to extract the number before "%"
+                                    match = re.match(r"([\d.]+)%", amount_str)
+                                    if match:
+                                        amount = float(match.group(1))
+                                    else:
+                                        raise ValueError(f"Invalid percentage format: {amount_str}")
+                                else:
+                                    amount = float(amount_str)
+
+                                if "-" in price_range:  # Price range (e.g., "0.00-99.99")
+                                    price_from, price_to = map(float, price_range.split("-"))
+                                else:  # Single value or "15000.00+"
+                                    price_from = float(price_range.replace("+", "")) if price_range != "15000.00+" else 0.0
+                                    price_to = 1000000
+
+                                fee = FeeModel(
+                                    auction="iaai",
+                                    fee_type=fee_type,
+                                    amount=amount,
+                                    percent=is_percent,
+                                    price_from=price_from,
+                                    price_to=price_to
+                                )
+                                db.add(fee)
+                                logger.info(f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}")
+
+                # Commit changes to the database
+                await db.commit()
+                logger.info("Committed new fees for auction 'iaai'")
+
+            except Exception as e:
+                logger.error(f"Database error updating fees: {e}", exc_info=True)
+                await db.rollback()
+                raise
 
             return JSONResponse(
                 status_code=response.status_code,
-                content={"message": f"Forwarded successfully", "external_status": response.status_code, "original_response": response.json()},
+                content={"message": "Forwarded successfully", "external_status": response.status_code, "response": data},
             )
 
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Failed to contact external service: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error in proxy_upload: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
