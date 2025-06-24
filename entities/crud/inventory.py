@@ -2,6 +2,7 @@ from datetime import datetime
 import logging
 import logging.handlers
 import os
+from utils import update_inventory_financials
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy import desc
@@ -178,7 +179,7 @@ async def update_car_inventory(
         update_data = inventory.dict(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_inventory, key, value)
-        db_inventory.update_financials()
+        await update_inventory_financials(db, inventory_id)
         await db.commit()
         await db.refresh(db_inventory)
 
@@ -248,7 +249,9 @@ async def get_car_investment(db: AsyncSession, investment_id: int, user_id: str 
     logger.info(f"Fetching investment with ID: {investment_id}", extra=extra)
 
     result = await db.execute(
-        select(CarInventoryInvestmentsModel).where(CarInventoryInvestmentsModel.id == investment_id)
+        select(CarInventoryInvestmentsModel)
+        .options(selectinload(CarInventoryInvestmentsModel.car_inventory))
+        .where(CarInventoryInvestmentsModel.id == investment_id)
     )
     investment = result.scalars().first()
     if not investment:
@@ -312,9 +315,10 @@ async def create_car_investment(
 
     db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
     if db_inventory:
-        db_investment = CarInventoryInvestmentsModel(**investment.dict(), car_inventory_id=inventory_id)
-        db_inventory.investments.append(db_investment)
-        db_inventory.update_financials()
+        data = investment.dict(exclude={"comment"})
+        db_investment = CarInventoryInvestmentsModel(**data, car_inventory_id=inventory_id)
+        db.add(db_investment)
+        await update_inventory_financials(db, inventory_id)
         await db.commit()
         await db.refresh(db_inventory)
         await db.refresh(db_investment)
@@ -367,8 +371,7 @@ async def update_car_investment(
             setattr(db_investment, key, value)
         await db.commit()
         await db.refresh(db_investment)
-        await db.refresh(db_investment.car_inventory)
-        db_investment.car_inventory.update_financials()
+        await update_inventory_financials(db, db_investment.car_inventory_id)
         await db.commit()
 
         # Create a history record
@@ -419,7 +422,7 @@ async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: s
         await db.delete(db_investment)
         await db.commit()
         if inventory:
-            inventory.update_financials()
+            await update_inventory_financials(db, car_inventory_id)
             await db.commit()
             await db.refresh(inventory)
         logger.info(f"Investment with ID {investment_id} deleted successfully", extra=extra)

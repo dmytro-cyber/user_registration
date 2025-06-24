@@ -233,7 +233,7 @@ async def update_investment(
     db_investment = await update_car_investment(db, investment_id, investment, user_id=str(current_user.id))
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
-    return CarInventoryInvestmentsResponse(**db_investment.__dict__, comment=investment.comment)
+    return CarInventoryInvestmentsResponse(**db_investment.__dict__)
 
 
 @router.delete("/vehicles/{inventory_id}/investments/{investment_id}", status_code=status.HTTP_204_NO_CONTENT)
