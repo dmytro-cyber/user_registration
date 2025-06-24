@@ -13,6 +13,7 @@ from models.vehicle import (
     HistoryModel,
     InvoiceModel,
 )
+from core.config import settings
 from models.user import UserModel
 from core.dependencies import get_s3_storage_client
 from schemas.inventory import (
@@ -681,9 +682,9 @@ async def upload_invoice(
         return None
 
     s3_client = get_s3_storage_client()
-    s3_key = f"invoices/{part_id}/{file_name}_{user_id}_{int(datetime.now().timestamp())}"
+    s3_key = f"invoices/{part_id}/{file_name}_{user_id}_{int(datetime.now().timestamp())}_invoice.{file_name.split('.')[-1]}"
     s3_client.upload_file(file_data=file_data, file_name="my-inventory-bucket")
-    file_url = f"https://my-inventory-bucket.s3.amazonaws.com/{s3_key}"
+    file_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{s3_key}"
 
     db_invoice = InvoiceModel(part_inventory_id=part_id, file_url=file_url)
     db.add(db_invoice)
