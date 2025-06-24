@@ -98,7 +98,7 @@ class CarModel(Base):
     )
 
     # Relationships
-    auto_checks = relationship("AutoCheckModel", back_populates="car")
+    auto_checks = relationship("AutoCheckModel", back_populates="car", cascade="all, delete-orphan")
     parts = relationship("PartModel", back_populates="car", cascade="all, delete-orphan")
     photos = relationship(
         "PhotoModel",
