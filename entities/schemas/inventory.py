@@ -52,7 +52,7 @@ class CarInventoryResponse(BaseModel):
     fullname: Optional[str] = None
     car_status: str = Field(..., min_length=1)
     id: int
-    car_id: int
+    car_id: int | None = None
 
     class Config:
         orm_mode = True

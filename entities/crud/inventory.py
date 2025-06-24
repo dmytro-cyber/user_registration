@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from models.vehicle import (
     CarInventoryModel,
     CarInventoryInvestmentsModel,
+    CarInventoryStatus,
     PartInventoryModel,
     HistoryModel,
     InvoiceModel,

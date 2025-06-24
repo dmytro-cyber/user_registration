@@ -263,7 +263,7 @@ class CarInventoryModel(Base):
     labor = Column(Float, nullable=True)
     additional_costs = Column(Float, nullable=True)
     car_status = Column(Enum(CarInventoryStatus), nullable=False, default=CarInventoryStatus.AWAITING_DELIVERY)
-    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), nullable=False)
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), nullable=True)
 
     car = relationship("CarModel", back_populates="inventory", single_parent=True)
 
