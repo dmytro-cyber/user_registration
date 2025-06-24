@@ -129,10 +129,29 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
 
-async def get_vehicle_by_vin(db: AsyncSession, vin: str) -> Optional[CarModel]:
-    """Get a vehicle by VIN from the database."""
-    result = await db.execute(select(CarModel).options(selectinload(CarModel.photos)).filter(CarModel.vin == vin))
-    return result.scalars().first()
+async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -> Optional[CarModel]:
+    """Get a vehicle by VIN from the database and mark if liked by current user."""
+    liked_expr = case(
+        (user_likes.c.user_id == current_user_id, True),
+        else_=False
+    ).label("liked")
+
+    stmt = (
+        select(CarModel, liked_expr)
+        .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == current_user_id))
+        .options(selectinload(CarModel.photos))
+        .filter(CarModel.vin == vin)
+    )
+
+    result = await db.execute(stmt)
+    row = result.first()
+
+    if row:
+        car, liked = row
+        car.liked = bool(liked)
+        return car
+
+    return None
 
 
 async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optional[CarModel]:
