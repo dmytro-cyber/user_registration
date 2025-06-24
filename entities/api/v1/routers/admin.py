@@ -482,3 +482,23 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error creating ROI record",
         )
+
+
+@router.post("/upload-iaai-fees")
+async def proxy_upload(file1: UploadFile = File(...), file2: UploadFile = File(...)):
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            files = {
+                "file1": (file1.filename, await file1.read(), file1.content_type),
+                "file2": (file2.filename, await file2.read(), file2.content_type),
+            }
+
+            response = await client.post("http://parsers:8001/api/v1/parsers/svrape/iaai/fees", files=files)
+
+            return JSONResponse(
+                status_code=response.status_code,
+                content={"message": f"Forwarded successfully", "external_status": response.status_code, "original_response": response.json()},
+            )
+
+    except httpx.RequestError as e:
+        raise HTTPException(status_code=502, detail=f"Failed to contact external service: {str(e)}")

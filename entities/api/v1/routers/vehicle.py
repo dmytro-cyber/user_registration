@@ -365,8 +365,8 @@ async def get_car_detail(
         logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
 
-    if not car.sales_history:
-        car = await scrape_and_save_sales_history(car, db, settings)
+    # if not car.sales_history:
+    #     car = await scrape_and_save_sales_history(car, db, settings)
 
     logger.info(f"Returning details for car with ID: {car_id}", extra=extra)
     logger.info(f"Car condition: {car.condition_assessments}", extra=extra)
