@@ -33,7 +33,7 @@ class CarInventoryUpdate(CarInventoryBase):
 
 
 class CarInventoryUpdateStatus(BaseModel):
-    status: CarInventoryStatus
+    car_status: CarInventoryStatus
     comment: str | None = None
 
 

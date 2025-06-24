@@ -144,15 +144,7 @@ async def update_inventory_status(
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
-    result = await db.execute(
-        select(HistoryModel)
-        .where(HistoryModel.car_inventory_id == db_inventory.id)
-        .order_by(desc(HistoryModel.created_at))
-        .limit(1)
-    )
-    latest_history = result.scalars().first()
-    comment = latest_history.comment if latest_history else None
-    return CarInventoryResponse(**db_inventory.__dict__, comment=comment)
+    return CarInventoryResponse(**db_inventory.__dict__)
 
 
 @router.delete("/vehicles/{inventory_id}", status_code=status.HTTP_204_NO_CONTENT)
