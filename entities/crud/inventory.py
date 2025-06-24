@@ -683,7 +683,7 @@ async def upload_invoice(
 
     s3_client = get_s3_storage_client()
     s3_key = f"invoices/{part_id}/{file_name}_{user_id}_{int(datetime.now().timestamp())}_invoice.{file_name.split('.')[-1]}"
-    s3_client.upload_file(file_data=file_data, file_name="my-inventory-bucket")
+    s3_client.upload_file(file_data=file_data, file_name=s3_key)
     file_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{s3_key}"
 
     db_invoice = InvoiceModel(part_inventory_id=part_id, file_url=file_url)
