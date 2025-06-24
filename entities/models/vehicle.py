@@ -313,6 +313,7 @@ class FeeModel(Base):
     auction = Column(String, nullable=False)
     fee_type = Column(String, nullable=False)
     amount = Column(Float, nullable=False)
+    percent = Column(Boolean, default=False, nullable=False)
     price_from = Column(Float, nullable=True)
     price_to = Column(Float, nullable=True)
 

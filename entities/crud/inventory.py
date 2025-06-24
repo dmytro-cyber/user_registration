@@ -366,7 +366,7 @@ async def update_car_investment(
 
     db_investment = await get_car_investment(db, investment_id, user_id, request_id)
     if db_investment:
-        update_data = investment.dict(exclude_unset=True)
+        update_data = investment.dict(exclude_unset=True, exclude={"comment"})
         for key, value in update_data.items():
             setattr(db_investment, key, value)
         await db.commit()

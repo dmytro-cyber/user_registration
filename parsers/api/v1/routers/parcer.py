@@ -103,8 +103,10 @@ async def parse_fees(
     high_volume: UploadFile = File(...),
     internet_bid: UploadFile = File(...)
 ):
-    """Endpoint to parse fees from three uploaded images (SVG or PNG)."""
+    """Endpoint to parse fees from two uploaded images (SVG or PNG)."""
     try:
+        logger.info(f"Received files: high_volume={high_volume.filename}, internet_bid={internet_bid.filename}")
+        
         # Define expected file extensions
         expected_extensions = {".png", ".svg"}
 
@@ -116,13 +118,12 @@ async def parse_fees(
 
         saved_paths = {}
         for name, file in files.items():
-            # Check file extension
             filename = file.filename
             _, ext = os.path.splitext(filename.lower())
+            logger.info(f"Processing {name} with extension {ext}")
             if ext not in expected_extensions:
                 raise HTTPException(status_code=400, detail=f"File {filename} must be .png or .svg")
 
-            # Save file temporarily
             file_path = f"/tmp/{name}_{filename}"
             with open(file_path, "wb") as buffer:
                 buffer.write(await file.read())
@@ -143,7 +144,7 @@ async def parse_fees(
             else:
                 logger.warning(f"No fees parsed from {name} image.")
 
-        # Add fixed fees (static as per original logic)
+        # Add fixed fees
         fees.update({
             "service_fee": {"amount": 95.0, "currency": "USD", "description": "Per unit for vehicle handling"},
             "environmental_fee": {"amount": 15.0, "currency": "USD", "description": "Per unit for environmental regulations"},
