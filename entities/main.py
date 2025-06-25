@@ -18,9 +18,9 @@ app = FastAPI(title="My Async FastAPI Project")
 #     await create_roles()
 
 
-@app.on_event("startup")
-async def on_startup():
-    await _update_car_fees_async()
+# @app.on_event("startup")
+# async def on_startup():
+#     await _update_car_fees_async()
 
 app.add_middleware(
     CORSMiddleware,
