@@ -91,6 +91,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             response = await http_get_with_retries(url, headers=headers, timeout=300.0)
             data = response.json()
+            logger.info(f"Received data for VIN {vin}: {data}")
 
             if data.get("error"):
                 raise ValueError(f"Scraping error: {data['error']}")
@@ -106,8 +107,8 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             car.owners = data.get("owners")
             if data.get("mileage") is not None:
-                car.has_correct_mileage = car.mileage == data.get("mileage")
-            car.accident_count = data.get("accident_count")
+                car.has_correct_mileage = car.mileage == data.get("mileage", 0)
+            car.accident_count = data.get("accident_count", 0)
             car.recommendation_status = (
                 RecommendationStatus.RECOMMENDED
                 if car.accident_count <= 2 or car.has_correct_mileage

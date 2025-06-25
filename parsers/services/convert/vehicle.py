@@ -63,7 +63,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "transmission": "transmision",
         "vehicle_type": "vehicle_type",
     }
-    logger.info(f"some log")
 
     type_conversions = {
         "date": parse_auction_date,
@@ -95,7 +94,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     car_data.setdefault("has_correct_accidents", False)
     car_data.setdefault("has_correct_mileage", False)
     logger.debug("Set default values for required fields")
-    logger.info(f"some log")
 
     optional_fields = [
         "owners", "accident_count", "actual_bid", "price_sold", "suggested_bid",
