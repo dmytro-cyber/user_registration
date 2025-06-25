@@ -90,6 +90,7 @@ class CarDetailResponseSchema(BaseModel):
     accident_count: int | None = None
     link: str | None = None
     location: str | None = None
+    auction_fee: float | None = None
 
     photos: List[str] = []
 
