@@ -766,48 +766,60 @@ class DealerCenterScraper:
 
     def scrape(self):
         """Run the full scraping process and return the results."""
-        self.login()
-        owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-        manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
-        self.close()
-        return {
-            "owners": owners,
-            "vehicle": f"{year} {make} {model}",
-            "mileage": int(odometer),
-            "accident_count": accidents,
-            "retail": retail,
-            "manheim": manheim,
-            "price": price,
-            "year": int(year),
-            "make": make,
-            "model": model,
-            "drivetrain": drivetrain,
-            "fuel": fuel,
-            "body_style": body_style,
-            "screenshot": screenshot_base64,
-        }
+        try:
+            self.login()
+            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
+            manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
+            self.close()
+            return {
+                "owners": owners,
+                "vehicle": f"{year} {make} {model}",
+                "mileage": int(odometer),
+                "accident_count": accidents,
+                "retail": retail,
+                "manheim": manheim,
+                "price": price,
+                "year": int(year),
+                "make": make,
+                "model": model,
+                "drivetrain": drivetrain,
+                "fuel": fuel,
+                "body_style": body_style,
+                "screenshot": screenshot_base64,
+            }
+        finally:
+            try:
+                self.close()
+            except:
+                pass
 
     def scrape_only_history(self):
         """Run only the history report scraping process."""
-        self.login()
-        owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-        self.close()
-        return {
-            "owners": owners,
-            "vehicle": None,
-            "mileage": int(odometer),
-            "accident_count": accidents,
-            "screenshot": screenshot_base64,
-            "retail": None,
-            "manheim": None,
-            "price": None,
-            "year": None,
-            "make": None,
-            "model":  None,
-            "drivetrain": None,
-            "fuel": None,
-            "body_style": None,
-        }
+        try:
+            self.login()
+            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
+            self.close()
+            return {
+                "owners": owners,
+                "vehicle": None,
+                "mileage": int(odometer),
+                "accident_count": accidents,
+                "screenshot": screenshot_base64,
+                "retail": None,
+                "manheim": None,
+                "price": None,
+                "year": None,
+                "make": None,
+                "model":  None,
+                "drivetrain": None,
+                "fuel": None,
+                "body_style": None,
+            }
+        finally:
+            try:
+                self.close()
+            except:
+                pass
 
 
 if __name__ == "__main__":
