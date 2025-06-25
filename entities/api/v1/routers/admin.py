@@ -488,10 +488,8 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
 
 @router.post("/upload-iaai-fees")
 async def proxy_upload(
-    high_volume: UploadFile = File(...),
-    internet_bid: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db)  # Використовуйте існуючу сесію
-):
+    high_volume: UploadFile = File(...), internet_bid: UploadFile = File(...), db: AsyncSession = Depends(get_db)
+):  # Використовуйте існуючу сесію
     try:
         # Perform HTTP request to the external endpoint
         async with httpx.AsyncClient(timeout=30) as client:
@@ -520,7 +518,7 @@ async def proxy_upload(
                     "internet_bid_buyer_fees": fees_data["internet_bid_buyer_fees"]["fees"],
                     "service_fee": {"amount": fees_data["service_fee"]["amount"]},
                     "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
-                    "title_handling_fee": {"amount": fees_data["title_handling_fee"]["amount"]}
+                    "title_handling_fee": {"amount": fees_data["title_handling_fee"]["amount"]},
                 }
 
                 for fee_type, fee_values in fee_mappings.items():
@@ -534,7 +532,7 @@ async def proxy_upload(
                                 amount=amount,
                                 percent=False,
                                 price_from=None,
-                                price_to=None
+                                price_to=None,
                             )
                             db.add(fee)
                             logger.info(f"Added fee: type={fee_type}, amount={amount}, percent=False, range=None-None")
@@ -558,7 +556,9 @@ async def proxy_upload(
                                 if "-" in price_range:  # Price range (e.g., "0.00-99.99")
                                     price_from, price_to = map(float, price_range.split("-"))
                                 else:  # Single value or "15000.00+"
-                                    price_from = float(price_range.replace("+", "")) if price_range != "15000.00+" else 0.0
+                                    price_from = (
+                                        float(price_range.replace("+", "")) if price_range != "15000.00+" else 0.0
+                                    )
                                     price_to = 1000000
 
                                 fee = FeeModel(
@@ -567,10 +567,12 @@ async def proxy_upload(
                                     amount=amount,
                                     percent=is_percent,
                                     price_from=price_from,
-                                    price_to=price_to
+                                    price_to=price_to,
                                 )
                                 db.add(fee)
-                                logger.info(f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}")
+                                logger.info(
+                                    f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}"
+                                )
 
                 # Commit changes to the database
                 await db.commit()
@@ -583,7 +585,11 @@ async def proxy_upload(
 
             return JSONResponse(
                 status_code=response.status_code,
-                content={"message": "Forwarded successfully", "external_status": response.status_code, "response": data},
+                content={
+                    "message": "Forwarded successfully",
+                    "external_status": response.status_code,
+                    "response": data,
+                },
             )
 
     except httpx.RequestError as e:

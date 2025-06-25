@@ -94,7 +94,9 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             response = await http_get_with_retries(url, headers=headers, timeout=300.0)
             data = response.json()
-            logger.info(f"Received data for VIN {vin}: {data}")
+            logger.info(
+                f"Received data for VIN {vin}: {data.get('vehicle', 'No vehicle data')} - {data.get('vin', 'No VIN')} - {data.get('mileage', 'No mileage')} - {data.get('accident_count', 'No accident count')} - {data.get('owners', 'No owners')}"
+            )
 
             if data.get("error"):
                 raise ValueError(f"Scraping error: {data['error']}")
@@ -110,7 +112,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             car.owners = data.get("owners")
             if data.get("mileage") is not None:
-                car.has_correct_mileage = car.mileage == data.get("mileage", 0)
+                car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
             car.accident_count = data.get("accident_count", 0)
             car.recommendation_status = (
                 RecommendationStatus.RECOMMENDED
@@ -247,7 +249,7 @@ async def _update_car_fees_async():
     logger.info("Starting _update_car_fees_async")
     engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
     AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
-    
+
     async with AsyncSessionFactory() as db:
         try:
             # Perform HTTP request to the endpoint
@@ -265,7 +267,7 @@ async def _update_car_fees_async():
                 "bidding_fees": fees_data["bidding_fees"]["secured"]["secured"],
                 "gate_fee": {"amount": fees_data["gate_fee"]["amount"]},
                 "virtual_bid_fee": {k: v for k, v in fees_data["virtual_bid_fee"]["live_bid"].items()},
-                "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]}
+                "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
             }
 
             for fee_type, fee_values in fee_mappings.items():
@@ -290,10 +292,12 @@ async def _update_car_fees_async():
                             amount=amount,
                             percent=is_percent,
                             price_from=price_from,
-                            price_to=price_to
+                            price_to=price_to,
                         )
                         db.add(fee)
-                        logger.info(f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}")
+                        logger.info(
+                            f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}"
+                        )
 
             # Commit changes to the database
             await db.commit()
@@ -309,9 +313,8 @@ async def _update_car_fees_async():
             await db.rollback()
             raise
 
+
 # Celery task
 @app.task(name="tasks.task.update_fees")
 def update_car_fees():
     return anyio.run(_update_car_fees_async)
-
-

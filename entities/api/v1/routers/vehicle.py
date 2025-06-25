@@ -207,7 +207,9 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             owners_range_query = select(func.min(CarModel.owners), func.max(CarModel.owners))
             owners_range_result = await db.execute(owners_range_query)
             owners_min, owners_max = owners_range_result.fetchone()
-            owners_range = {"min": owners_min, "max": owners_max} if owners_min is not None and owners_max is not None else None
+            owners_range = (
+                {"min": owners_min, "max": owners_max} if owners_min is not None and owners_max is not None else None
+            )
 
         response = CarFilterOptionsSchema(
             auctions=auctions,

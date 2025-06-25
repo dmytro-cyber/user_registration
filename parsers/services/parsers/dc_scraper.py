@@ -796,10 +796,10 @@ class DealerCenterScraper:
         self.close()
         return {
             "owners": owners,
+            "vehicle": None,
             "mileage": int(odometer),
             "accident_count": accidents,
             "screenshot": screenshot_base64,
-            "accident_count": None,
             "retail": None,
             "manheim": None,
             "price": None,

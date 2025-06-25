@@ -131,10 +131,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
 
 async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -> Optional[CarModel]:
     """Get a vehicle by VIN from the database and mark if liked by current user."""
-    liked_expr = case(
-        (user_likes.c.user_id == current_user_id, True),
-        else_=False
-    ).label("liked")
+    liked_expr = case((user_likes.c.user_id == current_user_id, True), else_=False).label("liked")
 
     stmt = (
         select(CarModel, liked_expr)
@@ -172,15 +169,17 @@ async def get_filtered_vehicles(
 
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
-    
+
     user_id = filters["user_id"]
 
-    liked_expr = case(
-        (user_likes.c.user_id == user_id, True),
-        else_=False
-    ).label("liked")
+    liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
-    query = select(CarModel, liked_expr).outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id)).options(selectinload(CarModel.photos)).filter(CarModel.date >= today_naive)
+    query = (
+        select(CarModel, liked_expr)
+        .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
+        .options(selectinload(CarModel.photos))
+        .filter(CarModel.date >= today_naive)
+    )
 
     if "make" in filters and filters["make"]:
         query = query.filter(CarModel.make.in_(filters["make"]))
@@ -214,7 +213,6 @@ async def get_filtered_vehicles(
             query = query.filter(user_likes.c.user_id == user_id)
         else:
             raise ValueError("user_id is required when filtering by liked=True")
-
 
     subq = query.subquery()
     total_count = await db.scalar(select(func.count()).select_from(subq))

@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, timedelta, timezone, date
 from typing import List
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Enum, Date, Column, Table
+from sqlalchemy import DateTime, ForeignKey, Integer, String, Enum, Date, Column, Table, Index
 from sqlalchemy.orm import Mapped, mapped_column, relationship, validates
 
 from models import Base
@@ -101,5 +101,6 @@ user_likes = Table(
     Base.metadata,
     Column("user_id", Integer, ForeignKey("users.id"), primary_key=True),
     Column("car_id", Integer, ForeignKey("cars.id"), primary_key=True),
+    Index("ix_user_car", "user_id", "car_id"),
     extend_existing=True,
 )

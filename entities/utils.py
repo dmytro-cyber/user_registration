@@ -5,10 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 async def update_inventory_financials(db: AsyncSession, inventory_id: int):
     result = await db.execute(
-        select(
-            CarInventoryInvestmentsModel.investment_type,
-            func.sum(CarInventoryInvestmentsModel.cost)
-        ).where(CarInventoryInvestmentsModel.car_inventory_id == inventory_id)
+        select(CarInventoryInvestmentsModel.investment_type, func.sum(CarInventoryInvestmentsModel.cost))
+        .where(CarInventoryInvestmentsModel.car_inventory_id == inventory_id)
         .group_by(CarInventoryInvestmentsModel.investment_type)
     )
     sums_by_type = dict(result.all())
@@ -23,8 +21,4 @@ async def update_inventory_financials(db: AsyncSession, inventory_id: int):
         "additional_costs": sums_by_type.get("Additional Costs", 0),
     }
 
-    await db.execute(
-        update(CarInventoryModel)
-        .where(CarInventoryModel.id == inventory_id)
-        .values(**update_values)
-    )
+    await db.execute(update(CarInventoryModel).where(CarInventoryModel.id == inventory_id).values(**update_values))
