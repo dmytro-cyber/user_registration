@@ -270,6 +270,7 @@ class CarFilterOptionsSchema(BaseModel):
     locations: List[str] | None = []
     mileage_range: Dict[str, int] | None = {}
     accident_count_range: Dict[str, int] | None = {}
+    owners_range: Dict[str, int] | None = {}
 
 
 class UpdateCurrentBidSchema(BaseModel):

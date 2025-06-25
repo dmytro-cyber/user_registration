@@ -132,7 +132,7 @@ async def get_autocheck(
     "/filter-options/",
     response_model=CarFilterOptionsSchema,
     summary="Get available filter options for cars",
-    description="Retrieve unique values and ranges for filtering cars (e.g., auctions, makes, models, years, mileage, accident count).",
+    description="Retrieve unique values and ranges for filtering cars (e.g., auctions, makes, models, years, mileage, accident count, owners).",
 )
 async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilterOptionsSchema:
     """
@@ -204,6 +204,11 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
                 else None
             )
 
+            owners_range_query = select(func.min(CarModel.owners), func.max(CarModel.owners))
+            owners_range_result = await db.execute(owners_range_query)
+            owners_min, owners_max = owners_range_result.fetchone()
+            owners_range = {"min": owners_min, "max": owners_max} if owners_min is not None and owners_max is not None else None
+
         response = CarFilterOptionsSchema(
             auctions=auctions,
             auction_names=auction_names,
@@ -213,9 +218,14 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             years=year_range,
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
+            owners_range=owners_range,
         )
         logger.info(f"Successfully fetched filter options")
         return response
+
+    except Exception as e:
+        logger.error(f"Error fetching filter options: {str(e)}", extra=extra)
+        raise HTTPException(status_code=500, detail="Failed to fetch filter options")
 
     except Exception as e:
         logger.error(f"Error fetching filter options for cars: {str(e)}", extra=extra)
@@ -240,6 +250,8 @@ async def get_cars(
     mileage_max: Optional[int] = Query(None, description="Max mileage"),
     min_accident_count: Optional[int] = Query(None, description="Min accident count"),
     max_accident_count: Optional[int] = Query(None, description="Max accident count"),
+    min_owners_count: Optional[int] = Query(None, description="Min owners count"),
+    max_owners_count: Optional[int] = Query(None, description="Max owners count"),
     min_year: Optional[int] = Query(None, description="Min year"),
     max_year: Optional[int] = Query(None, description="Max year"),
     make: List[str] = Query(None, description="Make"),
@@ -290,6 +302,8 @@ async def get_cars(
         "mileage_max": mileage_max,
         "min_accident_count": min_accident_count,
         "max_accident_count": max_accident_count,
+        "min_owners_count": min_owners_count,
+        "max_owners_count": max_owners_count,
         "min_year": min_year,
         "max_year": max_year,
         "make": make,

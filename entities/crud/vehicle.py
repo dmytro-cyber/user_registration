@@ -196,6 +196,10 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.mileage >= filters["mileage_min"])
     if "mileage_max" in filters and filters["mileage_max"] is not None:
         query = query.filter(CarModel.mileage <= filters["mileage_max"])
+    if "min_owners_count" in filters and filters["min_owners_count"] is not None:
+        query = query.filter(CarModel.owners >= filters["min_owners_count"])
+    if "max_owners_count" in filters and filters["max_owners_count"] is not None:
+        query = query.filter(CarModel.owners <= filters["max_owners_count"])
     if "min_accident_count" in filters and filters["min_accident_count"] is not None:
         query = query.filter(CarModel.accident_count >= filters["min_accident_count"])
     if "max_accident_count" in filters and filters["max_accident_count"] is not None:
