@@ -101,6 +101,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         owners=car.owners,
         accident_count=car.accident_count,
         date=car.date,
+        recommendation_status=car.recommendation_status.value,
         link=car.link,
         location=car.location,
         auction_fee=car.auction_fee,
