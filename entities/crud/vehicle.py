@@ -1,5 +1,6 @@
 from datetime import datetime, time, timezone
 from typing import List, Dict, Any, Optional
+from ordering_constr import ORDERING_MAP
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, asc, desc, delete
 from sqlalchemy.exc import IntegrityError
@@ -163,7 +164,7 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 
 async def get_filtered_vehicles(
-    db: AsyncSession, filters: Dict[str, Any], page: int, page_size: int
+    db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
 ) -> tuple[List[CarModel], int, int]:
     """Get filtered vehicles with pagination and liked status."""
 
@@ -180,6 +181,12 @@ async def get_filtered_vehicles(
         .options(selectinload(CarModel.photos))
         .filter(CarModel.date >= today_naive)
     )
+
+    order_clause = ORDERING_MAP.get(ordering)
+    if order_clause is not None:
+        query = query.order_by(order_clause)
+    else:
+        query = query.order_by(desc(CarModel.created_at))
 
     if "make" in filters and filters["make"]:
         query = query.filter(CarModel.make.in_(filters["make"]))

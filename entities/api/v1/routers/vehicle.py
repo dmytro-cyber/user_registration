@@ -260,6 +260,10 @@ async def get_cars(
     model: List[str] = Query(None, description="Model"),
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
     liked: bool = Query(False, description="Filter by liked cars"),
+    ordering: str = Query(
+        "created_at_desc",
+        description="Sort vehicles by a specific field. Available options: created_at_desc, current_bid_asc, current_bid_desc, recommendation_status_asc, recommendation_status_desc",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
@@ -283,6 +287,7 @@ async def get_cars(
         make (List[str], optional): List of car makes.
         model (List[str], optional): List of car models.
         vin (Optional[str], optional): VIN code to search for a specific car.
+        ordering (str): Field to sort vehicles by (default: created_at_desc).
         page (int): Page number for pagination (default: 1).
         page_size (int): Number of items per page (default: 10, max: 100).
         db (AsyncSession): The database session dependency.
@@ -337,7 +342,7 @@ async def get_cars(
                 logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
-    vehicles, total_count, total_pages = await get_filtered_vehicles(db, filters, page, page_size)
+    vehicles, total_count, total_pages = await get_filtered_vehicles(db=db, filters=filters, ordering=ordering, page=page, page_size=page_size)
     if not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
         return CarListResponseSchema(cars=[], page_links={}, last=True)
