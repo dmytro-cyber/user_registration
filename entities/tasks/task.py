@@ -98,19 +98,20 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 f"Received data for VIN {vin}: {data.get('vehicle', 'No vehicle data')} - {data.get('vin', 'No VIN')} - {data.get('mileage', 'No mileage')} - {data.get('accident_count', 'No accident count')} - {data.get('owners', 'No owners')}"
             )
 
-            if data.get("error"):
-                raise ValueError(f"Scraping error: {data['error']}")
+
 
             screenshot_data = base64.b64decode(data["screenshot"]) if data.get("screenshot") else None
 
             query = select(CarModel).where(CarModel.vin == vin).with_for_update()
             result = await db.execute(query)
             car = result.scalars().first()
-
             if not car:
                 raise ValueError(f"Car with VIN {vin} not found")
-
+            if data.get("error"):
+                car.has_correct_vin = False
+                raise ValueError(f"Scraping error: {data['error']}")
             car.owners = data.get("owners")
+            car.has_correct_vin = True
             if data.get("mileage") is not None:
                 car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
             car.accident_count = data.get("accident_count", 0)

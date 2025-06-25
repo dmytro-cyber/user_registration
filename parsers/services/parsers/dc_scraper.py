@@ -129,20 +129,18 @@ class DealerCenterScraper:
     def _init_driver(self):
         """Initialize the Chrome driver with specified options."""
         chrome_options = Options()
-        # chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        chrome_options.add_argument("--allow-insecure-localhost")
-        chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--allow-insecure-localhost")
+        chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--disable-background-timer-throttling")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-breakpad")
-        chrome_options.add_argument("--remote-debugging-port=9222")
-        chrome_options.add_argument("--remote-debugging-address=0.0.0.0")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-infobars")
 
         chrome_options.binary_location = "/usr/bin/google-chrome"
 
