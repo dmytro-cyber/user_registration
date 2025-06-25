@@ -129,20 +129,18 @@ class DealerCenterScraper:
     def _init_driver(self):
         """Initialize the Chrome driver with specified options."""
         chrome_options = Options()
-        # chrome_options.add_argument(f"--proxy-server=socks5://{self.proxy_host}:{self.proxy_port}")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        chrome_options.add_argument("--allow-insecure-localhost")
-        chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--headless")
+        chrome_options.add_argument("--headless=new")
         chrome_options.add_argument("--disable-gpu")
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--allow-insecure-localhost")
+        chrome_options.add_argument("--ignore-certificate-errors")
         chrome_options.add_argument("--disable-background-timer-throttling")
         chrome_options.add_argument("--disable-backgrounding-occluded-windows")
         chrome_options.add_argument("--disable-breakpad")
-        chrome_options.add_argument("--remote-debugging-port=9222")
-        chrome_options.add_argument("--remote-debugging-address=0.0.0.0")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-infobars")
 
         chrome_options.binary_location = "/usr/bin/google-chrome"
 
@@ -768,48 +766,60 @@ class DealerCenterScraper:
 
     def scrape(self):
         """Run the full scraping process and return the results."""
-        self.login()
-        owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-        manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
-        self.close()
-        return {
-            "owners": owners,
-            "vehicle": f"{year} {make} {model}",
-            "mileage": int(odometer),
-            "accident_count": accidents,
-            "retail": retail,
-            "manheim": manheim,
-            "price": price,
-            "year": int(year),
-            "make": make,
-            "model": model,
-            "drivetrain": drivetrain,
-            "fuel": fuel,
-            "body_style": body_style,
-            "screenshot": screenshot_base64,
-        }
+        try:
+            self.login()
+            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
+            manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
+            self.close()
+            return {
+                "owners": owners,
+                "vehicle": f"{year} {make} {model}",
+                "mileage": int(odometer),
+                "accident_count": accidents,
+                "retail": retail,
+                "manheim": manheim,
+                "price": price,
+                "year": int(year),
+                "make": make,
+                "model": model,
+                "drivetrain": drivetrain,
+                "fuel": fuel,
+                "body_style": body_style,
+                "screenshot": screenshot_base64,
+            }
+        finally:
+            try:
+                self.close()
+            except:
+                pass
 
     def scrape_only_history(self):
         """Run only the history report scraping process."""
-        self.login()
-        owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-        self.close()
-        return {
-            "owners": owners,
-            "vehicle": None,
-            "mileage": int(odometer),
-            "accident_count": accidents,
-            "screenshot": screenshot_base64,
-            "retail": None,
-            "manheim": None,
-            "price": None,
-            "year": None,
-            "make": None,
-            "model":  None,
-            "drivetrain": None,
-            "fuel": None,
-            "body_style": None,
-        }
+        try:
+            self.login()
+            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
+            self.close()
+            return {
+                "owners": owners,
+                "vehicle": None,
+                "mileage": int(odometer),
+                "accident_count": accidents,
+                "screenshot": screenshot_base64,
+                "retail": None,
+                "manheim": None,
+                "price": None,
+                "year": None,
+                "make": None,
+                "model":  None,
+                "drivetrain": None,
+                "fuel": None,
+                "body_style": None,
+            }
+        finally:
+            try:
+                self.close()
+            except:
+                pass
 
 
 if __name__ == "__main__":
