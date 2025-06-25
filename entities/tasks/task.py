@@ -11,7 +11,7 @@ from core.celery_config import app
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, sessionmaker
-from sqlalchemy import delete, func
+from sqlalchemy import delete, func, and_
 from sqlalchemy.exc import SQLAlchemyError
 
 from models.vehicle import CarModel, AutoCheckModel, FeeModel, RecommendationStatus
@@ -74,9 +74,12 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             # Перевірка наявності автомобіля в базі
             current_date = datetime.utcnow().date()
             query = select(CarModel).where(
-                func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
-                CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
-                func.date(CarModel.created_at) == current_date,
+                and_(
+                    func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
+                    CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
+                    func.date(CarModel.created_at) == current_date,
+                    CarModel.predicted_total_investments.isnot(None),
+                )
             )
             result = await db.execute(query)
             existing_car = result.scalars().first()
