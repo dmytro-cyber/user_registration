@@ -361,7 +361,6 @@ async def get_cars(
 async def get_car_detail(
     car_id: int,
     db: AsyncSession = Depends(get_db),
-    settings: Settings = Depends(get_settings),
 ) -> CarDetailResponseSchema:
     """
     Retrieve detailed information for a specific car.
@@ -385,9 +384,6 @@ async def get_car_detail(
     if not car:
         logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
-
-    # if not car.sales_history:
-    #     car = await scrape_and_save_sales_history(car, db, settings)
 
     logger.info(f"Returning details for car with ID: {car_id}", extra=extra)
     logger.info(f"Car condition: {car.condition_assessments}", extra=extra)
@@ -597,6 +593,7 @@ async def bulk_create_cars(
     vehicles: List[CarCreateSchema],
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
+    settings: Settings = Depends(get_settings),
 ) -> Dict:
     """
     Create multiple vehicles in bulk.
@@ -633,6 +630,8 @@ async def bulk_create_cars(
                 parse_and_update_car.delay(
                     vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine, vehicle_data.mileage
                 )
+
+                car = await scrape_and_save_sales_history(car, db, settings)
 
         return response
     except Exception as e:
