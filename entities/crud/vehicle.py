@@ -370,8 +370,8 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
         car.parts_cost = new_part.value
     else:
         car.parts_cost += new_part.value
-    if car.predicted_total_investment and car:
-        car.suggested_bid = car.predicted_total_investment - car.parts_cost
+    if car.predicted_total_investments and car:
+        car.suggested_bid = car.predicted_total_investments - car.parts_cost
     await db.commit()
     await db.refresh(new_part)
     return new_part
@@ -394,8 +394,8 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
 
     if existing_part.value != temp_value:
         car.parts_cost += existing_part.value - temp_value
-        if car.predicted_total_investment and car:
-            car.suggested_bid = car.predicted_total_investment - car.parts_cost
+        if car.predicted_total_investments and car:
+            car.suggested_bid = car.predicted_total_investments - car.parts_cost
 
     await db.commit()
     await db.refresh(existing_part)
@@ -413,8 +413,8 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
     if not part:
         return False
     car.parts_cost -= part.value
-    if car.predicted_total_investment and car:
-        car.suggested_bid = car.predicted_total_investment - car.parts_cost
+    if car.predicted_total_investments and car:
+        car.suggested_bid = car.predicted_total_investments - car.parts_cost
 
     await db.delete(part)
     await db.commit()
