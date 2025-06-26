@@ -87,10 +87,12 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                             car_id=existing_vehicle.id,
                         )
                     )
+            if vehicle_data.current_bid is not None and existing_vehicle.suggested_bid is not None and vehicle_data.current_bid > existing_vehicle.suggested_bid:
+                existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
 
-            await db.execute(delete(CarSaleHistoryModel).where(CarSaleHistoryModel.car_id == existing_vehicle.id))
-            if vehicle_data.sales_history:
-                await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
+            if not existing_vehicle.sales_history:
+                if vehicle_data.sales_history:
+                    await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
 
             return False
 
@@ -137,7 +139,7 @@ async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -
     stmt = (
         select(CarModel, liked_expr)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == current_user_id))
-        .options(selectinload(CarModel.photos))
+        .options(selectinload(CarModel.photos), selectinload(CarModel.sales_history))
         .filter(CarModel.vin == vin)
     )
 
