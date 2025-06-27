@@ -75,7 +75,7 @@ async def scrape_current_bid(
     respose = await get_current_bid(data.items)
     logger.info(f"Successfully scraped current bid, data length: {len(respose)}")
     logger.info(f"Response: {json.dumps(respose, indent=2)}")
-    return respose
+    return {"bids": respose}
 
 
 @router.get(

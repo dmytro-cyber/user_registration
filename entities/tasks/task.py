@@ -225,7 +225,7 @@ async def _update_car_bids_async():
             data = response.json()
             logger.info(f"Received {data} items to update bids")
 
-            for item in data:
+            for item in data.get("bids"):
                 car_id, current_bid = item.get("id"), item.get("value")
                 if car_id and current_bid is not None:
                     result = await db.execute(select(CarModel).where(CarModel.id == car_id).with_for_update())
