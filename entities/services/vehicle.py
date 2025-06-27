@@ -121,22 +121,19 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
     )
 
 
-async def scrape_and_save_sales_history(car: CarModel, db: AsyncSession, settings: Settings) -> CarModel:
+async def scrape_and_save_sales_history(vin: str, db: AsyncSession, settings: Settings) -> CarModel:
     """Scrape sales history for a car and save it."""
     httpx_client = httpx.AsyncClient(timeout=10.0)
     httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
     try:
-        response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{car.vin}")
+        response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
         response.raise_for_status()
         result = CarCreateSchema.model_validate(response.json())
         logger.info(f"Successfully scraped sales history data {result.sales_history}")
+        car = await get_vehicle_by_vin(db, vin, 1)  # Ensure the vehicle exists before saving sales history
         await save_sale_history(result.sales_history, car.id, db)
-
-        updated_car = await get_vehicle_by_id(db, car.id)
-        if not updated_car:
-            logger.error(f"Failed to retrieve updated car with ID {car.id}")
-            raise HTTPException(status_code=500, detail="Failed to retrieve updated car")
-        return updated_car
+        
+        return car
     except httpx.HTTPError as e:
         logger.warning(f"Failed to scrape data for VIN {car.vin}: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")

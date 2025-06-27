@@ -636,7 +636,7 @@ async def bulk_create_cars(
                     vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine, vehicle_data.mileage
                 )
 
-                car = await scrape_and_save_sales_history(car, db, settings)
+                await scrape_and_save_sales_history(vehicle_data.vin, db, settings)
 
         return response
     except Exception as e:
