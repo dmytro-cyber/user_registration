@@ -28,7 +28,7 @@ class UpdateCurrentBidRequestSchema(BaseModel):
 
 class UpdateCurrentBidResponseSchema(BaseModel):
     id: int
-    current_bid: float | None = None
+    value: float | None = None
 
 
 class UpdateCurrentBidListRequestSchema(BaseModel):
