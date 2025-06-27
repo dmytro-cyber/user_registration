@@ -226,12 +226,15 @@ async def _update_car_bids_async():
             logger.info(f"Received {data} items to update bids")
 
             for item in data:
-                car_id, current_bid = item.get("id"), item.get("current_bid")
+                car_id, current_bid = item.get("id"), item.get("value")
                 if car_id and current_bid is not None:
                     result = await db.execute(select(CarModel).where(CarModel.id == car_id).with_for_update())
                     car = result.scalars().first()
                     if car:
                         car.current_bid = int(float(current_bid))
+                        if car.current_bid > car.suggested_bid:
+                            car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    
 
             await db.commit()
             return {"status": "success", "updated_cars": len(data)}
