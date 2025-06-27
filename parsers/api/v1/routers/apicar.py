@@ -41,7 +41,6 @@ async def get_sales_history(car_vin: str):
         response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
         response.raise_for_status()
         data = response.json()
-        logger.info(f"API response received: {json.dumps(data, indent=2)}")
     except httpx.HTTPError as e:
         logger.error(f"Failed to fetch API data for VIN {car_vin}: {e}")
         return None
