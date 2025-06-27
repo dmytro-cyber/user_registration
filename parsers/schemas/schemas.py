@@ -36,4 +36,4 @@ class UpdateCurrentBidListRequestSchema(BaseModel):
 
 
 class UpdateCurrentBidListResponseSchema(BaseModel):
-    items: list[UpdateCurrentBidResponseSchema]
+    bids: list[UpdateCurrentBidResponseSchema]
