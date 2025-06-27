@@ -223,6 +223,7 @@ async def _update_car_bids_async():
                 timeout=300.0,
             )
             data = response.json()
+            logger.info(f"Received {data} items to update bids")
 
             for item in data:
                 car_id, current_bid = item.get("id"), item.get("current_bid")
