@@ -240,9 +240,9 @@ async def _update_car_bids_async():
             raise
 
 
-# @app.task(name="tasks.task.update_car_bids")
-# def update_car_bids():
-#     return anyio.run(_update_car_bids_async)
+@app.task(name="tasks.task.update_car_bids")
+def update_car_bids():
+    return anyio.run(_update_car_bids_async)
 
 
 # Asynchronous function to update fees

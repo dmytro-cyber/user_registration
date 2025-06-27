@@ -2,6 +2,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+from datetime import date
 from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -256,6 +257,8 @@ async def get_cars(
     max_owners_count: Optional[int] = Query(None, description="Max owners count"),
     min_year: Optional[int] = Query(None, description="Min year"),
     max_year: Optional[int] = Query(None, description="Max year"),
+    date_from: Optional[date] = Query(None, description="Date from (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="Date to (YYYY-MM-DD)"),
     make: List[str] = Query(None, description="Make"),
     model: List[str] = Query(None, description="Model"),
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
@@ -313,6 +316,8 @@ async def get_cars(
         "max_owners_count": max_owners_count,
         "min_year": min_year,
         "max_year": max_year,
+        "date_from": date_from,
+        "date_to": date_to,
         "make": make,
         "model": model,
         "liked": liked,

@@ -194,15 +194,15 @@ async def get_filtered_vehicles(
         query = query.order_by(desc(CarModel.created_at))
 
     if "make" in filters and filters["make"]:
-        query = query.filter(CarModel.make.in_(filters["make"]))
+        query = query.filter(func.lower(CarModel.make).in_([m.lower() for m in filters["make"]]))
     if "model" in filters and filters["model"]:
-        query = query.filter(CarModel.model.in_(filters["model"]))
+        query = query.filter(func.lower(CarModel.model).in_([m.lower() for m in filters["model"]]))
     if "auction" in filters and filters["auction"]:
-        query = query.filter(CarModel.auction.in_(filters["auction"]))
+        query = query.filter(func.lower(CarModel.auction).in_([a.lower() for a in filters["auction"]]))
     if "auction_name" in filters and filters["auction_name"]:
-        query = query.filter(CarModel.auction_name.in_(filters["auction_name"]))
+        query = query.filter(func.lower(CarModel.auction_name).in_([a.lower() for a in filters["auction_name"]]))
     if "location" in filters and filters["location"]:
-        query = query.filter(CarModel.location.in_(filters["location"]))
+        query = query.filter(func.lower(CarModel.location).in_([l.lower() for l in filters["location"]]))
     if "mileage_min" in filters and filters["mileage_min"] is not None:
         query = query.filter(CarModel.mileage >= filters["mileage_min"])
     if "mileage_max" in filters and filters["mileage_max"] is not None:
@@ -219,6 +219,12 @@ async def get_filtered_vehicles(
         query = query.filter(CarModel.year >= filters["min_year"])
     if "max_year" in filters and filters["max_year"] is not None:
         query = query.filter(CarModel.year <= filters["max_year"])
+    if "date_from" in filters and filters["date_from"]:
+        date_from = datetime.strptime(filters["date_from"], "%Y-%m-%d").date()
+        query = query.filter(CarModel.date >= date_from)
+    if "date_to" in filters and filters["date_to"]:
+        date_to = datetime.strptime(filters["date_to"], "%Y-%m-%d").date()
+        query = query.filter(CarModel.date <= date_to)
     if "liked" in filters and filters["liked"]:
         user_id = filters.get("user_id")
         if user_id is not None:
