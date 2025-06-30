@@ -294,19 +294,8 @@ class DealerCenterScraper:
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
         time.sleep(4)
         try:
-            max_retries = 3
-            for attempt in range(max_retries):
-                try:
-                    drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
-                    logging.info(f"Drawer element found on attempt {attempt + 1}")
-                    return drawer_element  # Повертаємо елемент, якщо знайдено
-                except TimeoutException:
-                    logging.warning(f"Attempt {attempt + 1}/{max_retries} failed to find drawer element. Reloading page...")
-                    self.driver.refresh()
-                    time.sleep(2)
-                    if attempt < max_retries - 1:
-                        continue
-
+            # Очікуємо наявності батьківського елемента меню
+            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
             # Наводимо мишу на батьківський елемент для розгортання меню
             ActionChains(self.driver).move_to_element(drawer_element).perform()
             time.sleep(1)  # Додаємо затримку для розгортання

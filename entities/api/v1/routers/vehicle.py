@@ -432,7 +432,7 @@ async def update_car_status(
         raise HTTPException(status_code=404, detail="Car not found")
     hub_history = HistoryModel(
         car_id=car_id,
-        action=f"Status changed from {car.car_status} to {status_data.car_status}",
+        action=f"Status changed from {car.car_status.value} to {status_data.car_status.value}",
         user_id=current_user.id,
         comment=status_data.comment,
     )
