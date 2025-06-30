@@ -91,7 +91,7 @@ class CarDetailResponseSchema(BaseModel):
     link: str | None = None
     location: str | None = None
     auction_fee: float | None = None
-    recommendation_status: str | None = None
+    recommendation_status: str | None
 
     photos: List[str] = []
 
