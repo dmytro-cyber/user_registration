@@ -530,14 +530,18 @@ class DealerCenterScraper:
                 best_option = OptionSelector.select_best_match(options, reference)
                 logging.info(f"Selected best option: {best_option}")
 
-                best_option_element = self.driver.find_element(
-                    By.XPATH,
-                    f"//div[contains(@class, 'car-wrap')]//h6[contains(text(), '{best_option}')]",
-                )
+                try:
+                    best_option_element = self.driver.find_element(
+                        By.XPATH,
+                        f"//div[contains(@class, 'car-wrap')]//h6[contains(text(), '{best_option}')]"
+                    )
+                except NoSuchElementException:
+                    logging.warning(f"Best match '{best_option}' not found, selecting the first available option.")
+                    best_option_element = option_elements[0]
+
                 best_option_element.click()
 
                 self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))).click()
-
                 attempts += 1
 
             except TimeoutException:
