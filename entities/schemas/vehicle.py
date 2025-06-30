@@ -33,7 +33,7 @@ class CarBaseSchema(BaseModel):
     has_correct_mileage: bool | None = None
     has_correct_vin: bool | None = None
     liked: bool
-    recomendation_status: str | None
+    recommendation_status: str | None
 
     model_config = ConfigDict(from_attributes=True)
 
