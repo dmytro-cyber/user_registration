@@ -4,8 +4,9 @@ from ordering_constr import ORDERING_MAP
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, asc, desc, delete
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload
+from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy import case, literal_column
+from sqlalchemy.sql import over
 from models.vehicle import (
     CarModel,
     PhotoModel,
@@ -260,15 +261,26 @@ async def get_bidding_hub_vehicles(
 
         order_func = asc if sort_order.lower() == "asc" else desc
 
-        last_history_subquery = (
-            select(HistoryModel)
-            .where(HistoryModel.car_id == CarModel.id)
-            .order_by(HistoryModel.created_at.desc())
-            .limit(1)
+        history_alias = aliased(HistoryModel)
+        subquery = (
+            select(
+                history_alias.id.label("id"),
+                history_alias.car_id.label("car_id"),
+                history_alias.user_id.label("user_id"),
+                over(
+                    func.row_number(),
+                    partition_by=history_alias.car_id,
+                    order_by=history_alias.created_at.desc(),
+                ).label("rn"),
+            )
             .subquery()
         )
 
-        query = select(CarModel).options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
+        query = select(CarModel).outerjoin(
+            subquery, (subquery.c.car_id == CarModel.id) & (subquery.c.rn == 1)
+        ).options(
+            selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user)
+        )
 
         if current_user.has_role(UserRoleEnum.ADMIN):
             query = query.filter(
@@ -289,9 +301,7 @@ async def get_bidding_hub_vehicles(
             )
 
         if sort_by == "user":
-            query = query.join(last_history_subquery, last_history_subquery.c.car_id == CarModel.id).join(
-                UserModel, UserModel.id == last_history_subquery.c.user_id
-            )
+            query = query.join(UserModel, UserModel.id == subquery.c.user_id)
             query = query.order_by(order_func(UserModel.email))
         else:
             sort_field_mapping = {

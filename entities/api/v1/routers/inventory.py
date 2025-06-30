@@ -55,21 +55,32 @@ from core.dependencies import get_current_user
 router = APIRouter(prefix="/inventory")
 
 
-@router.post("/vehicles/", response_model=CarInventoryResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/vehicles/",
+    response_model=CarInventoryResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 async def create_inventory(
     inventory: CarInventoryCreate,
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await create_car_inventory(db, inventory, user_id=str(current_user.id))
+    db_inventory = await create_car_inventory(
+        db, inventory, user_id=str(current_user.id)
+    )
     return CarInventoryResponse(**db_inventory.__dict__, comment=inventory.comment)
 
 
 @router.get("/vehicles/", response_model=List[CarInventoryResponse])
 async def read_inventories(
-    skip: int = 0, limit: int = 10, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
+    skip: int = 0,
+    limit: int = 10,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
-    inventories = await get_car_inventories(db, skip, limit, user_id=str(current_user.id))
+    inventories = await get_car_inventories(
+        db, skip, limit, user_id=str(current_user.id)
+    )
     responses = []
     for inventory in inventories:
         result = await db.execute(
@@ -82,14 +93,24 @@ async def read_inventories(
         latest_history = result.scalars().first()
         fullname = None
         if latest_history and latest_history.user:
-            fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
-        responses.append(CarInventoryResponse(**inventory.__dict__, fullname=fullname))
+            fullname = (
+                f"{latest_history.user.first_name} {latest_history.user.last_name}"
+            )
+        responses.append(
+            CarInventoryResponse(
+                **inventory.__dict__,
+                fullname=fullname,
+                total_investments=inventory.total_investments,
+            )
+        )
     return responses
 
 
 @router.get("/vehicles/{inventory_id}", response_model=CarInventoryDetailResponse)
 async def read_inventory(
-    inventory_id: int, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
+    inventory_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     inventory = await get_car_inventory(db, inventory_id, user_id=str(current_user.id))
     if inventory is None:
@@ -103,7 +124,11 @@ async def read_inventory(
     )
     latest_history = result.scalars().first()
     comment = latest_history.comment if latest_history else None
-    return CarInventoryDetailResponse(**inventory.__dict__, comment=comment)
+    return CarInventoryDetailResponse(
+        **inventory.__dict__,
+        comment=comment,
+        total_investments=inventory.total_investments,
+    )
 
 
 @router.put("/vehicles/{inventory_id}", response_model=CarInventoryResponse)
@@ -113,7 +138,9 @@ async def update_inventory(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await update_car_inventory(db, inventory_id, inventory, user_id=str(current_user.id))
+    db_inventory = await update_car_inventory(
+        db, inventory_id, inventory, user_id=str(current_user.id)
+    )
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
@@ -135,12 +162,16 @@ async def update_inventory_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await get_car_inventory(db, inventory_id, user_id=str(current_user.id))
+    db_inventory = await get_car_inventory(
+        db, inventory_id, user_id=str(current_user.id)
+    )
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
     previous_status = db_inventory.car_status
-    db_inventory = await update_car_inventory(db, inventory_id, inventory, user_id=str(current_user.id))
+    db_inventory = await update_car_inventory(
+        db, inventory_id, inventory, user_id=str(current_user.id)
+    )
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
@@ -154,14 +185,25 @@ async def delete_inventory(
     current_user=Depends(get_current_user),
     comment: Optional[str] = None,
 ):
-    db_inventory = await delete_car_inventory(db, inventory_id, user_id=str(current_user.id))
+    db_inventory = await delete_car_inventory(
+        db, inventory_id, user_id=str(current_user.id)
+    )
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
 
-@router.get("/vehicles/{inventory_id}/investments/", response_model=List[CarInventoryInvestmentsResponse])
-async def read_investments(inventory_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)):
-    investments = await get_car_investments_by_inventory(db, inventory_id, user_id=str(user.id))
+@router.get(
+    "/vehicles/{inventory_id}/investments/",
+    response_model=List[CarInventoryInvestmentsResponse],
+)
+async def read_investments(
+    inventory_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    investments = await get_car_investments_by_inventory(
+        db, inventory_id, user_id=str(user.id)
+    )
     responses = []
     for investment in investments:
         result = await db.execute(
@@ -173,13 +215,21 @@ async def read_investments(inventory_id: int, db: AsyncSession = Depends(get_db)
         )
         latest_history = result.scalars().first()
         comment = latest_history.comment if latest_history else None
-        responses.append(CarInventoryInvestmentsResponse(**investment.__dict__, comment=comment))
+        responses.append(
+            CarInventoryInvestmentsResponse(**investment.__dict__, comment=comment)
+        )
     return responses
 
 
-@router.get("/vehicles/{inventory_id}/investments/{investment_id}", response_model=CarInventoryInvestmentsResponse)
+@router.get(
+    "/vehicles/{inventory_id}/investments/{investment_id}",
+    response_model=CarInventoryInvestmentsResponse,
+)
 async def read_investment(
-    inventory_id: int, investment_id: int, db: AsyncSession = Depends(get_db), user=Depends(get_current_user)
+    inventory_id: int,
+    investment_id: int,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
 ):
     investment = await get_car_investment(db, investment_id, user_id=str(user.id))
     if investment is None or investment.car_inventory_id != inventory_id:
@@ -208,13 +258,20 @@ async def create_investment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_investment = await create_car_investment(db, inventory_id, investment, user_id=str(current_user.id))
+    db_investment = await create_car_investment(
+        db, inventory_id, investment, user_id=str(current_user.id)
+    )
     if db_investment is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
-    return CarInventoryInvestmentsResponse(**db_investment.__dict__, comment=investment.comment)
+    return CarInventoryInvestmentsResponse(
+        **db_investment.__dict__, comment=investment.comment
+    )
 
 
-@router.put("/vehicles/{inventory_id}/investments/{investment_id}", response_model=CarInventoryInvestmentsResponse)
+@router.put(
+    "/vehicles/{inventory_id}/investments/{investment_id}",
+    response_model=CarInventoryInvestmentsResponse,
+)
 async def update_investment(
     inventory_id: int,
     investment_id: int,
@@ -222,13 +279,18 @@ async def update_investment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_investment = await update_car_investment(db, investment_id, investment, user_id=str(current_user.id))
+    db_investment = await update_car_investment(
+        db, investment_id, investment, user_id=str(current_user.id)
+    )
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
     return CarInventoryInvestmentsResponse(**db_investment.__dict__)
 
 
-@router.delete("/vehicles/{inventory_id}/investments/{investment_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/vehicles/{inventory_id}/investments/{investment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+)
 async def delete_investment(
     inventory_id: int,
     investment_id: int,
@@ -236,7 +298,9 @@ async def delete_investment(
     current_user=Depends(get_current_user),
     comment: Optional[str] = None,
 ):
-    db_investment = await delete_car_investment(db, investment_id, user_id=str(current_user.id))
+    db_investment = await delete_car_investment(
+        db, investment_id, user_id=str(current_user.id)
+    )
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
 
@@ -266,7 +330,9 @@ async def post_part_inventory(
 
 
 @router.get("/parts/", response_model=List[PartInventoryResponse])
-async def get_part_inventory_endpoint(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
+async def get_part_inventory_endpoint(
+    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
+):
     parts = await get_part_inventories(db, user_id=str(current_user.id))
     for part in parts:
         result = await db.execute(
@@ -279,13 +345,17 @@ async def get_part_inventory_endpoint(db: AsyncSession = Depends(get_db), curren
         latest_history = result.scalars().first()
         part.fullname = None
         if latest_history and latest_history.user:
-            part.fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
+            part.fullname = (
+                f"{latest_history.user.first_name} {latest_history.user.last_name}"
+            )
     return parts
 
 
 @router.get("/parts/{part_id}", response_model=PartInventoryResponse)
 async def get_part_inventory_by_id(
-    part_id: int, db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
+    part_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
 ):
     db_part = await get_part_inventory(db, part_id, user_id=str(current_user.id))
     if not db_part:
@@ -313,7 +383,9 @@ async def put_update_part_inventory(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_part = await update_part_inventory(db, part_id, part, user_id=str(current_user.id))
+    db_part = await update_part_inventory(
+        db, part_id, part, user_id=str(current_user.id)
+    )
     if not db_part:
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -352,7 +424,9 @@ async def update_part_status_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_part = await update_part_status(db, part_id, status_update, user_id=str(current_user.id))
+    db_part = await update_part_status(
+        db, part_id, status_update, user_id=str(current_user.id)
+    )
     if not db_part:
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -379,9 +453,13 @@ async def upload_invoice_endpoint(
     current_user=Depends(get_current_user),
 ) -> InvoiceResponse:
     file_data = await file.read()
-    db_invoice = await upload_invoice(db, part_id, file_data, file.filename, user_id=str(current_user.id))
+    db_invoice = await upload_invoice(
+        db, part_id, file_data, file.filename, user_id=str(current_user.id)
+    )
     if not db_invoice:
-        raise HTTPException(status_code=404, detail="Part not found or invoice upload failed")
+        raise HTTPException(
+            status_code=404, detail="Part not found or invoice upload failed"
+        )
     return db_invoice
 
 
@@ -394,7 +472,9 @@ async def delete_invoice_endpoint(
 ):
     result = await delete_invoice(db, invoice_id, user_id=str(current_user.id))
     if not result:
-        raise HTTPException(status_code=404, detail="Part not found or no invoice to delete")
+        raise HTTPException(
+            status_code=404, detail="Part not found or no invoice to delete"
+        )
 
 
 @router.put("/parts/invoice/{invoice_id}", response_model=dict)
@@ -405,9 +485,13 @@ async def update_invoice_endpoint(
     current_user=Depends(get_current_user),
 ):
     file_data = await file.read()
-    db_invoice = await update_invoice(db, invoice_id, file_data, file.filename, user_id=str(current_user.id))
+    db_invoice = await update_invoice(
+        db, invoice_id, file_data, file.filename, user_id=str(current_user.id)
+    )
     if not db_invoice:
-        raise HTTPException(status_code=404, detail="Part not found or no invoice to update")
+        raise HTTPException(
+            status_code=404, detail="Part not found or no invoice to update"
+        )
     return {"message": "Invoice updated successfully", "file_url": db_invoice.file_url}
 
 
@@ -464,7 +548,8 @@ async def get_car_inventory_history(
         history_list = result.scalars().all()
         if not history_list:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No bidding history found for this vehicle",
             )
         return BiddingHubHistoryListResponseSchema(
             history=[
@@ -537,7 +622,8 @@ async def get_part_inventory_history(
         history_list = result.scalars().all()
         if not history_list:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No bidding history found for this vehicle",
             )
         return BiddingHubHistoryListResponseSchema(
             history=[
