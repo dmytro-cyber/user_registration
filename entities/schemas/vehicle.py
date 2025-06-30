@@ -33,7 +33,7 @@ class CarBaseSchema(BaseModel):
     has_correct_mileage: bool | None = None
     has_correct_vin: bool | None = None
     liked: bool
-    recomendation_status: str = "RECOMMENDED"
+    recomendation_status: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -91,7 +91,7 @@ class CarDetailResponseSchema(BaseModel):
     link: str | None = None
     location: str | None = None
     auction_fee: float | None = None
-    recommendation_status: str | None
+    recommendation_status: str | None = None
 
     photos: List[str] = []
 
