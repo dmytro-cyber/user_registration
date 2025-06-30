@@ -293,26 +293,35 @@ class DealerCenterScraper:
     def run_history_report(self):
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
         time.sleep(4)
-        try:
-            # Очікуємо наявності батьківського елемента меню
-            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
-            # Наводимо мишу на батьківський елемент для розгортання меню
-            ActionChains(self.driver).move_to_element(drawer_element).perform()
-            time.sleep(1)  # Додаємо затримку для розгортання
+        drawer_element = None
+        max_retries = 3
 
-            # Очікуємо, поки елемент "Inventory" стане видимим
+        for attempt in range(max_retries):
+            try:
+                drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
+                logging.info(f"Drawer element found on attempt {attempt + 1}")
+                break
+            except TimeoutException:
+                logging.warning(f"Attempt {attempt + 1}/{max_retries} failed to find drawer element. Reloading page...")
+                self.driver.refresh()
+                time.sleep(2)
+
+        if drawer_element is None:
+            logging.error("Drawer element not found after retries.")
+            raise RuntimeError("Drawer element not found after retries.")
+
+        try:
+            ActionChains(self.driver).move_to_element(drawer_element).perform()
+            time.sleep(1)
+
             inventory_element = self.wait.until(
                 EC.visibility_of_element_located((By.XPATH, "//li[@aria-label='Inventory']"))
             )
-            # Наводимо мишу безпосередньо на елемент "Inventory"
             ActionChains(self.driver).move_to_element(inventory_element).perform()
-            time.sleep(0.5)  # Коротка затримка для стабільності
-
-            # Клікаємо на елемент "Inventory" після розгортання
+            time.sleep(0.5)
             inventory_element.click()
         except Exception as e:
             logging.error(f"Failed to interact with Inventory menu: {str(e)}")
-            # Логування розмітки для діагностики
             with open("page_source.html", "w", encoding="utf-8") as f:
                 f.write(self.driver.page_source)
             logging.info("Page source saved to page_source.html")
@@ -320,17 +329,17 @@ class DealerCenterScraper:
 
         self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
         time.sleep(4)
-        elements = self.wait.until(
+
+        self.wait.until(
             EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
-        )
-        elements[-1].send_keys(self.vin)
+        )[-1].send_keys(self.vin)
+
         self.wait.until(
             EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
         ).click()
-        iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
 
-        iframe_position = self.driver.execute_script(
-            """
+        iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
+        iframe_position = self.driver.execute_script("""
             var iframe = arguments[0];
             var rect = iframe.getBoundingClientRect();
             return {
@@ -339,79 +348,69 @@ class DealerCenterScraper:
                 width: rect.width,
                 height: rect.height
             };
-            """,
-            iframe,
-        )
-
-        logging.info(f"iframe position and size: {iframe_position}")
+        """, iframe)
 
         self.driver.switch_to.frame(iframe)
 
         try:
             self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
         except TimeoutException:
-            logging.warning("Timeout waiting for iframe content to load, proceeding with screenshot.")
+            logging.warning("Timeout waiting for iframe content to load.")
 
-        screenshot_base64 = None
-
-        owners_value = None
+        # Парсимо власників
         try:
-            self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
-            try:
-                owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
-                owners_value = int(owners_element.text)
-            except:
-                owners_value = 1
+            owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
+            owners_value = int(owners_element.text)
         except:
-            pass
-        odometer_value = self.driver.find_element(
+            owners_value = 1
+
+        # Парсимо одометр
+        odometer_text = self.driver.find_element(
             By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
         ).text.replace(",", "")
+        odometer_value = int(odometer_text)
+
+        # Парсимо кількість аварій
         accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
+
+        # Скриншот
+        screenshot_base64 = None
         try:
-            total_height = self.driver.execute_script(
-                """
-                        return Math.max(
-                            document.body.scrollHeight,
-                            document.body.offsetHeight,
-                            document.documentElement.clientHeight,
-                            document.documentElement.scrollHeight,
-                            document.documentElement.offsetHeight
-                        );
-                    """
-            )
+            total_height = self.driver.execute_script("""
+                return Math.max(
+                    document.body.scrollHeight,
+                    document.body.offsetHeight,
+                    document.documentElement.clientHeight,
+                    document.documentElement.scrollHeight,
+                    document.documentElement.offsetHeight
+                );
+            """)
             viewport_height = self.driver.execute_script("return window.innerHeight")
             viewport_width = self.driver.execute_script("return window.innerWidth")
 
-            logging.info(
-                f"iframe Total height: {total_height}, Viewport height: {viewport_height}, Viewport width: {viewport_width}"
-            )
-
             if total_height == 0 or viewport_height == 0 or viewport_width == 0:
-                logging.error("Invalid dimensions for screenshot capture inside iframe.")
-                raise ValueError("Invalid dimensions for screenshot capture inside iframe.")
+                raise ValueError("Invalid dimensions for screenshot.")
 
             iframe_width = iframe_position["width"]
             iframe_height = iframe_position["height"]
             iframe_left = iframe_position["left"]
             iframe_top = iframe_position["top"]
 
-            if iframe_width <= 0 or iframe_height <= 0:
-                logging.error("Invalid iframe dimensions for cropping.")
-                raise ValueError("Invalid iframe dimensions for cropping.")
-
             screenshots = []
             scroll_position = 0
             first_loop = True
+
             while scroll_position < total_height:
                 self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
                 if first_loop:
                     time.sleep(1.5)
                     first_loop = False
+
                 screenshot = self.driver.get_screenshot_as_png()
                 screenshot_img = Image.open(BytesIO(screenshot))
                 overlap = 220
                 next_position = scroll_position + viewport_height - overlap
+
                 crop_box = (
                     max(0, iframe_left),
                     max(0, iframe_top),
@@ -430,9 +429,7 @@ class DealerCenterScraper:
                 offset = 0
                 for screenshot_img in screenshots:
                     if screenshot_img.width != iframe_width:
-                        screenshot_img = screenshot_img.resize(
-                            (int(iframe_width), screenshot_img.height), Image.Resampling.LANCZOS
-                        )
+                        screenshot_img = screenshot_img.resize((int(iframe_width), screenshot_img.height), Image.Resampling.LANCZOS)
                     full_screenshot.paste(screenshot_img, (0, offset))
                     offset += screenshot_img.height
 
@@ -443,20 +440,13 @@ class DealerCenterScraper:
                 buffered = BytesIO()
                 full_screenshot.save(buffered, format="PNG")
                 screenshot_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                logging.info("Full iframe screenshot captured and cropped for history report.")
+                logging.info("Full iframe screenshot captured and cropped.")
             else:
                 raise ValueError("No screenshots captured.")
-
-            buffered = BytesIO()
-            full_screenshot.save(buffered, format="PNG")
-            screenshot_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-            logging.info("Full iframe screenshot captured for history report.")
         except Exception as e:
-            logging.error(f"Failed to capture full iframe screenshot in run_history_report: {str(e)}")
-            screenshot_base64 = None
+            logging.error(f"Screenshot capture failed: {str(e)}")
 
         self.driver.switch_to.default_content()
-
         return owners_value, odometer_value, accidents_value, screenshot_base64
 
     def get_market_data(self, odometer_value):
