@@ -123,7 +123,7 @@ class DealerCenterScraper:
         # self.proxy_port = os.getenv("PROXY_PORT")
         self.cookies_file = "cookies.json"
         self.driver = self._init_driver()
-        self.wait = WebDriverWait(self.driver, 10)  # Reduced default timeout to 10 seconds
+        self.wait = WebDriverWait(self.driver, 15)  # Reduced default timeout to 10 seconds
         self.driver_closed = False  # Flag to track if the driver has been closed
 
     def _init_driver(self):
@@ -294,8 +294,19 @@ class DealerCenterScraper:
         """Run a vehicle history report and extract owners, odometer, and accidents data."""
         time.sleep(4)
         try:
-            # Очікуємо наявності батьківського елемента меню
-            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
+                    logging.info(f"Drawer element found on attempt {attempt + 1}")
+                    return drawer_element  # Повертаємо елемент, якщо знайдено
+                except TimeoutException:
+                    logging.warning(f"Attempt {attempt + 1}/{max_retries} failed to find drawer element. Reloading page...")
+                    self.driver.refresh()
+                    time.sleep(2)
+                    if attempt < max_retries - 1:
+                        continue
+
             # Наводимо мишу на батьківський елемент для розгортання меню
             ActionChains(self.driver).move_to_element(drawer_element).perform()
             time.sleep(1)  # Додаємо затримку для розгортання
@@ -575,6 +586,11 @@ class DealerCenterScraper:
 
         # Дочекатися зникнення оверлея перед кліком на "Books"
         WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
+        try:
+            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
+            logging.info("Loader disappeared after switching to iframe.")
+        except TimeoutException:
+            logging.warning("Loader did not disappear after switching to iframe, proceeding anyway.")
 
         # self.wait.until(
         #     EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))

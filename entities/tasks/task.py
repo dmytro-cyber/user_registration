@@ -117,7 +117,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             car.accident_count = data.get("accident_count", 0)
             car.recommendation_status = (
                 RecommendationStatus.RECOMMENDED
-                if car.accident_count <= 2 or car.has_correct_mileage
+                if car.accident_count <= 2 and car.has_correct_mileage
                 else RecommendationStatus.NOT_RECOMMENDED
             )
 
@@ -232,7 +232,7 @@ async def _update_car_bids_async():
                     car = result.scalars().first()
                     if car:
                         car.current_bid = int(float(current_bid))
-                        if car.current_bid > car.suggested_bid:
+                        if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     
 
