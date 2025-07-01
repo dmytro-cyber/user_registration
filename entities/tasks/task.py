@@ -114,6 +114,8 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             car.has_correct_vin = True
             if data.get("mileage") is not None:
                 car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
+            if car.mileage is None or not car.has_correct_mileage:
+                car.mileage = int(data.get("mileage", 0)) if data.get("mileage") else 0
             car.accident_count = data.get("accident_count", 0)
             car.recommendation_status = (
                 RecommendationStatus.RECOMMENDED

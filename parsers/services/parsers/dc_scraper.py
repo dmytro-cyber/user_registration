@@ -362,6 +362,7 @@ class DealerCenterScraper:
             owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
             owners_value = int(owners_element.text)
         except:
+            owners_element = self.driver.find_element(By.XPATH, "//div[@class='owner']")
             owners_value = 1
 
         # Парсимо одометр
@@ -371,7 +372,7 @@ class DealerCenterScraper:
         odometer_value = int(odometer_text)
 
         # Парсимо кількість аварій
-        accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr"))
+        accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr")) or 0
 
         # Скриншот
         screenshot_base64 = None
@@ -770,7 +771,7 @@ class DealerCenterScraper:
             owners, odometer, accidents, screenshot_base64 = self.run_history_report()
             manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
             self.close()
-            return {
+            results = {
                 "owners": owners,
                 "vehicle": f"{year} {make} {model}",
                 "mileage": int(odometer),
@@ -786,6 +787,10 @@ class DealerCenterScraper:
                 "body_style": body_style,
                 "screenshot": screenshot_base64,
             }
+            for k, v in results.items():
+                if len(str(v)) < 100:
+                    logging.info(f"{k}: {v}")
+            return results
         finally:
             try:
                 self.close()
@@ -798,7 +803,7 @@ class DealerCenterScraper:
             self.login()
             owners, odometer, accidents, screenshot_base64 = self.run_history_report()
             self.close()
-            return {
+            results = {
                 "owners": owners,
                 "vehicle": None,
                 "mileage": int(odometer),
@@ -814,6 +819,10 @@ class DealerCenterScraper:
                 "fuel": None,
                 "body_style": None,
             }
+            for k, v in results.items():
+                if len(str(v)) < 100:
+                    logging.info(f"{k}: {v}")
+            return 
         finally:
             try:
                 self.close()
