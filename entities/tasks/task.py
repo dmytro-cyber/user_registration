@@ -190,6 +190,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
+            db.add(car)
             await db.commit()
             return {"status": "success", "vin": vin}
 
