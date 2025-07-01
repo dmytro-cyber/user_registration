@@ -25,7 +25,7 @@ class CarBaseSchema(BaseModel):
     engine: float | None
     has_keys: bool | None
     predicted_roi: float | None
-    predicted_profit_margin: float | None
+    predicted_profit_margin_percent: float | None
     current_bid: float | None
     suggested_bid: float | None
     location: str | None
