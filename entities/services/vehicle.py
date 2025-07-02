@@ -105,7 +105,6 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         link=car.link,
         location=car.location,
         auction_fee=car.auction_fee,
-        
         photos=[photo.url for photo in car.photos_hd] if car.photos_hd else [],
         condition_assessments=[
             ConditionAssessmentResponseSchema(
@@ -118,6 +117,12 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
             if car.sales_history
             else []
         ),
+        additional_info={
+            "avg_price": car.avg_market_price or None,
+            "predicted_total_investment": car.predicted_total_investment or None,
+            "predicted_profit_margin": car.predicted_profit_margin or None,
+            "predicted_roi": car.predicted_roi or None,
+        },
     )
 
 
@@ -132,7 +137,7 @@ async def scrape_and_save_sales_history(vin: str, db: AsyncSession, settings: Se
         logger.info(f"Successfully scraped sales history data {result.sales_history}")
         car = await get_vehicle_by_vin(db, vin, 1)  # Ensure the vehicle exists before saving sales history
         await save_sale_history(result.sales_history, car.id, db)
-        
+
         return car
     except httpx.HTTPError as e:
         logger.warning(f"Failed to scrape data for VIN {car.vin}: {str(e)}")

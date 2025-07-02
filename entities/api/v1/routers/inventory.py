@@ -65,9 +65,7 @@ async def create_inventory(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await create_car_inventory(
-        db, inventory, user_id=str(current_user.id)
-    )
+    db_inventory = await create_car_inventory(db, inventory, user_id=str(current_user.id))
     return CarInventoryResponse(**db_inventory.__dict__, comment=inventory.comment)
 
 
@@ -78,9 +76,7 @@ async def read_inventories(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    inventories = await get_car_inventories(
-        db, skip, limit, user_id=str(current_user.id)
-    )
+    inventories = await get_car_inventories(db, skip, limit, user_id=str(current_user.id))
     responses = []
     for inventory in inventories:
         result = await db.execute(
@@ -93,9 +89,7 @@ async def read_inventories(
         latest_history = result.scalars().first()
         fullname = None
         if latest_history and latest_history.user:
-            fullname = (
-                f"{latest_history.user.first_name} {latest_history.user.last_name}"
-            )
+            fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
         responses.append(
             CarInventoryResponse(
                 **inventory.__dict__,
@@ -138,9 +132,7 @@ async def update_inventory(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await update_car_inventory(
-        db, inventory_id, inventory, user_id=str(current_user.id)
-    )
+    db_inventory = await update_car_inventory(db, inventory_id, inventory, user_id=str(current_user.id))
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
@@ -162,16 +154,12 @@ async def update_inventory_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await get_car_inventory(
-        db, inventory_id, user_id=str(current_user.id)
-    )
+    db_inventory = await get_car_inventory(db, inventory_id, user_id=str(current_user.id))
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
     previous_status = db_inventory.car_status
-    db_inventory = await update_car_inventory(
-        db, inventory_id, inventory, user_id=str(current_user.id)
-    )
+    db_inventory = await update_car_inventory(db, inventory_id, inventory, user_id=str(current_user.id))
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
@@ -185,9 +173,7 @@ async def delete_inventory(
     current_user=Depends(get_current_user),
     comment: Optional[str] = None,
 ):
-    db_inventory = await delete_car_inventory(
-        db, inventory_id, user_id=str(current_user.id)
-    )
+    db_inventory = await delete_car_inventory(db, inventory_id, user_id=str(current_user.id))
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
 
@@ -201,9 +187,7 @@ async def read_investments(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
-    investments = await get_car_investments_by_inventory(
-        db, inventory_id, user_id=str(user.id)
-    )
+    investments = await get_car_investments_by_inventory(db, inventory_id, user_id=str(user.id))
     responses = []
     for investment in investments:
         result = await db.execute(
@@ -215,9 +199,7 @@ async def read_investments(
         )
         latest_history = result.scalars().first()
         comment = latest_history.comment if latest_history else None
-        responses.append(
-            CarInventoryInvestmentsResponse(**investment.__dict__, comment=comment)
-        )
+        responses.append(CarInventoryInvestmentsResponse(**investment.__dict__, comment=comment))
     return responses
 
 
@@ -258,14 +240,10 @@ async def create_investment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_investment = await create_car_investment(
-        db, inventory_id, investment, user_id=str(current_user.id)
-    )
+    db_investment = await create_car_investment(db, inventory_id, investment, user_id=str(current_user.id))
     if db_investment is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
-    return CarInventoryInvestmentsResponse(
-        **db_investment.__dict__, comment=investment.comment
-    )
+    return CarInventoryInvestmentsResponse(**db_investment.__dict__, comment=investment.comment)
 
 
 @router.put(
@@ -279,9 +257,7 @@ async def update_investment(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_investment = await update_car_investment(
-        db, investment_id, investment, user_id=str(current_user.id)
-    )
+    db_investment = await update_car_investment(db, investment_id, investment, user_id=str(current_user.id))
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
     return CarInventoryInvestmentsResponse(**db_investment.__dict__)
@@ -298,9 +274,7 @@ async def delete_investment(
     current_user=Depends(get_current_user),
     comment: Optional[str] = None,
 ):
-    db_investment = await delete_car_investment(
-        db, investment_id, user_id=str(current_user.id)
-    )
+    db_investment = await delete_car_investment(db, investment_id, user_id=str(current_user.id))
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
 
@@ -330,9 +304,7 @@ async def post_part_inventory(
 
 
 @router.get("/parts/", response_model=List[PartInventoryResponse])
-async def get_part_inventory_endpoint(
-    db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)
-):
+async def get_part_inventory_endpoint(db: AsyncSession = Depends(get_db), current_user=Depends(get_current_user)):
     parts = await get_part_inventories(db, user_id=str(current_user.id))
     for part in parts:
         result = await db.execute(
@@ -345,9 +317,7 @@ async def get_part_inventory_endpoint(
         latest_history = result.scalars().first()
         part.fullname = None
         if latest_history and latest_history.user:
-            part.fullname = (
-                f"{latest_history.user.first_name} {latest_history.user.last_name}"
-            )
+            part.fullname = f"{latest_history.user.first_name} {latest_history.user.last_name}"
     return parts
 
 
@@ -383,9 +353,7 @@ async def put_update_part_inventory(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_part = await update_part_inventory(
-        db, part_id, part, user_id=str(current_user.id)
-    )
+    db_part = await update_part_inventory(db, part_id, part, user_id=str(current_user.id))
     if not db_part:
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -424,9 +392,7 @@ async def update_part_status_endpoint(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_part = await update_part_status(
-        db, part_id, status_update, user_id=str(current_user.id)
-    )
+    db_part = await update_part_status(db, part_id, status_update, user_id=str(current_user.id))
     if not db_part:
         raise HTTPException(status_code=404, detail="Part not found")
 
@@ -453,13 +419,9 @@ async def upload_invoice_endpoint(
     current_user=Depends(get_current_user),
 ) -> InvoiceResponse:
     file_data = await file.read()
-    db_invoice = await upload_invoice(
-        db, part_id, file_data, file.filename, user_id=str(current_user.id)
-    )
+    db_invoice = await upload_invoice(db, part_id, file_data, file.filename, user_id=str(current_user.id))
     if not db_invoice:
-        raise HTTPException(
-            status_code=404, detail="Part not found or invoice upload failed"
-        )
+        raise HTTPException(status_code=404, detail="Part not found or invoice upload failed")
     return db_invoice
 
 
@@ -472,9 +434,7 @@ async def delete_invoice_endpoint(
 ):
     result = await delete_invoice(db, invoice_id, user_id=str(current_user.id))
     if not result:
-        raise HTTPException(
-            status_code=404, detail="Part not found or no invoice to delete"
-        )
+        raise HTTPException(status_code=404, detail="Part not found or no invoice to delete")
 
 
 @router.put("/parts/invoice/{invoice_id}", response_model=dict)
@@ -485,13 +445,9 @@ async def update_invoice_endpoint(
     current_user=Depends(get_current_user),
 ):
     file_data = await file.read()
-    db_invoice = await update_invoice(
-        db, invoice_id, file_data, file.filename, user_id=str(current_user.id)
-    )
+    db_invoice = await update_invoice(db, invoice_id, file_data, file.filename, user_id=str(current_user.id))
     if not db_invoice:
-        raise HTTPException(
-            status_code=404, detail="Part not found or no invoice to update"
-        )
+        raise HTTPException(status_code=404, detail="Part not found or no invoice to update")
     return {"message": "Invoice updated successfully", "file_url": db_invoice.file_url}
 
 

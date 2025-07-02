@@ -265,7 +265,7 @@ async def get_cars(
     liked: bool = Query(False, description="Filter by liked cars"),
     ordering: str = Query(
         "created_at_desc",
-        description="Sort vehicles by a specific field. Available options: created_at_desc, current_bid_asc, current_bid_desc, recommendation_status_asc, recommendation_status_desc",
+        description="Sort vehicles by a specific field. Available options: created_at_desc, current_bid_asc, current_bid_desc, recommendation_status_asc, recommendation_status_desc, auction_date_asc, auction_date_desc",
     ),
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
@@ -347,7 +347,9 @@ async def get_cars(
                 logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
-    vehicles, total_count, total_pages = await get_filtered_vehicles(db=db, filters=filters, ordering=ordering, page=page, page_size=page_size)
+    vehicles, total_count, total_pages = await get_filtered_vehicles(
+        db=db, filters=filters, ordering=ordering, page=page, page_size=page_size
+    )
     if not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
         return CarListResponseSchema(cars=[], page_links={}, last=True)
@@ -506,13 +508,24 @@ async def add_part(
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info(f"Adding part for car with ID: {vehicle_id}, part: {part.dict()}", extra=extra)
 
-    new_part = await add_part_to_vehicle(db, vehicle_id, part.dict())
+    new_part, car = await add_part_to_vehicle(db, vehicle_id, part.dict())
     if not new_part:
         logger.warning(f"Car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
 
     logger.info(f"Part added for car with ID: {vehicle_id}, part ID: {new_part.id}", extra=extra)
-    return new_part
+    return PartResponseScheme(
+        name=new_part.name,
+        value=new_part.value,
+        car_id=vehicle_id,
+        id=new_part.id,
+        additional_info={
+            "avg_price": car.avg_market_price or None,
+            "predicted_total_investment": car.predicted_total_investment or None,
+            "predicted_profit_margin": car.predicted_profit_margin or None,
+            "predicted_roi": car.predicted_roi or None,
+        },
+    )
 
 
 @router.put(
@@ -546,13 +559,24 @@ async def update_part_endpoint(
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info(f"Updating part with ID: {part_id} for car with ID: {vehicle_id}", extra=extra)
 
-    updated_part = await update_part(db, vehicle_id, part_id, part.dict())
+    updated_part, car = await update_part(db, vehicle_id, part_id, part.dict())
     if not updated_part:
         logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Part not found")
 
     logger.info(f"Part with ID: {part_id} updated for car with ID: {vehicle_id}", extra=extra)
-    return updated_part
+    return PartResponseScheme(
+        name=updated_part.name,
+        value=updated_part.value,
+        car_id=vehicle_id,
+        id=updated_part.id,
+        additional_info={
+            "avg_price": car.avg_market_price or None,
+            "predicted_total_investment": car.predicted_total_investment or None,
+            "predicted_profit_margin": car.predicted_profit_margin or None,
+            "predicted_roi": car.predicted_roi or None,
+        },
+    )
 
 
 @router.delete(
@@ -584,13 +608,21 @@ async def delete_part_endpoint(
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info(f"Deleting part with ID: {part_id} for car with ID: {vehicle_id}", extra=extra)
 
-    success = await delete_part(db, vehicle_id, part_id)
+    success, car = await delete_part(db, vehicle_id, part_id)
     if not success:
         logger.warning(f"Part with ID {part_id} for car with ID {vehicle_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Part not found")
 
     logger.info(f"Part with ID: {part_id} deleted for car with ID: {vehicle_id}", extra=extra)
-    return {"message": "Part deleted successfully"}
+    return {
+        "message": "Part deleted successfully",
+        "additional_info": {
+            "avg_price": car.avg_market_price or None,
+            "predicted_total_investment": car.predicted_total_investment or None,
+            "predicted_profit_margin": car.predicted_profit_margin or None,
+            "predicted_roi": car.predicted_roi or None,
+        },
+    }
 
 
 @router.post("/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk.")

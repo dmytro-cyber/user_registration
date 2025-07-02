@@ -98,8 +98,6 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 f"Received data for VIN {vin}: {data.get('vehicle', 'No vehicle data')} - {data.get('vin', 'No VIN')} - {data.get('mileage', 'No mileage')} - {data.get('accident_count', 'No accident count')} - {data.get('owners', 'No owners')}"
             )
 
-
-
             screenshot_data = base64.b64decode(data["screenshot"]) if data.get("screenshot") else None
 
             query = select(CarModel).where(CarModel.vin == vin).with_for_update()
@@ -152,6 +150,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                     car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
+                car.predicted_profit_margin = car.predicted_total_investment * (default_roi.profit_margin / 100)
             else:
                 car.predicted_total_investment = 0
                 car.predicted_profit_margin_percent = 0
@@ -237,7 +236,6 @@ async def _update_car_bids_async():
                         car.current_bid = int(float(current_bid))
                         if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    
 
             await db.commit()
             return {"status": "success", "updated_cars": len(data)}

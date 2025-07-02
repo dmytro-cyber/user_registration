@@ -88,13 +88,17 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                             car_id=existing_vehicle.id,
                         )
                     )
-            if vehicle_data.current_bid is not None and existing_vehicle.suggested_bid is not None and vehicle_data.current_bid > existing_vehicle.suggested_bid:
+            if (
+                vehicle_data.current_bid is not None
+                and existing_vehicle.suggested_bid is not None
+                and vehicle_data.current_bid > existing_vehicle.suggested_bid
+            ):
                 existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
 
             if not existing_vehicle.sales_history:
                 if vehicle_data.sales_history:
                     await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
-            
+
             await db.commit()
 
             return False
@@ -262,24 +266,21 @@ async def get_bidding_hub_vehicles(
         order_func = asc if sort_order.lower() == "asc" else desc
 
         history_alias = aliased(HistoryModel)
-        subquery = (
-            select(
-                history_alias.id.label("id"),
-                history_alias.car_id.label("car_id"),
-                history_alias.user_id.label("user_id"),
-                over(
-                    func.row_number(),
-                    partition_by=history_alias.car_id,
-                    order_by=history_alias.created_at.desc(),
-                ).label("rn"),
-            )
-            .subquery()
-        )
+        subquery = select(
+            history_alias.id.label("id"),
+            history_alias.car_id.label("car_id"),
+            history_alias.user_id.label("user_id"),
+            over(
+                func.row_number(),
+                partition_by=history_alias.car_id,
+                order_by=history_alias.created_at.desc(),
+            ).label("rn"),
+        ).subquery()
 
-        query = select(CarModel).outerjoin(
-            subquery, (subquery.c.car_id == CarModel.id) & (subquery.c.rn == 1)
-        ).options(
-            selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user)
+        query = (
+            select(CarModel)
+            .outerjoin(subquery, (subquery.c.car_id == CarModel.id) & (subquery.c.rn == 1))
+            .options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
         )
 
         if current_user.has_role(UserRoleEnum.ADMIN):
@@ -394,7 +395,8 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
     db.add(car)
     await db.commit()
     await db.refresh(new_part)
-    return new_part
+    await db.refresh(car)
+    return new_part, car
 
 
 async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
@@ -420,7 +422,8 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
     db.add(existing_part)
     await db.commit()
     await db.refresh(existing_part)
-    return existing_part
+    await db.refresh(car)
+    return existing_part, car
 
 
 async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
@@ -440,7 +443,8 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
     db.add(car)
     await db.delete(part)
     await db.commit()
-    return True
+    await db.refresh(car)
+    return True, car
 
 
 async def bulk_save_vehicles(db: AsyncSession, vehicles: List[CarCreateSchema]) -> List[str]:

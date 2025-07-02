@@ -25,7 +25,7 @@ class CarBaseSchema(BaseModel):
     engine: float | None
     has_keys: bool | None
     predicted_roi: float | None
-    predicted_profit_margin_percent: float | None
+    predicted_profit_margin: float | None
     current_bid: float | None
     suggested_bid: float | None
     location: str | None
@@ -92,6 +92,7 @@ class CarDetailResponseSchema(BaseModel):
     location: str | None = None
     auction_fee: float | None = None
     recommendation_status: str | None
+    additional_info: dict | None = {}
 
     photos: List[str] = []
 
@@ -121,6 +122,7 @@ class PartRequestScheme(PartBaseScheme):
 class PartResponseScheme(PartBaseScheme):
     id: int
     car_id: int
+    additional_info: dict | None = {}
 
     class Config:
         from_attributes = True

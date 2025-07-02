@@ -373,16 +373,24 @@ class DealerCenterScraper:
                     logging.warning("owner-icon-1.svg found but not displayed, setting owners_value to 1.")
             except NoSuchElementException:
                 owners_value = 0
-                logging.warning("owner-icon-1.svg not found, setting owners_value to 1 by default.")
+                logging.warning("owner-icon-1.svg not found, setting owners_value to 0 by default.")
 
         # Парсимо одометр
-        odometer_text = self.driver.find_element(
-            By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
-        ).text.replace(",", "")
-        odometer_value = int(odometer_text)
+        try:
+            odometer_text = self.driver.find_element(
+                By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
+            ).text.replace(",", "")
+            odometer_value = int(odometer_text)
+        except Exception:
+            logging.warning("Failed to parse odometer value, setting to 0.")
+            odometer_value = 0
 
         # Парсимо кількість аварій
-        accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr")) or 0
+        try:
+            accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr")) or 0
+        except Exception:
+            logging.warning("Failed to parse accidents value, setting to 0.")
+            accidents_value = 0
 
         # Скриншот
         screenshot_base64 = None
