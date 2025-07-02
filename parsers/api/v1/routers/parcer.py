@@ -53,11 +53,9 @@ async def scrape_dc(
             else:
                 result = await asyncio.to_thread(scraper.scrape)
             logger.info(f"Successfully scraped data for VIN {car_vin}")
-            await asyncio.to_thread(scraper.close)
             return DCResponseSchema(**result)
         except Exception as e:
             logger.error(f"Error during scraping for VIN {car_vin}: {str(e)} attempt: {attempts + 1}", exc_info=True)
-            await asyncio.to_thread(scraper.close) if 'scraper' in locals() else None
             attempts += 1
             if attempts < max_attempts:
                 await asyncio.sleep(retry_delay)
