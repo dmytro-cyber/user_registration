@@ -93,6 +93,7 @@ class CarDetailResponseSchema(BaseModel):
     auction_fee: float | None = None
     recommendation_status: str | None
     additional_info: dict | None = {}
+    suggested_bid: float | None = None
 
     photos: List[str] = []
 
@@ -122,7 +123,7 @@ class PartRequestScheme(PartBaseScheme):
 class PartResponseScheme(PartBaseScheme):
     id: int
     car_id: int
-    additional_info: dict | None = {}
+    suggested_bid: float | None = None
 
     class Config:
         from_attributes = True

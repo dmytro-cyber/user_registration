@@ -519,12 +519,7 @@ async def add_part(
         value=new_part.value,
         car_id=vehicle_id,
         id=new_part.id,
-        additional_info={
-            "avg_price": car.avg_market_price or None,
-            "predicted_total_investment": car.predicted_total_investment or None,
-            "predicted_profit_margin": car.predicted_profit_margin or None,
-            "predicted_roi": car.predicted_roi or None,
-        },
+        suggested_bid=car.suggested_bid,
     )
 
 
@@ -570,12 +565,7 @@ async def update_part_endpoint(
         value=updated_part.value,
         car_id=vehicle_id,
         id=updated_part.id,
-        additional_info={
-            "avg_price": car.avg_market_price or None,
-            "predicted_total_investment": car.predicted_total_investment or None,
-            "predicted_profit_margin": car.predicted_profit_margin or None,
-            "predicted_roi": car.predicted_roi or None,
-        },
+        suggested_bid=car.suggested_bid,
     )
 
 
@@ -616,12 +606,7 @@ async def delete_part_endpoint(
     logger.info(f"Part with ID: {part_id} deleted for car with ID: {vehicle_id}", extra=extra)
     return {
         "message": "Part deleted successfully",
-        "additional_info": {
-            "avg_price": car.avg_market_price or None,
-            "predicted_total_investment": car.predicted_total_investment or None,
-            "predicted_profit_margin": car.predicted_profit_margin or None,
-            "predicted_roi": car.predicted_roi or None,
-        },
+        "suggested_bid": car.suggested_bid,
     }
 
 
