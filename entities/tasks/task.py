@@ -146,13 +146,13 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             default_roi = roi_result.scalars().first()
 
             if default_roi:
-                car.predicted_total_investment = (
+                car.predicted_total_investments = (
                     car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
-                car.predicted_profit_margin = car.predicted_total_investment * (default_roi.profit_margin / 100)
+                car.predicted_profit_margin = car.predicted_total_investments * (default_roi.profit_margin / 100)
             else:
-                car.predicted_total_investment = 0
+                car.predicted_total_investments = 0
                 car.predicted_profit_margin_percent = 0
 
             fees_result = await db.execute(
@@ -169,13 +169,13 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             for fee in fees:
                 if fee.percent:
                     # Calculate percentage-based fee
-                    car.auction_fee += (fee.amount / 100) * car.predicted_total_investment
+                    car.auction_fee += (fee.amount / 100) * car.predicted_total_investments
                 else:
                     # Add fixed fee
                     car.auction_fee += fee.amount
 
-            car.suggested_bid = int(car.predicted_total_investment - car.auction_fee)
-            car.predicted_roi = default_roi.roi if car.predicted_total_investment > 0 else 0
+            car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
+            car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
 
             if screenshot_data:
                 s3_storage = S3StorageClient(
