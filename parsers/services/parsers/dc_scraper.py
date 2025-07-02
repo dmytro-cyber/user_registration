@@ -358,9 +358,22 @@ class DealerCenterScraper:
             logging.warning("Timeout waiting for iframe content to load.")
 
         # Парсимо власників
-        owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
-        owners_value = int(owners_element.text) or 1
-
+        try:
+            owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
+            owners_value = int(owners_element.text) or 1
+        except Exception as e:
+            logging.warning(f"Failed to parse owners element: {str(e)}")
+            try:
+                image_element = self.driver.find_element(By.XPATH, "//img[@src='https://www.autocheck.com/reportservice/report/fullReport/img/owner-icon-1.svg']")
+                if image_element.is_displayed():
+                    owners_value = 1
+                    logging.info("Found owner-icon-1.svg, setting owners_value to 1.")
+                else:
+                    owners_value = 1
+                    logging.warning("owner-icon-1.svg found but not displayed, setting owners_value to 1.")
+            except NoSuchElementException:
+                owners_value = 0
+                logging.warning("owner-icon-1.svg not found, setting owners_value to 1 by default.")
 
         # Парсимо одометр
         odometer_text = self.driver.find_element(
