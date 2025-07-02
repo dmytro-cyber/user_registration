@@ -392,11 +392,11 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
 
     new_part = PartModel(**part_data, car_id=car_id)
     db.add(new_part)
-    if not car.parts_cost or car.parts_cost is None or car.parts_cost <= 0:
+    if car.parts_cost is None or car.parts_cost <= 0:
         car.parts_cost = new_part.value
     else:
         car.parts_cost += new_part.value
-    if car.predicted_total_investments and car:
+    if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
@@ -425,7 +425,7 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
 
     if existing_part.value != temp_value:
         car.parts_cost += existing_part.value - temp_value
-        if car.predicted_total_investments and car:
+        if car.suggested_bid is not None:
             car.suggested_bid = car.predicted_total_investments - car.parts_cost
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
@@ -448,7 +448,7 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
     if not part:
         return False
     car.parts_cost -= part.value
-    if car.predicted_total_investments and car:
+    if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
