@@ -383,79 +383,113 @@ async def get_parts_by_vehicle_id(db: AsyncSession, car_id: int) -> List[PartMod
     return result.scalars().all()
 
 
-async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
+async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str, Any]) -> Optional[tuple[PartModel, CarModel]]:
     """Add a part to a vehicle."""
+    logger.info(f"Adding part to vehicle. car_id: {car_id}, part_data: {part_data}")
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
+        logger.error(f"Vehicle not found for car_id: {car_id}")
         return None
 
     new_part = PartModel(**part_data, car_id=car_id)
+    logger.info(f"Created new part: {new_part.__dict__}")
     db.add(new_part)
+    
     if car.parts_cost is None or car.parts_cost <= 0:
         car.parts_cost = new_part.value
+        logger.info(f"Updated car.parts_cost to {new_part.value} as it was None or <= 0")
     else:
         car.parts_cost += new_part.value
+        logger.info(f"Incremented car.parts_cost by {new_part.value}, new value: {car.parts_cost}")
+
     if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-        
+        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+
     db.add(car)
     await db.commit()
     await db.refresh(new_part)
     await db.refresh(car)
+    logger.info(f"Part added successfully. Part ID: {new_part.id}, Updated Car: {car.__dict__}")
     return new_part, car
 
-
-async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[PartModel]:
+async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[tuple[PartModel, CarModel]]:
     """Update a part for a vehicle."""
+    logger.info(f"Updating part. car_id: {car_id}, part_id: {part_id}, part_data: {part_data}")
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
+        logger.error(f"Vehicle not found for car_id: {car_id}")
         return None
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     existing_part = result.scalars().first()
     if not existing_part:
+        logger.error(f"Part not found for part_id: {part_id}, car_id: {car_id}")
         return None
+
     temp_value = existing_part.value
+    logger.info(f"Original part value: {temp_value}")
 
     for key, value in part_data.items():
         setattr(existing_part, key, value)
+        logger.info(f"Updated part.{key} to {value}")
 
     if existing_part.value != temp_value:
         car.parts_cost += existing_part.value - temp_value
-        if car.suggested_bid is not None:
-            car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        logger.info(f"Adjusted car.parts_cost by {existing_part.value - temp_value}, new value: {car.parts_cost}")
+
+    if car.suggested_bid is not None:
+        car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+
     db.add(car)
     db.add(existing_part)
     await db.commit()
     await db.refresh(existing_part)
     await db.refresh(car)
+    logger.info(f"Part updated successfully. Part ID: {existing_part.id}, Updated Car: {car.__dict__}")
     return existing_part, car
 
-
-async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> bool:
+async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool, CarModel]:
     """Delete a part for a vehicle."""
+    logger.info(f"Deleting part. car_id: {car_id}, part_id: {part_id}")
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
     car = result.scalars().first()
     if not car:
-        return None
+        logger.error(f"Vehicle not found for car_id: {car_id}")
+        return False, None
     result = await db.execute(select(PartModel).filter(PartModel.id == part_id, PartModel.car_id == car_id))
     part = result.scalars().first()
     if not part:
-        return False
+        logger.error(f"Part not found for part_id: {part_id}, car_id: {car_id}")
+        return False, car
+
+    logger.info(f"Part to delete: {part.__dict__}, value: {part.value}")
     car.parts_cost -= part.value
+    logger.info(f"Decremented car.parts_cost by {part.value}, new value: {car.parts_cost}")
+
     if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+
     db.add(car)
     await db.delete(part)
     await db.commit()
     await db.refresh(car)
+    logger.info(f"Part deleted successfully. Updated Car: {car.__dict__}")
     return True, car
 
 
