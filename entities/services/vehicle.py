@@ -120,7 +120,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         ),
         additional_info={
             "avg_price": car.avg_market_price or None,
-            "predicted_total_investment": car.predicted_total_investment or None,
+            "predicted_total_investment": car.predicted_total_investments or None,
             "predicted_profit_margin": car.predicted_profit_margin or None,
             "predicted_roi": car.predicted_roi or None,
         },
