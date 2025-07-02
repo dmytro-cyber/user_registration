@@ -39,39 +39,36 @@ async def scrape_dc(
     car_name: str = Query(None, description="Name of the car (optional)"),
     car_engine: str = Query(None, description="Engine type of the car (optional)"),
     only_history: bool = Query(False, description="If true, only scrape history data"),
-):  
+):
     attempts = 0
     max_attempts = 3
+    retry_delay = 5
+
     while attempts < max_attempts:
-        logger.info(f"Starting scrape for VIN {car_vin}")
-        if only_history:
-            try:
-                scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+        logger.info(f"Starting scrape for VIN {car_vin}, attempt {attempts + 1}/{max_attempts}")
+        try:
+            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+            if only_history:
                 result = await asyncio.to_thread(scraper.scrape_only_history)
-                logger.info(f"Successfully scraped data for VIN {car_vin}")
-                return DCResponseSchema(**result)
-            except Exception as e:
-                logger.error(f"Error during scraping for VIN {car_vin}: {str(e)} attempt: {attempts + 1}", exc_info=True)
-                attempts += 1
-                if attempts < max_attempts:
-                    continue
-                else:
-                    logger.error(f"Failed to scrape after {max} attempts for VIN {car_vin}")
-                    return DCResponseSchema(error=str(e))
-        else:
-            try:
-                scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+            else:
                 result = await asyncio.to_thread(scraper.scrape)
-                logger.info(f"Successfully scraped data for VIN {car_vin}")
-                return DCResponseSchema(**result)
-            except Exception as e:
-                logger.error(f"Error during scraping for VIN {car_vin}: {str(e)} attempt: {attempts + 1}", exc_info=True)
-                attempts += 1
-                if attempts < max_attempts:
-                    continue
-                else:
-                    logger.error(f"Failed to scrape after {max} attempts for VIN {car_vin}")
-                    return DCResponseSchema(error=str(e))
+            logger.info(f"Successfully scraped data for VIN {car_vin}")
+            await asyncio.to_thread(scraper.close)
+            return DCResponseSchema(**result)
+        except Exception as e:
+            logger.error(f"Error during scraping for VIN {car_vin}: {str(e)} attempt: {attempts + 1}", exc_info=True)
+            await asyncio.to_thread(scraper.close) if 'scraper' in locals() else None
+            attempts += 1
+            if attempts < max_attempts:
+                await asyncio.sleep(retry_delay)
+                continue
+            else:
+                logger.error(f"Failed to scrape after {max_attempts} attempts for VIN {car_vin}")
+                return DCResponseSchema(error=str(e))
+
+
+    logger.error(f"Unexpected exit after {max_attempts} attempts for VIN {car_vin}")
+    return DCResponseSchema(error="Unexpected error during scraping")
 
 
 @router.post(

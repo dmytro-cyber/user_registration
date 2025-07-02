@@ -358,12 +358,9 @@ class DealerCenterScraper:
             logging.warning("Timeout waiting for iframe content to load.")
 
         # Парсимо власників
-        try:
-            owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
-            owners_value = int(owners_element.text)
-        except:
-            owners_element = self.driver.find_element(By.XPATH, "//div[@class='owner']")
-            owners_value = 1
+        owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
+        owners_value = int(owners_element.text) or 1
+
 
         # Парсимо одометр
         odometer_text = self.driver.find_element(
