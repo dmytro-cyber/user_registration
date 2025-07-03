@@ -193,7 +193,9 @@ async def get_filtered_vehicles(
         .options(selectinload(CarModel.photos))
         .filter(CarModel.date >= today_naive,
                 CarModel.predicted_total_investments.isnot(None),
-                CarModel.predicted_total_investments > 0)
+                CarModel.predicted_total_investments > 0),
+                CarModel.suggested_bid.isnot(None),
+                CarModel.suggested_bid > 0,
     )
 
     def apply_in_filter(field, values):
