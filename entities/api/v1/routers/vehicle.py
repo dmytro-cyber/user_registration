@@ -368,6 +368,7 @@ async def get_cars(
 async def get_car_detail(
     car_id: int,
     db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user)
 ) -> CarDetailResponseSchema:
     """
     Retrieve detailed information for a specific car.
@@ -387,7 +388,7 @@ async def get_car_detail(
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info(f"Fetching details for car with ID: {car_id}", extra=extra)
 
-    car = await get_vehicle_by_id(db, car_id)
+    car = await get_vehicle_by_id(db, car_id, current_user.id)
     if not car:
         logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")

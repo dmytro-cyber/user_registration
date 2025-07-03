@@ -345,8 +345,14 @@ async def get_bidding_hub_vehicles(
         return vehicles, total_count, total_pages
 
 
-async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]:
-    """Get a vehicle by ID with related data."""
+async def get_vehicle_by_id(
+    db: AsyncSession,
+    car_id: int,
+    user_id: Optional[int] = None
+) -> Optional[CarModel]:
+    """Get a vehicle by ID with related data and liked status."""
+    
+    # Fetch the car and related data
     result = await db.execute(
         select(CarModel)
         .options(
@@ -356,7 +362,21 @@ async def get_vehicle_by_id(db: AsyncSession, car_id: int) -> Optional[CarModel]
         )
         .filter(CarModel.id == car_id)
     )
-    return result.scalars().first()
+    car = result.scalars().first()
+    if not car:
+        return None
+
+    # Check if the car is liked by the user
+    if user_id is not None:
+        liked_result = await db.execute(
+            select(user_likes.c.user_id)
+            .filter(user_likes.c.user_id == user_id, user_likes.c.car_id == car_id)
+        )
+        car.liked = liked_result.first() is not None
+    else:
+        car.liked = False
+
+    return car
 
 
 async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) -> Optional[CarModel]:

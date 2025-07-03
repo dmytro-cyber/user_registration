@@ -94,6 +94,9 @@ class CarDetailResponseSchema(BaseModel):
     recommendation_status: str | None
     additional_info: dict | None = {}
     suggested_bid: float | None = None
+    has_correct_mileage: bool | None = None
+    has_correct_vin: bool | None = None
+    liked: bool | None = False
 
     photos: List[str] = []
 
