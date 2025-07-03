@@ -206,10 +206,10 @@ class CarBiddinHubResponseSchema(BaseModel):
     mileage: int | None = None
     date: datetime | None = None
     lot: int | None = None
-    avg_market_price: int | None = None
-    total_investment: int | None = None
-    profit_margin: int | None = None
-    roi: float | None = None
+    avg_market_price: float | None = None
+    predicted_total_investments: float | None = None
+    predicted_profit_margin: float | None = None
+    predicted_roi: float | None = None
     current_bid: float | None = None
     actual_bid: float | None = None
     suggested_bid: float | None = None

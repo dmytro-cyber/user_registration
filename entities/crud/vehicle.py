@@ -191,7 +191,9 @@ async def get_filtered_vehicles(
         select(CarModel).add_columns(liked_expr)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
         .options(selectinload(CarModel.photos))
-        .filter(CarModel.date >= today_naive)
+        .filter(CarModel.date >= today_naive,
+                CarModel.predicted_total_investments.isnot(None),
+                CarModel.predicted_total_investments > 0)
     )
 
     def apply_in_filter(field, values):
