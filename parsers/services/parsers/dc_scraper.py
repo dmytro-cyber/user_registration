@@ -535,7 +535,7 @@ class DealerCenterScraper:
                     )
                 except NoSuchElementException:
                     logging.warning(f"Best match '{best_option}' not found, selecting the first available option.")
-                    best_option_element = option_elements[0]
+                    best_option_element = options[0]
 
                 best_option_element.click()
 
