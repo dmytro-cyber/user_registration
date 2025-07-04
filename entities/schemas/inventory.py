@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, validator, root_validator
 from datetime import datetime
 from typing import List, Optional
 from enum import Enum
@@ -49,6 +49,10 @@ class CarInventoryResponse(BaseModel):
     roi: float = Field(None)
     profit_margin_percent: float = Field(None)
     total_investments: float = Field(None)
+    predicted_total_investments: Optional[float] = Field(None)
+    predicted_profit_margin: Optional[float] = Field(None)
+    predicted_profit_margin_percent: Optional[float] = Field(None)
+    predicted_roi: Optional[float] = Field(None)
     fullname: Optional[str] = None
     car_status: str = Field(..., min_length=1)
     id: int
@@ -56,6 +60,15 @@ class CarInventoryResponse(BaseModel):
 
     class Config:
         orm_mode = True
+    
+    @root_validator(pre=True)
+    def extract_fields_from_car(cls, values):
+        car_data = values.get("car")
+        if car_data:
+            for field in ["predicted_total_investments", "predicted_profit_margin", "predicted_profit_margin_percent", "predicted_roi"]:
+                if field in car_data:
+                    values[field] = car_data[field]
+        return values
 
 
 class CarInventoryDetailResponse(CarInventoryBase):
