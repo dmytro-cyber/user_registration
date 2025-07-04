@@ -145,7 +145,11 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
             default_roi = roi_result.scalars().first()
 
-            if default_roi:
+            if existing_car:
+                car.predicted_total_investments = existing_car.predicted_total_investments
+                car.predicted_profit_margin = existing_car.predicted_profit_margin
+                car.predicted_profit_margin_percent = existing_car.predicted_profit_margin_percent
+            elif default_roi:
                 car.predicted_total_investments = (
                     car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
                 )
