@@ -14,10 +14,5 @@ SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_co
 
 async def get_db():
     async with SessionLocal() as session:
-        try:
-            yield session
-        finally:
-            try:
-                await session.close()
-            except Exception as e:
-                pass
+        yield session
+

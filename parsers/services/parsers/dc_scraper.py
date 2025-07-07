@@ -51,7 +51,7 @@ class Config:
     }
 
     BROWSER_ARGS = {
-        "headless": False,
+        "headless": True,
         "args": [
             "--disable-gpu",
             "--no-sandbox",
@@ -212,7 +212,7 @@ class DealerCenterScraper:
                         logging.error(f"Failed to click Email Verification Code link: {str(e)}")
                         raise
 
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
                 verification_code = self.email_client.get_verification_code()
                 if not verification_code:
                     logging.error("Failed to retrieve verification code. Check SMTP credentials or email settings.")

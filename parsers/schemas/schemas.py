@@ -6,9 +6,9 @@ class DCResponseSchema(BaseModel):
     owners: Optional[int] = None
     mileage: Optional[int] = None
     accident_count: Optional[int] = None
-    jd: Optional[str] = None
-    manheim: Optional[str] = None
-    d_max: Optional[str] = None
+    jd: Optional[int] = None
+    manheim: Optional[int] = None
+    d_max: Optional[int] = None
     html_data: Optional[str] = None  # raw HTML data
     error: Optional[str] = None
 

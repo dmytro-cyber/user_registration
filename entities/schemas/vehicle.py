@@ -239,7 +239,7 @@ class CarBiddinHubResponseSchema(BaseModel):
             date=obj.date,
             lot=obj.lot,
             avg_market_price=obj.avg_market_price,
-            predicted_total_investment=obj.predicted_total_investments,
+            predicted_total_investments=obj.predicted_total_investments,
             predicted_profit_margin=obj.predicted_profit_margin,
             predicted_roi=obj.predicted_roi,
             current_bid=obj.current_bid,

@@ -71,8 +71,8 @@ class CarInventoryResponse(BaseModel):
                 "predicted_profit_margin_percent",
                 "predicted_roi",
             ]:
-                if field in car_data:
-                    values[field] = car_data[field]
+                if hasattr(car_data, field):
+                    values[field] = getattr(car_data, field)
         return values
 
 

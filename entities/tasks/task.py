@@ -134,7 +134,7 @@ async def _parse_and_update_car_async(
                     int(
                         sum(
                             [
-                                int(p.split(".")[0])
+                                int(p)
                                 for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)]
                                 if p
                             ]
@@ -160,7 +160,7 @@ async def _parse_and_update_car_async(
                     car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
-                car.predicted_profit_margin = car.predicted_total_investments * (default_roi.profit_margin / 100)
+                car.predicted_profit_margin = car.avg_market_price * (default_roi.profit_margin / 100)
             else:
                 car.predicted_total_investments = 0
                 car.predicted_profit_margin_percent = 0
@@ -198,6 +198,7 @@ async def _parse_and_update_car_async(
                 await s3_storage.upload_fileobj(file_key, BytesIO(html_data.encode("utf-8")))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
+                await db.flush()
 
             db.add(car)
             await db.commit()
