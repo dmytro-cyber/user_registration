@@ -858,6 +858,7 @@ anyio = "*"
 certifi = "*"
 httpcore = "==1.*"
 idna = "*"
+socksio = {version = "==1.*", optional = true, markers = "extra == \"socks\""}
 
 [package.extras]
 brotli = ["brotli", "brotlicffi"]
@@ -2234,6 +2235,18 @@ files = [
 ]
 
 [[package]]
+name = "socksio"
+version = "1.0.0"
+description = "Sans-I/O implementation of SOCKS4, SOCKS4A, and SOCKS5."
+optional = false
+python-versions = ">=3.6"
+groups = ["main"]
+files = [
+    {file = "socksio-1.0.0-py3-none-any.whl", hash = "sha256:95dc1f15f9b34e8d7b16f06d74b8ccf48f609af32ab33c608d08761c5dcbb1f3"},
+    {file = "socksio-1.0.0.tar.gz", hash = "sha256:f88beb3da5b5c38b9890469de67d0cb0f9d494b78b106ca1845f96c10b91c4ac"},
+]
+
+[[package]]
 name = "sortedcontainers"
 version = "2.4.0"
 description = "Sorted Containers -- Sorted List, Sorted Dict, Sorted Set"
@@ -2945,4 +2958,4 @@ propcache = ">=0.2.1"
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<4.0"
-content-hash = "75c0d43ea54ddfc0c1695c009d520476935c3aba3d9651d5317ccb947853f7d7"
+content-hash = "50f5220d430b004a64322f3b011b5d2bfb4a27da5bd5e5c6020855c47cfc63a5"

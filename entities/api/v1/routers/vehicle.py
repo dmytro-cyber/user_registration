@@ -366,9 +366,7 @@ async def get_cars(
     description="Retrieve detailed information for a specific car by its ID.",
 )
 async def get_car_detail(
-    car_id: int,
-    db: AsyncSession = Depends(get_db),
-    current_user: UserModel = Depends(get_current_user)
+    car_id: int, db: AsyncSession = Depends(get_db), current_user: UserModel = Depends(get_current_user)
 ) -> CarDetailResponseSchema:
     """
     Retrieve detailed information for a specific car.
@@ -651,7 +649,14 @@ async def bulk_create_cars(
             if vehicle_data.vin not in skipped_vins:
                 logger.info(f"Scheduling parse_and_update_car for VIN: {vehicle_data.vin}", extra=extra)
                 parse_and_update_car.delay(
-                    vehicle_data.vin, vehicle_data.vehicle, vehicle_data.engine, vehicle_data.mileage
+                    vin=vehicle_data.vin,
+                    car_name=vehicle_data.vehicle,
+                    car_engine=vehicle_data.engine_title,
+                    mileage=vehicle_data.mileage,
+                    car_make=vehicle_data.make,
+                    car_model=vehicle_data.model,
+                    car_year=vehicle_data.year,
+                    car_transmison=vehicle_data.transmision,
                 )
 
                 await scrape_and_save_sales_history(vehicle_data.vin, db, settings)

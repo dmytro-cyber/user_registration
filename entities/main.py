@@ -22,6 +22,7 @@ app = FastAPI(title="My Async FastAPI Project")
 # async def on_startup():
 #     await _update_car_fees_async()
 
+
 app.add_middleware(
     CORSMiddleware,
     # allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],

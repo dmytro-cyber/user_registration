@@ -146,7 +146,9 @@ async def get_car_inventories(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Fetching inventories with skip={skip}, limit={limit}", extra=extra)
 
-    result = await db.execute(select(CarInventoryModel).options(selectinload(CarInventoryModel.car)).offset(skip).limit(limit))
+    result = await db.execute(
+        select(CarInventoryModel).options(selectinload(CarInventoryModel.car)).offset(skip).limit(limit)
+    )
     inventories = result.scalars().all()
     logger.info(f"Returning {len(inventories)} inventories", extra=extra)
     return inventories

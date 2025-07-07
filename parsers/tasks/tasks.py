@@ -190,6 +190,7 @@ def fetch_api_data():
                 "current_bid": formatted_vehicle.get("current_bid"),
                 "engine": formatted_vehicle.get("engine"),
                 "has_keys": formatted_vehicle.get("has_keys"),
+                "engine_title": formatted_vehicle.get("engine_title"),
                 "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
                 "drive_type": formatted_vehicle.get("drive_type"),
                 "exterior_color": formatted_vehicle.get("exterior_color"),

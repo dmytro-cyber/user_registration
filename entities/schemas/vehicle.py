@@ -160,6 +160,7 @@ class CarCreateSchema(BaseModel):
     seller: str | None = None
     owners: int | None = None
     location: str | None = None
+    engine_title: str | None = None
 
     accident_count: int | None = None
 

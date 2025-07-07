@@ -53,6 +53,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "seller": "seller",
         "link": "link",
         "location": "location",
+        "engine": "engine_title",
         "current_bid": "current_bid",
         "engine_size": "engine",
         "keys": "has_keys",

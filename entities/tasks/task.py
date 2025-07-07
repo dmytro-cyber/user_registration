@@ -63,7 +63,16 @@ async def http_post_with_retries(
             await asyncio.sleep(2**attempt)
 
 
-async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine: str = None, mileage: int = None):
+async def _parse_and_update_car_async(
+    vin: str,
+    car_name: str = None,
+    car_engine: str = None,
+    mileage: int = None,
+    car_make: str = None,
+    car_model: str = None,
+    car_year: int = None,
+    car_transmison: str = None,
+):
     logger.info(
         f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}, mileage: {mileage}"
     )
@@ -86,10 +95,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
             # Формування URL для запиту до API
             only_history = "true" if existing_car else "false"
-            url = (
-                f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_name={car_name}&car_engine={car_engine}"
-                f"&only_history={only_history}"
-            )
+            url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_mileage={mileage}&car_name={car_name}&car_engine={car_engine}&car_make={car_make}&car_model={car_model}&car_year={car_year}&car_transmison={car_transmison}&only_history={only_history}"
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
 
             response = await http_get_with_retries(url, headers=headers, timeout=300.0)
@@ -98,7 +104,7 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                 f"Received data for VIN {vin}: {data.get('vehicle', 'No vehicle data')} - {data.get('vin', 'No VIN')} - {data.get('mileage', 'No mileage')} - {data.get('accident_count', 'No accident count')} - {data.get('owners', 'No owners')}"
             )
 
-            screenshot_data = base64.b64decode(data["screenshot"]) if data.get("screenshot") else None
+            html_data = data.get("html_data", None)
 
             query = select(CarModel).where(CarModel.vin == vin).with_for_update()
             result = await db.execute(query)
@@ -129,12 +135,12 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
                         sum(
                             [
                                 int(p.split(".")[0])
-                                for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)]
+                                for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)]
                                 if p
                             ]
                         )
-                        / len([p for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)] if p])
-                        if [p for p in [data.get(k) for k in ["price", "retail", "manheim"] if data.get(k)] if p]
+                        / len([p for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)] if p])
+                        if [p for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)] if p]
                         else [0]
                     )
                     if not existing_car
@@ -181,15 +187,15 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
             car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
 
-            if screenshot_data:
+            if html_data:
                 s3_storage = S3StorageClient(
                     endpoint_url=settings.S3_STORAGE_ENDPOINT,
                     access_key=settings.S3_STORAGE_ACCESS_KEY,
                     secret_key=settings.S3_STORAGE_SECRET_KEY,
                     bucket_name=settings.S3_BUCKET_NAME,
                 )
-                file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_screenshot.png"
-                await s3_storage.upload_fileobj(file_key, BytesIO(screenshot_data))
+                file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
+                await s3_storage.upload_fileobj(file_key, BytesIO(html_data.encode("utf-8")))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
@@ -203,9 +209,20 @@ async def _parse_and_update_car_async(vin: str, car_name: str = None, car_engine
 
 
 @app.task(name="tasks.task.parse_and_update_car")
-def parse_and_update_car(vin: str, car_name: str = None, car_engine: str = None, mileage: int = None):
+def parse_and_update_car(
+    vin: str,
+    car_name: str = None,
+    car_engine: str = None,
+    mileage: int = None,
+    car_make: str = None,
+    car_model: str = None,
+    car_year: int = None,
+    car_transmison: str = None,
+):
     logger.info(f"Scheduling parse_and_update_car for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
-    return anyio.run(_parse_and_update_car_async, vin, car_name, car_engine, mileage)
+    return anyio.run(
+        _parse_and_update_car_async, vin, car_name, car_engine, mileage, car_make, car_model, car_year, car_transmison
+    )
 
 
 async def _update_car_bids_async():

@@ -60,12 +60,17 @@ class CarInventoryResponse(BaseModel):
 
     class Config:
         orm_mode = True
-    
+
     @root_validator(pre=True)
     def extract_fields_from_car(cls, values):
         car_data = values.get("car")
         if car_data:
-            for field in ["predicted_total_investments", "predicted_profit_margin", "predicted_profit_margin_percent", "predicted_roi"]:
+            for field in [
+                "predicted_total_investments",
+                "predicted_profit_margin",
+                "predicted_profit_margin_percent",
+                "predicted_roi",
+            ]:
                 if field in car_data:
                     values[field] = car_data[field]
         return values

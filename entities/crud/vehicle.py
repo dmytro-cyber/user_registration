@@ -182,10 +182,7 @@ async def get_filtered_vehicles(
     today_naive = datetime.combine(today, time.min)
     user_id = filters["user_id"]
 
-    liked_expr = case(
-        (user_likes.c.user_id == user_id, True),
-        else_=False
-    ).label("liked")
+    liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
     def apply_in_filter(field, values):
         return func.lower(field).in_([v.lower() for v in values])
@@ -200,7 +197,7 @@ async def get_filtered_vehicles(
             CarModel.predicted_total_investments.isnot(None),
             CarModel.predicted_total_investments > 0,
             CarModel.suggested_bid.isnot(None),
-            CarModel.suggested_bid > 0
+            CarModel.suggested_bid > 0,
         )
     )
 
@@ -269,6 +266,7 @@ async def get_filtered_vehicles(
         vehicles_with_liked.append(car)
 
     return vehicles_with_liked, total_count, total_pages
+
 
 async def get_bidding_hub_vehicles(
     db: AsyncSession,
@@ -345,13 +343,9 @@ async def get_bidding_hub_vehicles(
         return vehicles, total_count, total_pages
 
 
-async def get_vehicle_by_id(
-    db: AsyncSession,
-    car_id: int,
-    user_id: Optional[int] = None
-) -> Optional[CarModel]:
+async def get_vehicle_by_id(db: AsyncSession, car_id: int, user_id: Optional[int] = None) -> Optional[CarModel]:
     """Get a vehicle by ID with related data and liked status."""
-    
+
     # Fetch the car and related data
     result = await db.execute(
         select(CarModel)
@@ -369,8 +363,7 @@ async def get_vehicle_by_id(
     # Check if the car is liked by the user
     if user_id is not None:
         liked_result = await db.execute(
-            select(user_likes.c.user_id)
-            .filter(user_likes.c.user_id == user_id, user_likes.c.car_id == car_id)
+            select(user_likes.c.user_id).filter(user_likes.c.user_id == user_id, user_likes.c.car_id == car_id)
         )
         car.liked = liked_result.first() is not None
     else:
@@ -415,7 +408,9 @@ async def get_parts_by_vehicle_id(db: AsyncSession, car_id: int) -> List[PartMod
     return result.scalars().all()
 
 
-async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str, Any]) -> Optional[tuple[PartModel, CarModel]]:
+async def add_part_to_vehicle(
+    db: AsyncSession, car_id: int, part_data: Dict[str, Any]
+) -> Optional[tuple[PartModel, CarModel]]:
     """Add a part to a vehicle."""
     logger.info(f"Adding part to vehicle. car_id: {car_id}, part_data: {part_data}")
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
@@ -427,7 +422,7 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
     new_part = PartModel(**part_data, car_id=car_id)
     logger.info(f"Created new part: {new_part.__dict__}")
     db.add(new_part)
-    
+
     if car.parts_cost is None or car.parts_cost <= 0:
         car.parts_cost = new_part.value
         logger.info(f"Updated car.parts_cost to {new_part.value} as it was None or <= 0")
@@ -437,11 +432,15 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
 
     if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
-        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+        logger.info(
+            f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
+        )
 
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+        logger.info(
+            f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
+        )
 
     db.add(car)
     await db.commit()
@@ -450,7 +449,10 @@ async def add_part_to_vehicle(db: AsyncSession, car_id: int, part_data: Dict[str
     logger.info(f"Part added successfully. Part ID: {new_part.id}, Updated Car: {car.__dict__}")
     return new_part, car
 
-async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]) -> Optional[tuple[PartModel, CarModel]]:
+
+async def update_part(
+    db: AsyncSession, car_id: int, part_id: int, part_data: Dict[str, Any]
+) -> Optional[tuple[PartModel, CarModel]]:
     """Update a part for a vehicle."""
     logger.info(f"Updating part. car_id: {car_id}, part_id: {part_id}, part_data: {part_data}")
     result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
@@ -477,11 +479,15 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
 
     if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
-        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+        logger.info(
+            f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
+        )
 
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+        logger.info(
+            f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
+        )
 
     db.add(car)
     db.add(existing_part)
@@ -490,6 +496,7 @@ async def update_part(db: AsyncSession, car_id: int, part_id: int, part_data: Di
     await db.refresh(car)
     logger.info(f"Part updated successfully. Part ID: {existing_part.id}, Updated Car: {car.__dict__}")
     return existing_part, car
+
 
 async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool, CarModel]:
     """Delete a part for a vehicle."""
@@ -511,11 +518,15 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool
 
     if car.suggested_bid is not None:
         car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
-        logger.info(f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}")
+        logger.info(
+            f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
+        )
 
     if car.current_bid and car.current_bid > car.suggested_bid:
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-        logger.info(f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}")
+        logger.info(
+            f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
+        )
 
     db.add(car)
     await db.delete(part)

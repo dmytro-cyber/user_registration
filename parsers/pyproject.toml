@@ -23,6 +23,7 @@ dependencies = [
     "pyautogui (>=0.9.54,<0.10.0)",
     "cairosvg (>=2.8.2,<3.0.0)",
     "2captcha-python (>=1.5.1,<2.0.0)",
+    "httpx[socks] (>=0.28.1,<0.29.0)",
 ]
 
 

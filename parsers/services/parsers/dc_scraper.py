@@ -2,75 +2,87 @@ import json
 import os
 import re
 import time
-import email
-import imaplib
-import base64
-from typing import List, Optional
-from io import BytesIO
-from PIL import Image
-from email.header import decode_header
+from typing import Optional, Tuple
 from dotenv import load_dotenv
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-import undetected_chromedriver as uc
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from selenium.webdriver.common.action_chains import ActionChains
+from bs4 import BeautifulSoup
+import httpx
+from playwright.async_api import async_playwright
 import logging
+import asyncio
+import imaplib
+import email
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
+)
 
 load_dotenv()
 
+# Configuration class for constants
+class Config:
+    BASE_URL = "https://app.dealercenter.net"
+    AUTOCHECK_URL = f"{BASE_URL}/api-gateway/inventory/AutoCheck/RunAutoCheckReport"
+    VALUATION_URL = f"{BASE_URL}/api-gateway/inventory/BookService/GetValuationValues"
+    MARKET_DATA_URL = f"{BASE_URL}/api-gateway/inventory/MarketData/GetMarketPriceStatistics?mathching=0"
+    TOKEN_VALIDATION_URL = f"{BASE_URL}/api-gateway/admin/userauth/public/validaterefreshtoken"
+    LOGIN_URL = f"{BASE_URL}/apps/shell/reports/home"
 
-class OptionSelector:
-    @staticmethod
-    def select_best_match(options: List[str], reference: str) -> Optional[str]:
-        """
-        Select the best matching option from a list based on the reference string.
+    BASE_HEADERS = {
+        "authority": "app.dealercenter.net",
+        "Accept": "application/json",
+        "Content-Type": "application/*+json",
+        "Origin": BASE_URL,
+        "Referer": f"{BASE_URL}/apps/shell/inventory/vehicle/history-reports",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 OPR/119.0.0.0",
+        "X-Xsrf-Token": "dd091ebc-65c0-413f-af29-5fa9abf2e612",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Ch-Ua": '"Chromium";v="134", "Not:A-Brand";v="24", "Opera";v="119"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": "macOS",
+        "Priority": "u=1, i",
+        "Timezone": "Europe/Kiev",
+        "Dc-Location": "ceaf9582-d242-4911-9b81-2da5fa48b8bb",
+        "Dc-User": "loc=ceaf9582-d242-4911-9b81-2da5fa48b8bb;cache=74e3653a-3a14-43f8-a1c1-64102452b408;type=Self;",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "en-US,en;q=0.9",
+    }
 
-        Args:
-            options (List[str]): List of options to choose from (e.g., ["SLT Quad Cab", "Sport Quad Cab"]).
-            reference (str): Reference string to compare against (e.g., vehicle_name or engine).
+    BROWSER_ARGS = {
+        "headless": False,
+        "args": [
+            "--disable-gpu",
+            "--no-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-web-security",
+            "--allow-insecure-localhost",
+            "--ignore-certificate-errors",
+        ],
+    }
+    CREDENTIALS = {}
 
-        Returns:
-            str: The best matching option, or None if no options are provided.
-        """
-        if not options:
-            return None
+    TIMEOUT = 10
+    MAX_WAIT_VERIFICATION = 30
+    POLL_INTERVAL = 4
+    VIEWPORT = {"width": 1280, "height": 720}
 
-        def to_upper_set(s: str) -> set:
-            """Convert a string to a set of uppercase characters, ignoring spaces and special characters."""
-            return set(re.sub(r"[^a-zA-Z0-9]", "", s).upper())
+# Separate Email Client
+class EmailClient:
+    def __init__(self, email: str, password: str, imap_server: str = "imap.gmail.com"):
+        if not email or not password:
+            raise ValueError("Email and password must be provided in .env (SMTP_USER and SMTP_PASSWORD)")
+        self.email = email
+        self.password = password
+        self.imap_server = imap_server
 
-        reference_set = to_upper_set(reference)
-        differences = []
-
-        for option in options:
-            option_set = to_upper_set(option)
-            diff = len(option_set.symmetric_difference(reference_set))
-            differences.append((diff, option))
-
-        differences.sort(key=lambda x: x[0])
-        return differences[0][1]
-
-
-class GmailClient:
-    def __init__(self):
-        load_dotenv()
-        self.email = os.getenv("SMTP_USER")
-        self.password = os.getenv("SMTP_PASSWORD")
-        self.imap_server = "imap.gmail.com"
-
-    def get_verification_code(self, max_wait=30, poll_interval=4):
+    def get_verification_code(self, max_wait: int = Config.MAX_WAIT_VERIFICATION, poll_interval: int = Config.POLL_INTERVAL) -> Optional[str]:
         """Poll the inbox for the verification code with a maximum wait time."""
         start_time = time.time()
         while time.time() - start_time < max_wait:
-            mail = imaplib.IMAP4_SSL(self.imap_server)
             try:
+                mail = imaplib.IMAP4_SSL(self.imap_server)
                 mail.login(self.email, self.password)
                 mail.select("inbox")
                 status, messages = mail.search(None, '(FROM "do-not-reply@dealercenter.net")')
@@ -85,9 +97,6 @@ class GmailClient:
                 for response_part in msg_data:
                     if isinstance(response_part, tuple):
                         msg = email.message_from_bytes(response_part[1])
-                        subject, encoding = decode_header(msg["Subject"])[0]
-                        if isinstance(subject, bytes):
-                            subject = subject.decode(encoding or "utf-8")
                         body = ""
                         if msg.is_multipart():
                             for part in msg.walk():
@@ -98,9 +107,15 @@ class GmailClient:
                             body = msg.get_payload(decode=True).decode()
                         match = re.search(r"\b\d{6}\b", body)
                         if match:
+                            code = match.group()
+                            logging.info(f"Verification code found: {code}")
                             mail.logout()
-                            return match.group()
+                            return code
                 mail.logout()
+            except imaplib.IMAP4.error as e:
+                logging.error(f"IMAP login failed: {str(e)}")
+                mail.logout()
+                raise
             except Exception as e:
                 logging.error(f"Error checking email: {str(e)}")
                 mail.logout()
@@ -108,752 +123,432 @@ class GmailClient:
         logging.error("Failed to retrieve verification code within the timeout period.")
         return None
 
-
 class DealerCenterScraper:
-    def __init__(
-        self,
-        vin,
-        vehicle_name: str = None,
-        engine: str = None,
-    ):
+    def __init__(self, vin: str, vehicle_name: str = None, engine: str = None, year: int = None, make: str = None, model: str = None, odometer: int = None, transmission: str = None):
         self.vin = vin
         self.vehicle_name = vehicle_name
         self.engine = engine
-        # self.proxy_host = os.getenv("PROXY_HOST")
-        # self.proxy_port = os.getenv("PROXY_PORT")
-        self.cookies_file = "cookies.json"
-        self.driver = self._init_driver()
-        self.wait = WebDriverWait(self.driver, 15)  # Reduced default timeout to 10 seconds
-        self.driver_closed = False  # Flag to track if the driver has been closed
+        self.year = year
+        self.make = make
+        self.model = model
+        self.odometer = odometer
+        self.transmission = transmission
+        self.proxy_host = os.getenv("PROXY_HOST")
+        self.proxy_port = os.getenv("PROXY_PORT")
+        self.credentials_file = "credentials.json"
+        self.dc_username = os.getenv("DC_USERNAME")
+        self.dc_password = os.getenv("DC_PASSWORD")
+        smtp_user = os.getenv("SMTP_USER")
+        smtp_password = os.getenv("SMTP_PASSWORD")
+        if not smtp_user or not smtp_password:
+            raise ValueError("SMTP_USER and SMTP_PASSWORD must be set in .env file")
+        self.email_client = EmailClient(smtp_user, smtp_password)
+        self.cookies = []
+        self.access_token = None
+        self._load_credentials()
 
-    def _init_driver(self):
-        """Initialize the Chrome driver with specified options."""
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-web-security")
-        chrome_options.add_argument("--allow-insecure-localhost")
-        chrome_options.add_argument("--ignore-certificate-errors")
-        chrome_options.add_argument("--disable-background-timer-throttling")
-        chrome_options.add_argument("--disable-backgrounding-occluded-windows")
-        chrome_options.add_argument("--disable-breakpad")
-        chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-infobars")
+    def _load_credentials(self):
+        """Load saved cookies and access token from file."""
+        if Config.CREDENTIALS != {}:
+            self.cookies = Config.CREDENTIALS.get("cookies", [])
+            self.access_token = Config.CREDENTIALS.get("access_token")
+            logging.info("Loaded saved credentials")
 
-        chrome_options.binary_location = "/usr/bin/google-chrome"
+    def _save_credentials(self):
+        """Save cookies and access token to file."""
+        Config.CREDENTIALS = {"cookies": self.cookies, "access_token": self.access_token}
+        logging.info("Saved credentials to Config.CREDENTIALS")
 
-        service = Service()
-        try:
-            driver = uc.Chrome(service=service, options=chrome_options)
-            logging.info("Chrome driver initialized.")
-            return driver
-        except Exception as e:
-            logging.error(f"Failed to initialize Chrome driver: {str(e)}")
-            raise
+    def _get_headers(self):
+        """Generate headers with dynamic Authorization and Cookie."""
+        headers = Config.BASE_HEADERS.copy()
+        headers["Authorization"] = f"Bearer {self.access_token}"
+        headers["Cookie"] = "; ".join([f"{cookie['name']}={cookie['value']}" for cookie in self.cookies])
+        return headers
 
-    def _save_cookies(self):
-        """Save current session cookies to a file."""
-        cookies = self.driver.get_cookies()
-        with open(self.cookies_file, "w") as f:
-            json.dump(cookies, f)
-        logging.info("Cookies saved to file.")
+    def _get_cookies_dict(self):
+        """Generate cookies dictionary from stored cookies."""
+        return {cookie["name"]: cookie["value"] for cookie in self.cookies}
 
-    def _load_cookies(self):
-        """Load session cookies from a file if it exists and validate them."""
-        self.driver.get("https://app.dealercenter.net/apps/shell/reports/home")
-        if not os.path.exists(self.cookies_file):
-            logging.info("Cookies file does not exist.")
-            return False
+    async def _perform_login(self):
+        """Perform the full login process using Playwright."""
+        start_time = time.time()
+        async with async_playwright() as p:
+            browser_args = Config.BROWSER_ARGS.copy()
+            if self.proxy_host and self.proxy_port:
+                browser_args["proxy"] = {"server": f"socks5://{self.proxy_host}:{self.proxy_port}"}
+                logging.info(f"Configured SOCKS5 proxy: {self.proxy_host}:{self.proxy_port}")
 
-        try:
-            self.wait.until(EC.presence_of_element_located((By.TAG_NAME, "body")))
-            with open(self.cookies_file, "r") as f:
-                cookies = json.load(f)
-                for cookie in cookies:
-                    if "domain" in cookie and "dealercenter.net" in cookie["domain"]:
-                        try:
-                            self.driver.add_cookie(cookie)
-                        except Exception as e:
-                            logging.error(f"Failed to add cookie {cookie.get('name')}: {str(e)}")
-                            return False
-            logging.info("Cookies loaded from file.")
-            return True
-        except Exception as e:
-            logging.error(f"Error loading cookies: {str(e)}")
-            return False
-
-    def _clear_cookies_file(self):
-        """Delete the cookies file if it exists."""
-        if os.path.exists(self.cookies_file):
-            os.remove(self.cookies_file)
-            logging.info("Cookies file deleted.")
-
-    def check_session(self):
-        """Check if the current session is active."""
-        try:
-            self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(text(),'Inventory')]")))
-            logging.info("Session is active.")
-            return True
-        except TimeoutException:
-            logging.info("Session is not active.")
-            return False
-
-    def login(self):
-        """Perform login only if the session is not active."""
-        # Try to load cookies and check the session
-        cookies_loaded = self._load_cookies()
-        if cookies_loaded and self.check_session():
-            logging.info("Login not required, session is active.")
-            return
-
-        # If cookies are invalid or loading failed, delete the file and perform login
-        logging.info("Cookies are invalid or session is not active. Clearing cookies and performing login...")
-        self._clear_cookies_file()
-
-        # Логуємо значення змінних
-        dc_username = os.getenv("DC_USERNAME")
-        dc_password = os.getenv("DC_PASSWORD")
-        logging.info(f"DC_USERNAME: {dc_username}")
-        logging.info(f"DC_PASSWORD: {dc_password}")
-
-        # Перевірка, чи змінні не порожні
-        if not dc_username or not dc_password:
-            logging.error("DC_USERNAME or DC_PASSWORD is not set in .env file")
-            raise ValueError("DC_USERNAME or DC_PASSWORD is not set in .env file")
-
-        # Очікуємо поле для логіну
-        try:
-            username_field = self.wait.until(EC.presence_of_element_located((By.ID, "username")))
-            password_field = self.driver.find_element(By.ID, "password")
-            login_button = self.driver.find_element(By.ID, "login")
-            logging.info("Login form elements found")
-        except Exception as e:
-            logging.error(f"Failed to find login form elements: {str(e)}")
-            raise
-
-        # Вводимо логін і пароль
-        username_field.send_keys(dc_username)
-        password_field.send_keys(dc_password)
-        login_button.click()
-        logging.info("Clicked login button")
-
-        # Очікуємо появу кнопки для запиту коду верифікації
-        try:
-            self._click_if_exists(
-                "//span[contains(text(), 'Email Verification Code')]/parent::a", fallback_id="WebMFAEmail"
+            browser = await p.chromium.launch(**browser_args)
+            context = await browser.new_context(
+                user_agent=Config.BASE_HEADERS["User-Agent"],
+                viewport=Config.VIEWPORT,
             )
-            logging.info("Clicked Email Verification Code link")
-        except Exception as e:
-            logging.error(f"Failed to click Email Verification Code link: {str(e)}")
-            raise
+            page = await context.new_page()
 
-        # Added 5-second delay before fetching the verification code
-        time.sleep(5)
-        gmail = GmailClient()
-        verification_code = gmail.get_verification_code(max_wait=30, poll_interval=4)
-        if not verification_code:
-            logging.error("Failed to retrieve verification code.")
-            raise Exception("Failed to retrieve verification code.")
+            try:
+                await page.goto(Config.LOGIN_URL)
+                logging.info("Navigated to DealerCenter login page")
 
-        # Очікуємо поле для введення коду верифікації
-        try:
-            verification_code_field = self.wait.until(EC.presence_of_element_located((By.ID, "email-passcode-input")))
-            submit_button = self.driver.find_element(By.ID, "email-passcode-submit")
-            logging.info("Verification code input field found")
-        except Exception as e:
-            logging.error(f"Failed to find verification code input field: {str(e)}")
-            raise
+                await page.wait_for_selector("#username")
+                await page.fill("#username", self.dc_username)
+                await page.fill("#password", self.dc_password)
+                await page.click("#login")
+                logging.info("Clicked login button")
 
-        # Вводимо код верифікації
-        verification_code_field.send_keys(verification_code)
-        submit_button.click()
-        logging.info("Submitted verification code")
-
-        # Зберігаємо куки
-        self._save_cookies()
-
-    def _click_if_exists(self, xpath, fallback_id=None):
-        """Click an element if it exists, with an optional fallback ID."""
-        try:
-            button = self.wait.until(EC.element_to_be_clickable((By.XPATH, xpath)))
-            button.click()
-        except:
-            if fallback_id:
                 try:
-                    self.driver.find_element(By.ID, fallback_id).click()
+                    await page.wait_for_selector(
+                        "xpath=//span[contains(text(), 'Email Verification Code')]/parent::a",
+                        timeout=10000,
+                    )
+                    await page.click("xpath=//span[contains(text(), 'Email Verification Code')]/parent::a")
+                    logging.info("Clicked Email Verification Code link")
                 except:
-                    pass
+                    try:
+                        await page.wait_for_selector("#WebMFAEmail", timeout=5000)
+                        await page.click("#WebMFAEmail")
+                        logging.info("Clicked fallback WebMFAEmail link")
+                    except Exception as e:
+                        logging.error(f"Failed to click Email Verification Code link: {str(e)}")
+                        raise
 
-    from selenium.webdriver.common.action_chains import ActionChains
-    from selenium.webdriver.support import expected_conditions as EC
-    from selenium.webdriver.common.by import By
+                await asyncio.sleep(5)
+                verification_code = self.email_client.get_verification_code()
+                if not verification_code:
+                    logging.error("Failed to retrieve verification code. Check SMTP credentials or email settings.")
+                    raise Exception("Failed to retrieve verification code.")
 
-    def run_history_report(self):
-        """Run a vehicle history report and extract owners, odometer, and accidents data."""
-        time.sleep(4)
-        drawer_element = None
-        max_retries = 3
+                await page.wait_for_selector("#email-passcode-input")
+                await page.fill("#email-passcode-input", verification_code)
+                await page.click("#email-passcode-submit")
+                logging.info("Submitted verification code")
 
-        for attempt in range(max_retries):
-            try:
-                drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
-                logging.info(f"Drawer element found on attempt {attempt + 1}")
-                break
-            except TimeoutException:
-                logging.warning(f"Attempt {attempt + 1}/{max_retries} failed to find drawer element. Reloading page...")
-                self.driver.refresh()
-                time.sleep(2)
+                await asyncio.sleep(5)
 
-        if drawer_element is None:
-            logging.error("Drawer element not found after retries.")
-            raise RuntimeError("Drawer element not found after retries.")
+                self.cookies = await context.cookies()
+                self._save_credentials()
 
+                await page.goto(Config.TOKEN_VALIDATION_URL)
+                await page.wait_for_load_state("networkidle")
+
+                content = await page.content()
+                logging.info(content)
+                match = re.search(r"<pre>({.*})</pre>", content)
+                if not match:
+                    logging.error("Failed to extract token from response")
+                    raise Exception("Failed to extract token from response")
+                json_data = json.loads(match.group(1))
+                self.access_token = json_data.get("userAccessToken")
+                if not self.access_token:
+                    logging.error("No userAccessToken found in response")
+                    raise Exception("No userAccessToken found in response")
+                logging.info("Access token retrieved")
+                self._save_credentials()
+
+            finally:
+                await browser.close()
+        end_time = time.time()
+        logging.info(f"Login completed in {end_time - start_time} seconds")
+
+    async def authenticate_and_prepare_async(self) -> Tuple[Optional[httpx.Proxy], dict, dict, dict]:
+        """Authenticate and prepare credentials, falling back to login if needed."""
+        start_time = time.time()
+        proxy = None
+        if self.proxy_host and self.proxy_port:
+            proxy = httpx.Proxy(f"socks5://{self.proxy_host}:{self.proxy_port}")
+
+        payload = {
+            "auctionVehicleId": None,
+            "deviceType": None,
+            "format": 1,
+            "inventoryId": None,
+            "language": 1,
+            "reportOwner": 1,
+            "reportType": 1,
+            "userAgent": None,
+            "vin": self.vin,
+        }
+        headers = self._get_headers()
+        cookies_dict = self._get_cookies_dict()
+
+        if self.cookies and self.access_token:
+            async with httpx.AsyncClient(proxy=proxy) as client:
+                try:
+                    response = await client.post(
+                        Config.AUTOCHECK_URL,
+                        headers=headers,
+                        cookies=cookies_dict,
+                        json=payload,
+                        timeout=Config.TIMEOUT,
+                    )
+                    response.raise_for_status()
+                    logging.info("API call succeeded with saved credentials")
+                except httpx.HTTPStatusError as e:
+                    if e.response.status_code in (401, 403):
+                        logging.info("Saved credentials invalid, performing full login")
+                        await self._perform_login()
+                    else:
+                        raise
+                except Exception as e:
+                    logging.error(f"API call failed: {str(e)}")
+                    await self._perform_login()
+        else:
+            logging.info("No saved credentials, performing full login")
+            await self._perform_login()
+
+        end_time = time.time()
+        logging.info(f"Authentication prepared in {end_time - start_time} seconds")
+        return proxy, headers, cookies_dict, payload
+
+    async def get_market_data(self, proxy: Optional[httpx.Proxy], headers: dict, cookies_dict: dict, initial_payload: dict) -> dict:
+        """Retrieve market data including AutoCheck report, JD valuation, and market price statistics."""
+        start_time = time.time()
+        response = await httpx.AsyncClient(proxy=proxy).post(
+            Config.AUTOCHECK_URL,
+            headers=headers,
+            cookies=cookies_dict,
+            json=initial_payload,
+            timeout=Config.TIMEOUT,
+        )
+        response.raise_for_status()
+        response_json = response.json()
+
+        html_data = response_json.get("htmlResponseData")
+        if not html_data:
+            logging.error("htmlResponseData key not found in response")
+            raise Exception("htmlResponseData key not found in response")
+
+        with open("response.html", "w", encoding="utf-8") as f:
+            f.write(html_data)
+        logging.info("HTML saved to response.html")
+
+        soup = BeautifulSoup(html_data, "html.parser")
+
+        owners_value = None
         try:
-            ActionChains(self.driver).move_to_element(drawer_element).perform()
-            time.sleep(1)
+            owners_element = soup.select_one("span.box-title-owners > span")
+            owners_value = int(owners_element.text) if owners_element else 1
+        except:
+            logging.warning("Failed to extract owners, defaulting to 1")
+            owners_value = 1
 
-            inventory_element = self.wait.until(
-                EC.visibility_of_element_located((By.XPATH, "//li[@aria-label='Inventory']"))
+        odometer_value = None
+        try:
+            odometer_element = soup.select_one(
+                "p:contains('Last reported odometer:') span.font-weight-bold"
             )
-            ActionChains(self.driver).move_to_element(inventory_element).perform()
-            time.sleep(0.5)
-            inventory_element.click()
-        except Exception as e:
-            logging.error(f"Failed to interact with Inventory menu: {str(e)}")
-            with open("page_source.html", "w", encoding="utf-8") as f:
-                f.write(self.driver.page_source)
-            logging.info("Page source saved to page_source.html")
-            raise
+            odometer_value = int(odometer_element.text.replace(",", "")) if odometer_element else self.odometer
+        except:
+            logging.error("Failed to extract odometer value")
+            odometer_value = self.odometer
 
-        self._click_if_exists("//button[.//span[contains(text(), 'Run History Report')]]")
-        time.sleep(4)
-
-        self.wait.until(
-            EC.presence_of_all_elements_located((By.XPATH, "//input[contains(@class, 'k-input-inner')]"))
-        )[-1].send_keys(self.vin)
-
-        self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[.//span[.//span[contains(text(), 'Run')]]]"))
-        ).click()
-
-        iframe = self.wait.until(EC.presence_of_element_located((By.CLASS_NAME, "autocheck-content")))
-        iframe_position = self.driver.execute_script("""
-            var iframe = arguments[0];
-            var rect = iframe.getBoundingClientRect();
-            return {
-                top: rect.top,
-                left: rect.left,
-                width: rect.width,
-                height: rect.height
-            };
-        """, iframe)
-
-        self.driver.switch_to.frame(iframe)
-
+        accidents_value = None
         try:
-            self.wait.until(EC.presence_of_element_located((By.XPATH, "//span[contains(@class, 'box-title-owners')]")))
-        except TimeoutException:
-            logging.warning("Timeout waiting for iframe content to load.")
-
-        # Парсимо власників
-        try:
-            owners_element = self.driver.find_element(By.XPATH, "//span[@class='box-title-owners']/span")
-            owners_value = int(owners_element.text) or 1
-        except Exception as e:
-            logging.warning(f"Failed to parse owners element: {str(e)}")
-            try:
-                image_element = self.driver.find_element(By.XPATH, "//img[@src='https://www.autocheck.com/reportservice/report/fullReport/img/owner-icon-1.svg']")
-                if image_element.is_displayed():
-                    owners_value = 1
-                    logging.info("Found owner-icon-1.svg, setting owners_value to 1.")
-                else:
-                    owners_value = 1
-                    logging.warning("owner-icon-1.svg found but not displayed, setting owners_value to 1.")
-            except NoSuchElementException:
-                owners_value = 0
-                logging.warning("owner-icon-1.svg not found, setting owners_value to 0 by default.")
-
-        # Парсимо одометр
-        try:
-            odometer_text = self.driver.find_element(
-                By.XPATH, "//p[contains(., 'Last reported odometer:')]/span[@class='font-weight-bold'][1]"
-            ).text.replace(",", "")
-            odometer_value = int(odometer_text)
-        except Exception:
-            logging.warning("Failed to parse odometer value, setting to 0.")
-            odometer_value = 0
-
-        # Парсимо кількість аварій
-        try:
-            accidents_value = len(self.driver.find_elements(By.XPATH, "//table[@class='table table-striped']/tbody/tr")) or 0
-        except Exception:
-            logging.warning("Failed to parse accidents value, setting to 0.")
+            accidents_elements = soup.select("table.table.table-striped > tbody > tr")
+            accidents_value = len(accidents_elements) if accidents_elements else 0
+        except:
+            logging.warning("Failed to extract accidents, defaulting to 0")
             accidents_value = 0
 
-        # Скриншот
-        screenshot_base64 = None
-        try:
-            total_height = self.driver.execute_script("""
-                return Math.max(
-                    document.body.scrollHeight,
-                    document.body.offsetHeight,
-                    document.documentElement.clientHeight,
-                    document.documentElement.scrollHeight,
-                    document.documentElement.offsetHeight
-                );
-            """)
-            viewport_height = self.driver.execute_script("return window.innerHeight")
-            viewport_width = self.driver.execute_script("return window.innerWidth")
+        payload_jd = {
+            "method": 1,
+            "odometer": self.odometer,
+            "vehicleType": 1,
+            "vin": self.vin,
+            "isTitleBrandCommercial": False,
+            "hasExistingBBBBooked": False,
+            "hasExistingNadaBooked": False,
+            "vehicleBuilds": [
+                {
+                    "bookPeriod": None,
+                    "region": "NC",
+                    "bookType": 2,
+                    "modelId": "some_model_id",
+                    "manheim": None,
+                },
+                {"bookType": 4},
+            ],
+        }
 
-            if total_height == 0 or viewport_height == 0 or viewport_width == 0:
-                raise ValueError("Invalid dimensions for screenshot.")
-
-            iframe_width = iframe_position["width"]
-            iframe_height = iframe_position["height"]
-            iframe_left = iframe_position["left"]
-            iframe_top = iframe_position["top"]
-
-            screenshots = []
-            scroll_position = 0
-            first_loop = True
-
-            while scroll_position < total_height:
-                self.driver.execute_script(f"window.scrollTo(0, {scroll_position});")
-                if first_loop:
-                    time.sleep(1.5)
-                    first_loop = False
-
-                screenshot = self.driver.get_screenshot_as_png()
-                screenshot_img = Image.open(BytesIO(screenshot))
-                overlap = 220
-                next_position = scroll_position + viewport_height - overlap
-
-                crop_box = (
-                    max(0, iframe_left),
-                    max(0, iframe_top),
-                    min(viewport_width, iframe_left + iframe_width),
-                    min(viewport_height, iframe_top + iframe_height),
-                )
-                cropped_img = screenshot_img.crop(crop_box)
-                screenshots.append(cropped_img)
-
-                if next_position >= total_height:
-                    break
-                scroll_position = next_position
-
-            if screenshots:
-                full_screenshot = Image.new("RGB", (int(iframe_width), total_height))
-                offset = 0
-                for screenshot_img in screenshots:
-                    if screenshot_img.width != iframe_width:
-                        screenshot_img = screenshot_img.resize((int(iframe_width), screenshot_img.height), Image.Resampling.LANCZOS)
-                    full_screenshot.paste(screenshot_img, (0, offset))
-                    offset += screenshot_img.height
-
-                width, height = full_screenshot.size
-                crop_box = (0, 100, width, height)
-                full_screenshot = full_screenshot.crop(crop_box)
-
-                buffered = BytesIO()
-                full_screenshot.save(buffered, format="PNG")
-                screenshot_base64 = base64.b64encode(buffered.getvalue()).decode("utf-8")
-                logging.info("Full iframe screenshot captured and cropped.")
-            else:
-                raise ValueError("No screenshots captured.")
-        except Exception as e:
-            logging.error(f"Screenshot capture failed: {str(e)}")
-
-        self.driver.switch_to.default_content()
-        return owners_value, odometer_value, accidents_value, screenshot_base64
-
-    def get_market_data(self, odometer_value):
-        """Retrieve market data including retail value, market price, year, make, model, drivetrain, fuel type, and body style for the vehicle."""
-        try:
-            # Очікуємо наявності батьківського елемента меню
-            drawer_element = self.wait.until(EC.presence_of_element_located((By.XPATH, "//kendo-drawer")))
-            # Наводимо мишу на батьківський елемент для розгортання меню
-            ActionChains(self.driver).move_to_element(drawer_element).perform()
-            time.sleep(1)  # Затримка для розгортання меню
-
-            # Очікуємо, поки елемент "Inventory" стане видимим
-            inventory_element = self.wait.until(
-                EC.visibility_of_element_located((By.XPATH, "//li[@aria-label='Inventory']"))
+        async with httpx.AsyncClient(proxy=proxy) as client:
+            response = await client.post(
+                Config.VALUATION_URL,
+                headers=headers,
+                cookies=cookies_dict,
+                json=payload_jd,
+                timeout=Config.TIMEOUT,
             )
-            # Наводимо мишу на елемент "Inventory"
-            ActionChains(self.driver).move_to_element(inventory_element).perform()
-            time.sleep(0.5)  # Коротка затримка для стабільності
-
-            # Клікаємо на елемент "Inventory"
-            inventory_element.click()
-        except Exception as e:
-            logging.error(f"Failed to interact with Inventory menu: {str(e)}")
-            with open("page_source.html", "w", encoding="utf-8") as f:
-                f.write(self.driver.page_source)
-            logging.info("Page source saved to page_source.html")
-            raise
-
-        self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//button[.//span[contains(text(), 'Appraise New Vehicle')]]"))
-        ).click()
-        time.sleep(5)
-        vin_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-textbox[formcontrolname='vin'] input"))
-        )
-        vin_input.send_keys(self.vin)
-        odometer_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
-        )
-        odometer_input.click()
-        max_attempts = 5
-        attempts = 0
-        while attempts < max_attempts:
-            try:
-                self.wait.until(EC.presence_of_element_located((By.XPATH, "//div[contains(@class, 'car-wrap')]")))
-                option_elements = self.driver.find_elements(By.XPATH, "//div[contains(@class, 'car-wrap')]//h6")
-                options = [elem.text.strip() for elem in option_elements if elem.text.strip()]
-                options.append("automatic")
-
-                if not options:
-                    logging.info("No options found, proceeding with 'Next' button.")
-                    break
-
-                logging.info(f"Found options: {options}")
-
-                reference = self.vehicle_name if self.vehicle_name else ""
-                if self.engine:
-                    reference += f" {self.engine}"
-
-                best_option = OptionSelector.select_best_match(options, reference)
-                logging.info(f"Selected best option: {best_option}")
-
-                try:
-                    best_option_element = self.driver.find_element(
-                        By.XPATH,
-                        f"//div[contains(@class, 'car-wrap')]//h6[contains(text(), '{best_option}')]"
-                    )
-                except NoSuchElementException:
-                    logging.warning(f"Best match '{best_option}' not found, selecting the first available option.")
-                    best_option_element = options[0]
-
-                best_option_element.click()
-
-                self.wait.until(EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))).click()
-                attempts += 1
-
-            except TimeoutException:
-                logging.info("No more option selection windows found, proceeding.")
-                break
-
-        # Додатковий етап: обробка чекбокса
-        try:
-            # Очікуємо наявності чекбокса
-            checkbox_element = WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located(
-                    (By.XPATH, "//input[@type='checkbox' and contains(@class, 'k-checkbox')]"))
-            )
-            # Перевіряємо, чи чекбокс видимий і клікабельний
-            WebDriverWait(self.driver, 10).until(EC.element_to_be_clickable(checkbox_element))
-            # Клікаємо по чекбоксу, якщо він ще не позначений
-            if not checkbox_element.is_selected():
-                checkbox_element.click()
-                logging.info("Checkbox selected.")
-            else:
-                logging.info("Checkbox is already selected.")
-
-            # Очікуємо і натискаємо кнопку "Next" після чекбокса
-            next_button = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.XPATH, "//button[contains(., 'Next')]"))
-            )
-            next_button.click()
-            logging.info("Clicked 'Next' after checkbox.")
-            time.sleep(2)  # Затримка для завантаження наступної сторінки
-
-        except TimeoutException:
-            logging.info("No checkbox or 'Next' button found after car options, proceeding.")
-        except Exception as e:
-            logging.error(f"Failed to handle checkbox or 'Next' button: {str(e)}")
-            with open("page_source.html", "w", encoding="utf-8") as f:
-                f.write(self.driver.page_source)
-            logging.info("Page source saved to page_source.html")
-
-        time.sleep(2)
-        odometer_input = self.wait.until(
-            EC.presence_of_element_located((By.CSS_SELECTOR, "kendo-numerictextbox[formcontrolname='odometer'] input"))
-        )
-        odometer_input.send_keys(str(odometer_value))
-        odometer_input.click()
-        time.sleep(5)
-
-        # Дочекатися зникнення оверлея перед кліком на "Books"
-        WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
-        try:
-            self.wait.until(EC.invisibility_of_element_located((By.TAG_NAME, "dc-ui-shared-loader")))
-            logging.info("Loader disappeared after switching to iframe.")
-        except TimeoutException:
-            logging.warning("Loader did not disappear after switching to iframe, proceeding anyway.")
-
-        # self.wait.until(
-        #     EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
-        # ).click()
-        # time.sleep(3)
-        self.wait.until(
-            EC.element_to_be_clickable((By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Books')]"))
-        ).click()
-
-        # Дочекатися зникнення оверлея перед кліком на "J.D. Power"
-        WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
-
-        self.wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
-            )
-        ).click()
-        time.sleep(1)
-        try:
-            self.wait.until(
-                EC.element_to_be_clickable(
-                    (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'J.D. Power')]")
-                )
-            ).click()
-        except:
-            logging.info("No J.D. Power option selected, proceeding.")
-        logging.info("Clicked 'J.D. Power' button.")
-        retail_value = self.wait.until(
-            EC.presence_of_element_located((By.XPATH, "//kendo-numerictextbox[@formcontrolname='RetailBook']//input"))
-        ).get_attribute("aria-valuenow")
-
-        try:
-            WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
-        except:
-            logging.info("k-overlay elements not found, proceeding.")
-
-        self.wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Manheim')]")
-            )
-        ).click()
-        time.sleep(1)
-        try:
-            logging.info("Clicked 'Manheim' button.")
-            time.sleep(1)
-            manheim = (
-                self.wait.until(
-                    EC.presence_of_element_located(
-                        (
-                            By.XPATH,
-                            "//div[contains(@class, 'center')]//label[contains(text(), 'Based on Advertised Retail Price')]/following-sibling::label[contains(@class, 'fw-bold') and contains(@class, 'fs-px-18')]",
-                        )
-                    )
-                )
-                .text.strip()
-                .replace("$", "")
-                .replace(",", "")
-            ) or None
-        except:
+            response.raise_for_status()
+            response_json = response.json()
+            jd = None
             manheim = None
+            try:
+                jd = int(float(response_json.get("nada", {}).get("retailBook")))
+                manheim = int(float(response_json.get("manheim", {}).get("adjustedWholesaleAverage")))
+            except Exception:
+                logging.error("Failed to extract valuation data")
 
-        # # Дочекатися зникнення оверлея перед кліком на "Market Data"
-        # WebDriverWait(self.driver, 10).until_not(EC.presence_of_element_located((By.CLASS_NAME, "k-overlay")))
-
-        self.wait.until(
-            EC.element_to_be_clickable(
-                (By.XPATH, "//span[contains(@class, 'k-link') and contains(text(), 'Market Data')]")
+        market_data_url = Config.MARKET_DATA_URL
+        payload_market_data = {
+            "vehicleInfo": {
+                "entityID": "00000000-0000-0000-0000-000000000000",
+                "entityTypeID": 3,
+                "vin": self.vin,
+                "stockNumber": "",
+                "year": self.year,
+                "make": self.make,
+                "model": self.model,
+                "odometer": odometer_value or self.odometer,
+                "transmission": self.transmission,
+                "vehiclePrice": 0,
+                "advertisingPrice": 0,
+                "askingPrice": 0,
+                "specialPrice": 0,
+                "specialPriceStartDate": None,
+                "specialPriceEndDate": None,
+                "price": 0,
+                "totalCost": 0,
+                "certified": None,
+            },
+            "filters": {
+                "bodyStyles": [],
+                "driveTrains": [],
+                "engines": [],
+                "equipments": [],
+                "fuelTypes": [],
+                "geoCoordinate": None,
+                "isActive": 1,
+                "isCertified": None,
+                "longitude": 0,
+                "latitude": 0,
+                "modelAggregate": [self.model],
+                "odometerMax": (odometer_value or self.odometer) + 10000 if odometer_value or self.odometer else None,
+                "odometerMin": (odometer_value or self.odometer) - 10000 if odometer_value or self.odometer else None,
+                "packages": [],
+                "radiusInMiles": 1000,
+                "transmissions": [],
+                "yearAdjusment": 0,
+                "years": [self.year],
+                "zip": "27834",
+            },
+            "maxDigitalPriceLockType": None,
+        }
+        async with httpx.AsyncClient(proxy=proxy) as client:
+            response = await client.post(
+                market_data_url,
+                headers=headers,
+                cookies=cookies_dict,
+                json=payload_market_data,
+                timeout=Config.TIMEOUT,
             )
-        ).click()
-        logging.info("Clicked 'Market Data' button.")
-        time.sleep(0.5)
+            response.raise_for_status()
+            response_json = response.json()
+            d_max = None
+            try:
+                d_max = int(float(response_json.get("priceAvg")))
+            except Exception:
+                logging.error("Failed to extract priceAvg, defaulting to 0")
 
-        short_wait = WebDriverWait(self.driver, 5)
+        result = {
+            "owners": owners_value,
+            "mileage": odometer_value,
+            "accident_count": accidents_value,
+            "html_data": html_data,
+            "jd": jd,
+            "manheim": manheim,
+            "d_max": d_max,
+        }
+        end_time = time.time()
+        logging.info(f"Market data collected in {end_time - start_time} seconds")
+        return result
 
-        try:
-            price_tooltip_element = short_wait.until(
-                EC.presence_of_element_located(
-                    (
-                        By.XPATH,
-                        "//span[contains(@class, 'max-digital__risk-slider-bar-tooltip')]//span[contains(@class, 'font-weight-bold')]",
-                    )
-                )
-            )
-            price_value = price_tooltip_element.text.strip().replace("$", "").replace(",", "")
-        except (TimeoutException, NoSuchElementException):
-            price_value = None
-
-        short_wait.until(
-            EC.presence_of_element_located(
-                (
-                    By.XPATH,
-                    "//dc-ui-shared-ui-shared-multiselect[contains(@formcontrolname, 'year') or contains(@formcontrolname, 'make') or contains(@formcontrolname, 'model') or contains(@formcontrolname, 'driveTrain') or contains(@formcontrolname, 'fuel') or contains(@formcontrolname, 'bodyStyle')]",
-                )
-            )
+    async def get_history_only_async(self):
+        """Collect only vehicle history data."""
+        start_time = time.time()
+        proxy, headers, cookies_dict, payload = await self.authenticate_and_prepare_async()
+        response = await httpx.AsyncClient(proxy=proxy).post(
+            Config.AUTOCHECK_URL,
+            headers=headers,
+            cookies=cookies_dict,
+            json=payload,
+            timeout=Config.TIMEOUT,
         )
+        response.raise_for_status()
+        response_json = response.json()
 
-        year_value = None
-        make_value = None
-        model_value = None
-        drivetrain_value = None
-        fuel_value = None
-        body_style_value = None
+        html_data = response_json.get("htmlResponseData")
+        if not html_data:
+            logging.error("htmlResponseData key not found in response")
+            raise Exception("htmlResponseData key not found in response")
 
+        # with open("response.html", "w", encoding="utf-8") as f:
+        #     f.write(html_data)
+        # logging.info("HTML saved to response.html")
+
+        soup = BeautifulSoup(html_data, "html.parser")
+
+        owners_value = None
         try:
-            year_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='year']//div[starts-with(@id, 'tag-')]",
+            owners_element = soup.select_one("span.box-title-owners > span")
+            owners_value = int(owners_element.text) if owners_element else 1
+        except:
+            logging.warning("Failed to extract owners, defaulting to 1")
+            owners_value = 1
+
+        odometer_value = None
+        try:
+            odometer_element = soup.select_one(
+                "p:contains('Last reported odometer:') span.font-weight-bold"
             )
-            year_value = int(year_element.text.strip().split()[0])
-        except NoSuchElementException:
-            pass
+            odometer_value = int(odometer_element.text.replace(",", "")) if odometer_element else self.odometer
+        except:
+            logging.error("Failed to extract odometer value")
+            odometer_value = self.odometer
 
+        accidents_value = None
         try:
-            make_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='make']//div[starts-with(@id, 'tag-')]",
-            )
-            make_value = make_element.text.strip()
-        except NoSuchElementException:
-            pass
+            accidents_elements = soup.select("table.table.table-striped > tbody > tr")
+            accidents_value = len(accidents_elements) if accidents_elements else 0
+        except:
+            logging.warning("Failed to extract accidents, defaulting to 0")
+            accidents_value = 0
 
-        try:
-            model_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='model']//div[starts-with(@id, 'tag-')]",
-            )
-            model_value = model_element.text.strip().split()[0]
-        except NoSuchElementException:
-            pass
+        result = {
+            "owners": owners_value,
+            "mileage": odometer_value,
+            "accident_count": accidents_value,
+            "html_data": html_data,
+            "jd": None,
+            "manheim": None,
+            "d_max": None,
+        }
+        end_time = time.time()
+        logging.info(f"History data collected in {end_time - start_time} seconds")
+        return result
 
-        try:
-            drivetrain_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='driveTrain']//div[starts-with(@id, 'tag-')]",
-            )
-            drivetrain_value = drivetrain_element.text.strip()
-        except NoSuchElementException:
-            pass
-
-        try:
-            fuel_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='fuel']//div[starts-with(@id, 'tag-')]",
-            )
-            fuel_value = fuel_element.text.strip().split()[0]
-        except NoSuchElementException:
-            pass
-
-        try:
-            body_style_element = self.driver.find_element(
-                By.XPATH,
-                "//dc-ui-shared-ui-shared-multiselect[@formcontrolname='bodyStyle']//div[starts-with(@id, 'tag-')]",
-            )
-            body_style_value = body_style_element.text.strip().split()[0]
-        except NoSuchElementException:
-            pass
-
-        return (
-            manheim,
-            retail_value,
-            price_value,
-            year_value,
-            make_value,
-            model_value,
-            drivetrain_value,
-            fuel_value,
-            body_style_value,
-        )
-
-    def close(self):
-        """Close the browser driver safely."""
-        if not self.driver_closed:
-            try:
-                # Close all browser windows
-                for handle in self.driver.window_handles:
-                    self.driver.switch_to.window(handle)
-                    self.driver.close()
-                # Small delay to ensure browser processes terminate
-                time.sleep(1)
-                self.driver.quit()
-                logging.info("Driver closed successfully.")
-            except Exception as e:
-                logging.error(f"Error closing driver: {str(e)}")
-            finally:
-                # Prevent __del__ from calling quit again
-                self.driver.service = None
-                self.driver.session_id = None
-                self.driver_closed = True
-
-    def scrape(self):
-        """Run the full scraping process and return the results."""
-        try:
-            self.login()
-            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-            manheim, retail, price, year, make, model, drivetrain, fuel, body_style = self.get_market_data(odometer)
-            self.close()
-            results = {
-                "owners": owners,
-                "vehicle": f"{year} {make} {model}",
-                "mileage": int(odometer),
-                "accident_count": accidents,
-                "retail": retail,
-                "manheim": manheim,
-                "price": price,
-                "year": int(year),
-                "make": make,
-                "model": model,
-                "drivetrain": drivetrain,
-                "fuel": fuel,
-                "body_style": body_style,
-                "screenshot": screenshot_base64,
-            }
-            for k, v in results.items():
-                if len(str(v)) < 100:
-                    logging.info(f"{k}: {v}")
-            return results
-        finally:
-            try:
-                self.close()
-            except:
-                pass
-
-    def scrape_only_history(self):
-        """Run only the history report scraping process."""
-        try:
-            self.login()
-            owners, odometer, accidents, screenshot_base64 = self.run_history_report()
-            self.close()
-            results = {
-                "owners": owners,
-                "vehicle": None,
-                "mileage": int(odometer),
-                "accident_count": accidents,
-                "screenshot": screenshot_base64,
-                "retail": None,
-                "manheim": None,
-                "price": None,
-                "year": None,
-                "make": None,
-                "model":  None,
-                "drivetrain": None,
-                "fuel": None,
-                "body_style": None,
-            }
-            for k, v in results.items():
-                if len(str(v)) < 100:
-                    logging.info(f"{k}: {v}")
-            return 
-        finally:
-            try:
-                self.close()
-            except:
-                pass
+    async def get_history_and_market_data_async(self):
+        """Collect vehicle history and market data."""
+        start_time = time.time()
+        proxy, headers, cookies_dict, payload = await self.authenticate_and_prepare_async()
+        result = await self.get_market_data(proxy, headers, cookies_dict, payload)
+        end_time = time.time()
+        logging.info(f"History & Market data collected in {end_time - start_time} seconds")
+        return result
 
 
 if __name__ == "__main__":
-    vin = "1B7GL2AN81S127838"
-    name = "2001 DODGE DAKOTA SLT/SPORT"
-    engine = "4.7l v-8 235hp"
-    dc = DealerCenterScraper(vin = vin, vehicle_name = name, engine = engine)
-    result = dc.scrape()
+    vin = "2HKRM4H59GH672591"
+    name = "2016 Honda CR-V"
+    engine = "4-Cyl, i-VTEC, 2.4 Liter"
+    year = 2016
+    make = "Honda"
+    model = "CR-V"
+    odometer = 100000
+    transmission = "Automatic"
+    dc = DealerCenterScraper(vin=vin, vehicle_name=name, engine=engine, year=year, make=make, model=model, odometer=odometer, transmission=transmission)
+    result = asyncio.run(dc.get_history_and_market_data_async())
     for k, v in result.items():
-        if len(str(v)) < 100:
+        if v is not None and len(str(v)) < 100:
             print(f"{k}: {v}")
+        if k == "html_data":
+            print(f"{k}: {len(str(v))}")

@@ -37,6 +37,7 @@ class CarModel(Base):
     seller = Column(String, nullable=True)
     owners = Column(Integer, nullable=True)
     location = Column(String, nullable=True)
+    engine_title = Column(String, nullable=True)
 
     accident_count = Column(Integer, nullable=True)
 

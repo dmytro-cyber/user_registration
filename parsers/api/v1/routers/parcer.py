@@ -38,20 +38,25 @@ async def scrape_dc(
     car_vin: str = Query(..., description="VIN of the car to scrape"),
     car_name: str = Query(None, description="Name of the car (optional)"),
     car_engine: str = Query(None, description="Engine type of the car (optional)"),
+    car_mileage: int = Query(None, description="Mileage of the car (optional)"),
+    car_make: str = Query(..., description="Make of the car"),
+    car_model: str = Query(..., description="Model of the car"),
+    car_year: int = Query(..., description="Year of the car"),
+    car_transmison: str = Query(..., description="Transmission type of the car"),
     only_history: bool = Query(False, description="If true, only scrape history data"),
 ):
     attempts = 0
     max_attempts = 3
-    retry_delay = 5
+    retry_delay = 2
 
     while attempts < max_attempts:
         logger.info(f"Starting scrape for VIN {car_vin}, attempt {attempts + 1}/{max_attempts}")
         try:
-            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine)
+            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine, make=car_make, model=car_model, year=car_year, transmission=car_transmison, odometer=car_mileage)
             if only_history:
-                result = await asyncio.to_thread(scraper.scrape_only_history)
+                result = await scraper.get_history_only_async()
             else:
-                result = await asyncio.to_thread(scraper.scrape)
+                result = await scraper.get_history_and_market_data_async()
             logger.info(f"Successfully scraped data for VIN {car_vin}")
             return DCResponseSchema(**result)
         except Exception as e:
