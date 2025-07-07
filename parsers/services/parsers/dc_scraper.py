@@ -384,7 +384,7 @@ class DealerCenterScraper:
             manheim = None
             try:
                 jd = int(float(response_json.get("nada", {}).get("retailBook")))
-                manheim = int(float(response_json.get("manheim", {}).get("adjustedWholesaleAverage")))
+                manheim = int(float(response_json.get("manheim", {}).get("adjustedRetailAverage")))
             except Exception:
                 logging.error("Failed to extract valuation data")
 
