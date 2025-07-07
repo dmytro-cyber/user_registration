@@ -133,8 +133,8 @@ class DealerCenterScraper:
         self.model = model
         self.odometer = odometer
         self.transmission = transmission
-        self.proxy_host = os.getenv("PROXY_HOST")
-        self.proxy_port = os.getenv("PROXY_PORT")
+        # self.proxy_host = os.getenv("PROXY_HOST")
+        # self.proxy_port = os.getenv("PROXY_PORT")
         self.credentials_file = "credentials.json"
         self.dc_username = os.getenv("DC_USERNAME")
         self.dc_password = os.getenv("DC_PASSWORD")
@@ -175,9 +175,9 @@ class DealerCenterScraper:
         start_time = time.time()
         async with async_playwright() as p:
             browser_args = Config.BROWSER_ARGS.copy()
-            if self.proxy_host and self.proxy_port:
-                browser_args["proxy"] = {"server": f"socks5://{self.proxy_host}:{self.proxy_port}"}
-                logging.info(f"Configured SOCKS5 proxy: {self.proxy_host}:{self.proxy_port}")
+            # if self.proxy_host and self.proxy_port:
+            #     browser_args["proxy"] = {"server": f"socks5://{self.proxy_host}:{self.proxy_port}"}
+            #     logging.info(f"Configured SOCKS5 proxy: {self.proxy_host}:{self.proxy_port}")
 
             browser = await p.chromium.launch(**browser_args)
             context = await browser.new_context(
@@ -254,8 +254,8 @@ class DealerCenterScraper:
         """Authenticate and prepare credentials, falling back to login if needed."""
         start_time = time.time()
         proxy = None
-        if self.proxy_host and self.proxy_port:
-            proxy = httpx.Proxy(f"socks5://{self.proxy_host}:{self.proxy_port}")
+        # if self.proxy_host and self.proxy_port:
+        #     proxy = httpx.Proxy(f"socks5://{self.proxy_host}:{self.proxy_port}")
 
         payload = {
             "auctionVehicleId": None,
@@ -272,7 +272,7 @@ class DealerCenterScraper:
         cookies_dict = self._get_cookies_dict()
 
         if self.cookies and self.access_token:
-            async with httpx.AsyncClient(proxy=proxy) as client:
+            async with httpx.AsyncClient() as client:
                 try:
                     response = await client.post(
                         Config.AUTOCHECK_URL,
@@ -303,7 +303,7 @@ class DealerCenterScraper:
     async def get_market_data(self, proxy: Optional[httpx.Proxy], headers: dict, cookies_dict: dict, initial_payload: dict) -> dict:
         """Retrieve market data including AutoCheck report, JD valuation, and market price statistics."""
         start_time = time.time()
-        response = await httpx.AsyncClient(proxy=proxy).post(
+        response = await httpx.AsyncClient().post(
             Config.AUTOCHECK_URL,
             headers=headers,
             cookies=cookies_dict,
@@ -370,7 +370,7 @@ class DealerCenterScraper:
             ],
         }
 
-        async with httpx.AsyncClient(proxy=proxy) as client:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 Config.VALUATION_URL,
                 headers=headers,
@@ -433,7 +433,7 @@ class DealerCenterScraper:
             },
             "maxDigitalPriceLockType": None,
         }
-        async with httpx.AsyncClient(proxy=proxy) as client:
+        async with httpx.AsyncClient() as client:
             response = await client.post(
                 market_data_url,
                 headers=headers,
@@ -466,7 +466,7 @@ class DealerCenterScraper:
         """Collect only vehicle history data."""
         start_time = time.time()
         proxy, headers, cookies_dict, payload = await self.authenticate_and_prepare_async()
-        response = await httpx.AsyncClient(proxy=proxy).post(
+        response = await httpx.AsyncClient().post(
             Config.AUTOCHECK_URL,
             headers=headers,
             cookies=cookies_dict,
