@@ -1,6 +1,7 @@
 from typing import Union, IO
 import boto3
 from botocore.exceptions import BotoCoreError, NoCredentialsError, HTTPClientError, ConnectionError, ClientError
+import mimetypes
 
 from exceptions.storage import S3ConnectionError, S3FileUploadError
 from storages import S3StorageInterface
@@ -30,9 +31,17 @@ class S3StorageClient(S3StorageInterface):
 
     async def upload_fileobj(self, file_key: str, file_obj: IO) -> None:
         try:
-            self._s3_client.upload_fileobj(file_obj, self._bucket_name, file_key)
+            content_type, _ = mimetypes.guess_type(file_key)
+            extra_args = {"ContentType": content_type} if content_type else {}
+
+            self._s3_client.upload_fileobj(
+                Fileobj=file_obj,
+                Bucket=self._bucket_name,
+                Key=file_key,
+                ExtraArgs=extra_args
+            )
         except ClientError as e:
-            raise
+            raise e
 
     def upload_file(self, file_name: str, file_data: Union[bytes, bytearray]) -> None:
         """
