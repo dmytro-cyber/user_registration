@@ -10,7 +10,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from tasks.task import _update_car_fees_async
 
 
-app = FastAPI(title="My Async FastAPI Project")
+app = FastAPI(title="Cars&Beyond API",
+              description="Cars&Beyond API for managing vehicles, users, and bidding",)
 
 
 # @app.on_event("startup")
