@@ -342,13 +342,20 @@ class DealerCenterScraper:
             logging.error("Failed to extract odometer value")
             odometer_value = self.odometer
 
-        accidents_value = None
+        accidents_value = 0
         try:
-            accidents_elements = soup.select("table.table.table-striped > tbody > tr")
-            accidents_value = len(accidents_elements) if accidents_elements else 0
-        except:
-            logging.warning("Failed to extract accidents, defaulting to 0")
-            accidents_value = 0
+            tables = soup.find_all("table", class_="table table-striped")
+            for table in tables:
+                if "Damage Type" in table.get_text():
+                    rows = table.find_all("tr")
+                    damage_rows = [row for row in rows if len(row.find_all("td")) >= 3]
+                    accidents_value = len(damage_rows)
+                    logging.info(f"✅ Found {accidents_value} accident records.")
+                    break
+            else:
+                logging.warning("⚠️ No damage table with 'Damage Type' found.")
+        except Exception as e:
+            logging.warning(f"❌ Failed to extract accidents: {str(e)}, defaulting to 0")
 
         payload_jd = {
             "method": 1,
@@ -505,13 +512,20 @@ class DealerCenterScraper:
             logging.error("Failed to extract odometer value")
             odometer_value = self.odometer
 
-        accidents_value = None
+        accidents_value = 0
         try:
-            accidents_elements = soup.select("table.table.table-striped > tbody > tr")
-            accidents_value = len(accidents_elements) if accidents_elements else 0
-        except:
-            logging.warning("Failed to extract accidents, defaulting to 0")
-            accidents_value = 0
+            tables = soup.find_all("table", class_="table table-striped")
+            for table in tables:
+                if "Damage Type" in table.get_text():
+                    rows = table.find_all("tr")
+                    damage_rows = [row for row in rows if len(row.find_all("td")) >= 3]
+                    accidents_value = len(damage_rows)
+                    logging.info(f"✅ Found {accidents_value} accident records.")
+                    break
+            else:
+                logging.warning("⚠️ No damage table with 'Damage Type' found.")
+        except Exception as e:
+            logging.warning(f"❌ Failed to extract accidents: {str(e)}, defaulting to 0")
 
         result = {
             "owners": owners_value,
