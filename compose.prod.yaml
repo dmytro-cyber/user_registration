@@ -262,7 +262,7 @@ services:
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     depends_on:
-      - entities
+      # - entities
     env_file:
       - ./docker/nginx/.env
     networks:
