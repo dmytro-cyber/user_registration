@@ -32,6 +32,7 @@ class CarBaseSchema(BaseModel):
     photos: List[str]
     has_correct_mileage: bool | None = None
     has_correct_vin: bool | None = None
+    has_correct_accidents: bool | None = None
     liked: bool
     recommendation_status: str | None
 
@@ -96,6 +97,7 @@ class CarDetailResponseSchema(BaseModel):
     suggested_bid: float | None = None
     has_correct_mileage: bool | None = None
     has_correct_vin: bool | None = None
+    has_correct_accidents: bool | None = None
     liked: bool | None = False
 
     photos: List[str] = []

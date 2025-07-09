@@ -106,7 +106,7 @@ async def _parse_and_update_car_async(
 
             html_data = data.get("html_data", None)
 
-            query = select(CarModel).where(CarModel.vin == vin).with_for_update()
+            query = select(CarModel).where(CarModel.vin == vin).options(selectinload(CarModel.condition_assessments)).with_for_update()
             result = await db.execute(query)
             car = result.scalars().first()
             if not car:
@@ -121,9 +121,14 @@ async def _parse_and_update_car_async(
             if car.mileage is None or not car.has_correct_mileage:
                 car.mileage = int(data.get("mileage", 0)) if data.get("mileage") else 0
             car.accident_count = data.get("accident_count", 0)
+            if car.condition_assessments and car.accident_count == 0:
+                car.has_correct_accidents = False
+            else:
+                car.has_correct_accidents = True
+                
             car.recommendation_status = (
                 RecommendationStatus.RECOMMENDED
-                if car.accident_count <= 2 and car.has_correct_mileage
+                if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
                 else RecommendationStatus.NOT_RECOMMENDED
             )
 
@@ -186,6 +191,7 @@ async def _parse_and_update_car_async(
 
             car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
+
 
             if html_data:
                 s3_storage = S3StorageClient(

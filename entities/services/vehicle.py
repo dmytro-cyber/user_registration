@@ -109,6 +109,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         liked=car.liked,
         has_correct_mileage=car.has_correct_mileage,
         has_correct_vin=car.has_correct_vin,
+        has_correct_accidents=car.has_correct_accidents
         photos=[photo.url for photo in car.photos_hd] if car.photos_hd else [],
         condition_assessments=[
             ConditionAssessmentResponseSchema(
