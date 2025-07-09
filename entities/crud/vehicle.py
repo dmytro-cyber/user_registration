@@ -388,7 +388,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
             car=car,
             vehicle=car.vehicle,
             vin=car.vin,
-            vehicle_cost=car.suggested_bid,
+            vehicle_cost=car.actual_bid,
             car_status=CarInventoryStatus.AWAITING_DELIVERY,
         )
         db.add(car_inventory_model)

@@ -29,6 +29,7 @@ class CarInventoryUpdate(CarInventoryBase):
     vehicle: Optional[str] = Field(None, min_length=1)
     vin: Optional[str] = Field(None, min_length=17, max_length=17)
     car_status: Optional[CarInventoryStatus] = None
+    vehicle_cost: Optional[float] = Field(None)
     comment: str | None = None
 
 
@@ -49,6 +50,7 @@ class CarInventoryResponse(BaseModel):
     roi: float = Field(None)
     profit_margin_percent: float = Field(None)
     total_investments: float = Field(None)
+    vehicle_cost: Optional[float] = Field(None)
     predicted_total_investments: Optional[float] = Field(None)
     predicted_profit_margin: Optional[float] = Field(None)
     predicted_profit_margin_percent: Optional[float] = Field(None)

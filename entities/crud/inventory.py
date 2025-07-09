@@ -180,7 +180,9 @@ async def update_car_inventory(
     db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
     if db_inventory:
         update_data = inventory.dict(exclude_unset=True)
+        action = "Updated: "
         for key, value in update_data.items():
+            action += f"{key} {getattr(db_inventory, key)} -> {value}, "
             setattr(db_inventory, key, value)
         await update_inventory_financials(db, inventory_id)
         await db.commit()
@@ -188,7 +190,7 @@ async def update_car_inventory(
 
         # Create a history record
         history = HistoryModel(
-            action="Updated",
+            action=action,
             user_id=int(user_id),
             car_inventory_id=db_inventory.id,
             comment=inventory.comment,
