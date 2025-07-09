@@ -282,8 +282,8 @@ class CarFilterOptionsSchema(BaseModel):
     owners_range: Dict[str, int] | None = {}
 
 
-class UpdateCurrentBidSchema(BaseModel):
-    current_bid: float
+class UpdateAvtualBidSchema(BaseModel):
+    actual_bid: float
     comment: str | None = None
 
 

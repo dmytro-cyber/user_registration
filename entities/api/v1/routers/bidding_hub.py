@@ -14,7 +14,7 @@ from schemas.vehicle import (
     CarBiddinHubListResponseSchema,
     BiddingHubHistoryListResponseSchema,
     BiddingHubHistorySchema,
-    UpdateCurrentBidSchema,
+    UpdateActualBidSchema,
 )
 from models.user import UserModel
 from models.vehicle import CarStatus
@@ -195,9 +195,9 @@ async def delete_vehicle(
     summary="Update current bid for a vehicle",
     description="Update the current bid for a vehicle in the bidding hub and log the action in history.",
 )
-async def update_current_bid(
+async def update_actual_bid(
     car_id: int,
-    data: UpdateCurrentBidSchema,
+    data: UpdateActualBidSchema,
     current_user: Settings = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
@@ -220,7 +220,7 @@ async def update_current_bid(
     request_id = "N/A"  # No request object available here
     extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
     logger.info(
-        f"Updating current bid for car_id={car_id} to {data.current_bid} by user_id={current_user.id}", extra=extra
+        f"Updating current bid for car_id={car_id} to {data.actual_bid} by user_id={current_user.id}", extra=extra
     )
 
     try:
@@ -231,12 +231,12 @@ async def update_current_bid(
 
         hub_history = HistoryModel(
             car_id=car_id,
-            action=f"Updated current bid from {vehicle.current_bid} to {data.current_bid}",
+            action=f"Updated current bid from {vehicle.actual_bid} to {data.actual_bid}",
             user_id=current_user.id,
             comment=data.comment,
         )
         db.add(hub_history)
-        vehicle.current_bid = data.current_bid
+        vehicle.actual_bid = data.actual_bid
         await db.commit()
         await db.refresh(vehicle)
         logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
