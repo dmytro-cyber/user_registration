@@ -427,13 +427,13 @@ async def update_car_status(
     extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
     logger.info(f"Updating status for car with ID: {car_id}, new status: {status_data.car_status}", extra=extra)
 
-    car = await update_vehicle_status(db, car_id, status_data.car_status)
+    car, old_status = await update_vehicle_status(db, car_id, status_data.car_status)
     if not car:
         logger.warning(f"Car with ID {car_id} not found", extra=extra)
         raise HTTPException(status_code=404, detail="Car not found")
     hub_history = HistoryModel(
         car_id=car_id,
-        action=f"Status changed from {car.car_status.value} to {status_data.car_status.value}",
+        action=f"Status changed from {old_status} to {status_data.car_status.value}",
         user_id=current_user.id,
         comment=status_data.comment,
     )

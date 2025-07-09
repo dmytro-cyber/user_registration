@@ -378,6 +378,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     car = result.scalars().first()
     if not car:
         raise HTTPException(status_code=404, detail="Vehicle not found")
+    old_status = car.car_status.value
 
     car.car_status = car_status
 
@@ -399,7 +400,7 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
 
     await db.commit()
     await db.refresh(car)
-    return car
+    return car, old_status
 
 
 async def get_parts_by_vehicle_id(db: AsyncSession, car_id: int) -> List[PartModel]:

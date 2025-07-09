@@ -53,6 +53,7 @@ class CarInventoryResponse(BaseModel):
     predicted_profit_margin: Optional[float] = Field(None)
     predicted_profit_margin_percent: Optional[float] = Field(None)
     predicted_roi: Optional[float] = Field(None)
+    avg_market_price: Optional[float] = Field(None)
     fullname: Optional[str] = None
     car_status: str = Field(..., min_length=1)
     id: int
@@ -70,6 +71,7 @@ class CarInventoryResponse(BaseModel):
                 "predicted_profit_margin",
                 "predicted_profit_margin_percent",
                 "predicted_roi",
+                "avg_market_price"
             ]:
                 if hasattr(car_data, field):
                     values[field] = getattr(car_data, field)
