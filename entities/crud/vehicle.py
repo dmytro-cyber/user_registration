@@ -400,6 +400,8 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     car.car_status = car_status
 
     if car.car_status == CarStatus.WON:
+        if not car.actual_bid:
+            raise HTTPException(status_code=400, detail="First fill out the actual bid")
         result = await db.execute(select(HistoryModel).where(HistoryModel.car_id == car_id))
         car_inventory_model = CarInventoryModel(
             car=car,
