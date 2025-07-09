@@ -257,8 +257,8 @@ async def get_filtered_vehicles(
         func.max(CarModel.current_bid),
         func.avg(CarModel.current_bid)
     ).select_from(base_query.subquery())
-    min_bid, max_bid, avg_bid = await db.execute(stats_query)
-    min_bid, max_bid, avg_bid = min_bid or 0, max_bid or 0, float(avg_bid or 0)
+    result = await db.execute(stats_query)
+    min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
 
     # Основний запит з liked_expr та сортуванням
     full_query = base_query.add_columns(liked_expr)

@@ -93,6 +93,8 @@ async def read_inventories(
         responses.append(
             CarInventoryResponse(
                 **inventory.__dict__,
+                roi=inventory.roi,
+                profit_margin_percent=inventory.profit_margin_percent,
                 fullname=fullname,
                 total_investments=inventory.total_investments,
             )
