@@ -340,9 +340,14 @@ async def get_bidding_hub_vehicles(
                 "date": CarModel.date,
                 "lot": CarModel.lot,
                 "avg_market_price": CarModel.avg_market_price,
+                "predicted_total_investments": CarModel.predicted_total_investments,
+                "predicted_profit_margin": CarModel.predicted_profit_margin,
+                "predicted_roi": CarModel.predicted_roi,
+                "actual_bid": CarModel.actual_bid,
                 "status": CarModel.car_status,
             }
             sort_field = sort_field_mapping.get(sort_by)
+            
             if sort_field:
                 query = query.order_by(order_func(sort_field))
 
