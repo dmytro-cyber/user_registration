@@ -256,6 +256,7 @@ class CarInventoryModel(Base):
 
     net_profit = Column(Float, nullable=True)
 
+    final_sale_price = Column(Float, nullable=True)
     vehicle_cost = Column(Float, nullable=True)
     parts_cost = Column(Float, nullable=True)
     maintenance = Column(Float, nullable=True)

@@ -30,6 +30,7 @@ class CarInventoryUpdate(CarInventoryBase):
     vin: Optional[str] = Field(None, min_length=17, max_length=17)
     car_status: Optional[CarInventoryStatus] = None
     vehicle_cost: Optional[float] = Field(None)
+    final_sale_price: Optional[float] = Field(None)
     comment: str | None = None
 
 
@@ -45,6 +46,7 @@ class CarInventoryResponse(BaseModel):
 
     purchase_date: datetime
 
+    final_sale_price: Optional[float] = Field(None)
     net_profit: Optional[float]
     total_investments: float = Field(None)
     roi: float = Field(None)
