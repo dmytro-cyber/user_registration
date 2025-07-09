@@ -51,6 +51,7 @@ class CarListResponseSchema(BaseModel):
     cars: List[CarBaseSchema]
     page_links: dict
     last: bool
+    bid_info: dict | None = {}
 
 
 class ConditionAssessmentResponseSchema(BaseModel):

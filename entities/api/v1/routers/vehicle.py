@@ -347,14 +347,14 @@ async def get_cars(
                 logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
                 return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
-    vehicles, total_count, total_pages = await get_filtered_vehicles(
+    vehicles, total_count, total_pages, additional = await get_filtered_vehicles(
         db=db, filters=filters, ordering=ordering, page=page, page_size=page_size
     )
     if not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
         return CarListResponseSchema(cars=[], page_links={}, last=True)
     base_url = str(request.url.remove_query_params("page"))
-    response = await prepare_response(vehicles, total_pages, page, base_url)
+    response = await prepare_response(vehicles, total_pages, page, base_url, additional)
     logger.info(f"Returning {len(response.cars)} cars, total pages: {total_pages}", extra=extra)
     return response
 

@@ -62,7 +62,7 @@ async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings
 
 
 async def prepare_response(
-    vehicles: List[CarModel], total_pages: int, page: int, base_url: str
+    vehicles: List[CarModel], total_pages: int, page: int, base_url: str, bid_info: dict
 ) -> CarListResponseSchema:
     """Prepare the response with validated cars and pagination links."""
     validated_cars = []
@@ -77,7 +77,7 @@ async def prepare_response(
             raise HTTPException(status_code=500, detail=f"Validation error for car VIN {car.vin}: {str(e)}")
 
     page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
-    return CarListResponseSchema(cars=validated_cars, page_links=page_links, last=(total_pages == page))
+    return CarListResponseSchema(cars=validated_cars, page_links=page_links, last=(total_pages == page), bid_info=bid_info)
 
 
 async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
@@ -109,7 +109,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         liked=car.liked,
         has_correct_mileage=car.has_correct_mileage,
         has_correct_vin=car.has_correct_vin,
-        has_correct_accidents=car.has_correct_accidents
+        has_correct_accidents=car.has_correct_accidents,
         photos=[photo.url for photo in car.photos_hd] if car.photos_hd else [],
         condition_assessments=[
             ConditionAssessmentResponseSchema(
