@@ -123,6 +123,8 @@ async def _parse_and_update_car_async(
             car.accident_count = data.get("accident_count", 0)
             if car.condition_assessments and car.accident_count == 0:
                 car.has_correct_accidents = False
+            elif car.accident_count > 0 and not car.condition_assessments:
+                car.has_correct_accidents = False
             else:
                 car.has_correct_accidents = True
                 
