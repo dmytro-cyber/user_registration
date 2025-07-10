@@ -259,7 +259,7 @@ services:
       - ./cert.pem:/etc/nginx/certs/cert.pem:ro
       - ./key.pem:/etc/nginx/certs/key.pem:ro
       - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
-      - ./user_registration/configs/nginx/static/robots.txt:/usr/share/nginx/html/robots.txt:ro
+      - ./configs/nginx/static/robots.txt:/usr/share/nginx/html/robots.txt:ro
       - ./certbot/www:/var/www/certbot
       - ./certbot/conf:/etc/letsencrypt
     depends_on:
