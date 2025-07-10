@@ -53,6 +53,7 @@ class CarModel(Base):
     price_sold = Column(Float, nullable=True)
     suggested_bid = Column(Float, nullable=True)
     avg_market_price = Column(Integer, nullable=True)
+    fuel_type = Column(String, nullable=True)
 
     # Additional costs
     parts_cost = Column(Float, nullable=True)

@@ -42,6 +42,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     field_mapping = {
         "vin": "vin",
         "title": "vehicle",
+        "fuel": "fuel_type",
         "make": "make",
         "model": "model",
         "year": "year",

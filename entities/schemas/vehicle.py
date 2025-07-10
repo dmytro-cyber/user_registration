@@ -164,6 +164,7 @@ class CarCreateSchema(BaseModel):
     owners: int | None = None
     location: str | None = None
     engine_title: str | None = None
+    fuel_type: str | None = None
 
     accident_count: int | None = None
 
@@ -283,6 +284,12 @@ class CarFilterOptionsSchema(BaseModel):
     mileage_range: Dict[str, int] | None = {}
     accident_count_range: Dict[str, int] | None = {}
     owners_range: Dict[str, int] | None = {}
+    transmissions: List[str] | None = []
+    body_styles: List[str] | None = []
+    vehicle_types: List[str] | None = []
+    drive_types: List[str] | None = []
+    engine_cylinders: List[int] | None = []
+    fuel_type: List[str] | None = []
 
 
 class UpdateActualBidSchema(BaseModel):

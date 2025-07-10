@@ -174,6 +174,36 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             models_result = await db.execute(model_query)
             models = [row[0] for row in models_result.fetchall()]
 
+            # Fetch unique transmission values
+            transmission_query = select(distinct(CarModel.transmision)).where(CarModel.transmision.isnot(None))
+            transmission_result = await db.execute(transmission_query)
+            transmissions = [row[0] for row in transmission_result.fetchall()]
+            
+            # Fetch unique body_style values
+            body_style_query = select(distinct(CarModel.body_style)).where(CarModel.body_style.isnot(None))
+            body_style_result = await db.execute(body_style_query)
+            body_styles = [row[0] for row in body_style_result.fetchall()]
+
+            # Fetch unique vehicle_type values
+            vehicle_type_query = select(distinct(CarModel.vehicle_type)).where(CarModel.vehicle_type.isnot(None))
+            vehicle_type_result = await db.execute(vehicle_type_query)
+            vehicle_types = [row[0] for row in vehicle_type_result.fetchall()]
+
+            # Fetch unique fuel_type values
+            fuel_type_query = select(distinct(CarModel.fuel_type)).where(CarModel.fuel_type.isnot(None))
+            fuel_type_result = await db.execute(fuel_type_query)
+            fuel_types = [row[0] for row in fuel_type_result.fetchall()]
+            
+            # Fetch unique drive_type values
+            drive_type_query = select(distinct(CarModel.drive_type)).where(CarModel.drive_type.isnot(None))
+            drive_type_result = await db.execute(drive_type_query)
+            drive_types = [row[0] for row in drive_type_result.fetchall()]
+
+            # Fetch unique engine_cylinder values
+            engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(CarModel.engine_cylinder.isnot(None))
+            engine_cylinder_result = await db.execute(engine_cylinder_query)
+            engine_cylinders = [row[0] for row in engine_cylinder_result.fetchall()]
+
             # Fetch unique location values
             location_query = select(distinct(CarModel.location)).where(CarModel.location.isnot(None))
             locations_result = await db.execute(location_query)
@@ -219,9 +249,15 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             models=models,
             locations=locations,
             years=year_range,
+            transmissions=transmissions,
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
             owners_range=owners_range,
+            body_styles=body_styles,
+            vehicle_types=vehicle_types,
+            drive_types=drive_types,
+            engine_cylinders=engine_cylinders,
+            fuel_types=fuel_types
         )
         logger.info(f"Successfully fetched filter options")
         return response
