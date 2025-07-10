@@ -5,6 +5,7 @@ from api.v1.routers.vehicle import router as vehicle_router
 from api.v1.routers.admin import router as admin_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
+from api.v1.routers.analytic import router as analytics_router
 from core.setup import create_roles
 from fastapi.middleware.cors import CORSMiddleware
 from tasks.task import _update_car_fees_async
@@ -45,6 +46,7 @@ app.include_router(vehicle_router, prefix="/api/v1", tags=["Vehicle"])
 app.include_router(admin_router, prefix="/api/v1", tags=["Admin"])
 app.include_router(bidding_hub_router, prefix="/api/v1", tags=["Bidding Hub"])
 app.include_router(inventory_router, prefix="/api/v1", tags=["Inventory"])
+app.include_router(analytics_router, prefix="/api/v1", tags=["Analytics"])
 
 if __name__ == "__main__":
     import uvicorn

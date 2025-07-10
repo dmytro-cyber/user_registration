@@ -241,7 +241,7 @@ async def _update_car_bids_async():
     async with AsyncSessionFactory() as db:
         try:
             current_time = datetime.utcnow()
-            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.date < current_time)
+            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.date > current_time)
             result = await db.execute(query)
             cars = [{"id": r.id, "url": r.link, "lot": r.lot} for r in result.all()]
 
