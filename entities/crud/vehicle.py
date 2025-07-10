@@ -231,6 +231,14 @@ async def get_filtered_vehicles(
         base_query = base_query.filter(CarModel.mileage >= filters["mileage_min"])
     if filters.get("mileage_max") is not None:
         base_query = base_query.filter(CarModel.mileage <= filters["mileage_max"])
+    if filters.get("predicted_profit_margin_min") is not None:
+        base_query = base_query.filter(CarModel.predicted_profit_margin >= filters["predicted_profit_margin_min"])
+    if filters.get("predicted_profit_margin_max") is not None:
+        base_query = base_query.filter(CarModel.predicted_profit_margin <= filters["predicted_profit_margin_max"])
+    if filters.get("predicted_roi_min") is not None:
+        base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
+    if filters.get("predicted_roi_max") is not None:
+        base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
 
     if filters.get("min_owners_count") is not None:
         base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
