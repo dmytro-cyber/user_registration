@@ -2,8 +2,6 @@ from fastapi import APIRouter, Depends, HTTPException, status, Query, File, Uplo
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi.encoders import jsonable_encoder
-from schemas.analytic import AuctionFilters
-from services.analytic import build_top_sellers_query
 from db.session import get_db
 from typing import Optional, List, Literal
 from sqlalchemy import text
