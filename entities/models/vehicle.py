@@ -91,6 +91,7 @@ class CarModel(Base):
     vehicle_type = Column(String, nullable=True)
     link = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=True, default=func.now())
+    condition = Column(String, nullable=True)
 
     inventory = relationship(
         "CarInventoryModel",

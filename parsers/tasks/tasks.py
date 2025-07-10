@@ -194,6 +194,7 @@ def fetch_api_data():
                 "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
                 "drive_type": formatted_vehicle.get("drive_type"),
                 "exterior_color": formatted_vehicle.get("exterior_color"),
+                "condition": formatted_vehicle.get("condition"),
                 "body_style": formatted_vehicle.get("body_style"),
                 "fuel_type": formatted_vehicle.get("fuel_type"),
                 "transmision": formatted_vehicle.get("transmision"),

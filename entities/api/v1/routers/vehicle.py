@@ -198,6 +198,11 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             drive_type_query = select(distinct(CarModel.drive_type)).where(CarModel.drive_type.isnot(None))
             drive_type_result = await db.execute(drive_type_query)
             drive_types = [row[0] for row in drive_type_result.fetchall()]
+            
+            # Fetch unique condition values
+            condition_query = select(distinct(CarModel.condition)).where(CarModel.condition.isnot(None))
+            condition_result = await db.execute(condition_query)
+            conditions = [row[0] for row in condition_result.fetchall()]
 
             # Fetch unique engine_cylinder values
             engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(CarModel.engine_cylinder.isnot(None))
@@ -249,15 +254,16 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             models=models,
             locations=locations,
             years=year_range,
-            transmissions=transmissions,
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
             owners_range=owners_range,
             body_styles=body_styles,
             vehicle_types=vehicle_types,
+            transmissions=transmissions,
             drive_types=drive_types,
             engine_cylinders=engine_cylinders,
-            fuel_types=fuel_types
+            fuel_types=fuel_types,
+            conditions=conditions,
         )
         logger.info(f"Successfully fetched filter options")
         return response
@@ -297,6 +303,14 @@ async def get_cars(
     date_to: Optional[date] = Query(None, description="Date to (YYYY-MM-DD)"),
     make: List[str] = Query(None, description="Make"),
     model: List[str] = Query(None, description="Model"),
+    body_style: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    vehicle_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    transmission: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    drive_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    engine_cylinder: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
     liked: bool = Query(False, description="Filter by liked cars"),
     ordering: str = Query(
@@ -358,6 +372,14 @@ async def get_cars(
         "model": model,
         "liked": liked,
         "user_id": current_user.id if current_user else None,
+        "body_style": body_style.split(",") if body_style else None,
+        "vehicle_type": vehicle_type.split(",") if vehicle_type else None,
+        "transmission": transmission.split(",") if transmission else None,
+        "drive_type": drive_type.split(",") if drive_type else None,
+        "engine_cylinder": [int(c) for c in engine_cylinder.split(",")] if engine_cylinder else None,
+        "fuel_type": fuel_type.split(",") if fuel_type else None,
+        "condition": condition.split(",") if condition else None,
+        
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
 

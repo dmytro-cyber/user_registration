@@ -204,6 +204,20 @@ async def get_filtered_vehicles(
     # Застосування фільтрів
     if filters.get("make"):
         base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
+    if filters.get("body_style"):
+        base_query = base_query.filter(apply_in_filter(CarModel.body_style, filters["body_style"]))
+    if filters.get("vehicle_type"):
+        base_query = base_query.filter(apply_in_filter(CarModel.vehicle_type, filters["vehicle_type"]))
+    if filters.get("transmission"):
+        base_query = base_query.filter(apply_in_filter(CarModel.transmision, filters["transmission"]))
+    if filters.get("drive_type"):
+        base_query = base_query.filter(apply_in_filter(CarModel.drive_type, filters["drive_type"]))
+    if filters.get("engine_cylinder"):
+        base_query = base_query.filter(apply_in_filter(CarModel.engine_cylinder, filters["engine_cylinder"]))
+    if filters.get("fuel_type"):
+        base_query = base_query.filter(apply_in_filter(CarModel.fuel_type, filters["fuel_type"]))
+    if filters.get("condition"):
+        base_query = base_query.filter(apply_in_filter(CarModel.condition, filters["condition"]))
     if filters.get("model"):
         base_query = base_query.filter(apply_in_filter(CarModel.model, filters["model"]))
     if filters.get("auction"):

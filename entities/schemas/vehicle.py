@@ -199,6 +199,7 @@ class CarCreateSchema(BaseModel):
     style_id: int | None = None
     transmision: str | None = None
     vehicle_type: str | None = None
+    condition: str | None = None
 
     photos: List[PhotoSchema] = Field(default=[], exclude=True)
     photos_hd: List[PhotoSchema] = Field(default=[], exclude=True)
@@ -289,7 +290,8 @@ class CarFilterOptionsSchema(BaseModel):
     vehicle_types: List[str] | None = []
     drive_types: List[str] | None = []
     engine_cylinders: List[int] | None = []
-    fuel_type: List[str] | None = []
+    fuel_types: List[str] | None = []
+    conditions: List[str] | None = []
 
 
 class UpdateActualBidSchema(BaseModel):
