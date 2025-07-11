@@ -106,6 +106,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         location=car.location,
         auction_fee=car.auction_fee,
         suggested_bid=car.suggested_bid,
+        auction_name=car.auction_name,
         liked=car.liked,
         has_correct_mileage=car.has_correct_mileage,
         has_correct_vin=car.has_correct_vin,
@@ -127,6 +128,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
             "predicted_total_investment": car.predicted_total_investments or None,
             "predicted_profit_margin": car.predicted_profit_margin or None,
             "predicted_roi": car.predicted_roi or None,
+            "current_bid": car.current_bid,
         },
     )
 

@@ -82,6 +82,7 @@ class CarDetailResponseSchema(BaseModel):
     drive_type: str | None
     transmision: str | None
     vehicle_type: str | None
+    auction_name: str | None
     exterior_color: str | None
     body_style: str | None
     interior_color: str | None
