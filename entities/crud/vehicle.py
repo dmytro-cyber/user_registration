@@ -261,6 +261,8 @@ async def get_filtered_vehicles(
     if filters.get("date_to"):
         date_to = datetime.strptime(filters["date_to"], "%Y-%m-%d").date()
         base_query = base_query.filter(CarModel.date <= date_to)
+    if filters.get("recommended_only"):
+        base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
 
     if filters.get("liked"):
         if user_id is not None:

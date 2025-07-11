@@ -314,6 +314,7 @@ async def get_cars(
     engine_cylinder: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
     
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
     liked: bool = Query(False, description="Filter by liked cars"),
@@ -387,6 +388,7 @@ async def get_cars(
         "engine_cylinder": [int(c) for c in engine_cylinder.split(",")] if engine_cylinder else None,
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
+        "recommended_only": recommended_only,
         
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
