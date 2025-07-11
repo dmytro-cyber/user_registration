@@ -380,6 +380,8 @@ async def get_bidding_hub_vehicles(
             
             if sort_field:
                 query = query.order_by(order_func(sort_field))
+            else:
+                raise HTTPException(status_code=400, detail=f"Sorting by {sort_by} not alowed")
 
         total_count = await session.scalar(select(func.count()).select_from(query.subquery()))
         total_pages = (total_count + page_size - 1) // page_size
