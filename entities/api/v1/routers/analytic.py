@@ -56,10 +56,10 @@ router = APIRouter(prefix="/analytic")
 
 
 
-def normalize_csv_param(val: Optional[str]) -> Optional[List[str]]:
+def normalize_csv_param(val: Optional[str]) -> List[str]:
     if val:
         return [v.strip() for v in val.split(",") if v.strip()]
-    return None
+    return []
 
 def normalize_date_param(val: Optional[str]) -> Optional[str]:
     try:
