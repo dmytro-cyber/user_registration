@@ -55,7 +55,35 @@ logger.addFilter(ContextFilter())
 router = APIRouter(prefix="/analytic")
 
 
-@router.get("/recommended-cars")
+
+def normalize_csv_param(val: Optional[str]) -> Optional[List[str]]:
+    if val:
+        return [v.strip() for v in val.split(",") if v.strip()]
+    return None
+
+def normalize_date_param(val: Optional[str]) -> Optional[str]:
+    try:
+        return datetime.strptime(val, "%Y-%m-%d").date() if val else None
+    except ValueError:
+        return None
+
+
+@router.get("/recommended-cars", description="""
+Returns a list of recommended cars (with status 'RECOMMENDED') that match the provided filters.
+
+📌 You can pass comma-separated string values for multi-value fields, like:
+- `make=Toyota,Ford`
+- `vehicle_types=Sedan,SUV`
+- `transmission=Automatic,Manual`
+
+Supported filters include:
+- Mileage, owners, accident count, year
+- Vehicle condition, type, engine, transmission, drivetrain, cylinders
+- Make, model, ROI and profit margin ranges
+- Auction, location, body style
+
+Only cars with upcoming auction dates and assigned sellers will be returned.
+""")
 async def get_recommended_cars(
     db: AsyncSession = Depends(get_db),
     mileage_start: Optional[int] = None,
@@ -66,20 +94,20 @@ async def get_recommended_cars(
     accident_end: Optional[int] = None,
     year_start: Optional[int] = None,
     year_end: Optional[int] = None,
-    vehicle_condition: Optional[List[str]] = Query(None),
-    vehicle_types: Optional[List[str]] = Query(None),
+    vehicle_condition: Optional[str] = Query(None),
+    vehicle_types: Optional[str] = Query(None),
     make: Optional[str] = None,
     model: Optional[str] = None,
     predicted_roi_start: Optional[float] = None,
     predicted_roi_end: Optional[float] = None,
     predicted_profit_margin_start: Optional[float] = None,
     predicted_profit_margin_end: Optional[float] = None,
-    engine_type: Optional[List[str]] = Query(None),
-    transmission: Optional[List[str]] = Query(None),
-    drive_train: Optional[List[str]] = Query(None),
-    cylinder: Optional[List[str]] = Query(None),
-    auction_names: Optional[List[str]] = Query(None),
-    body_style: Optional[List[str]] = Query(None),
+    engine_type: Optional[str] = Query(None),
+    transmission: Optional[str] = Query(None),
+    drive_train: Optional[str] = Query(None),
+    cylinder: Optional[str] = Query(None),
+    auction_names: Optional[str] = Query(None),
+    body_style: Optional[str] = Query(None),
 ):
     query = text("""
         WITH us_states AS (
@@ -147,31 +175,31 @@ async def get_recommended_cars(
         "accident_end": accident_end,
         "year_start": year_start,
         "year_end": year_end,
-        "vehicle_condition": vehicle_condition,
-        "vehicle_types": vehicle_types,
+        "vehicle_condition": normalize_csv_param(vehicle_condition),
+        "vehicle_types": normalize_csv_param(vehicle_types),
         "make": make,
         "model": model,
         "predicted_roi_start": predicted_roi_start,
         "predicted_roi_end": predicted_roi_end,
         "predicted_profit_margin_start": predicted_profit_margin_start,
         "predicted_profit_margin_end": predicted_profit_margin_end,
-        "engine_type": engine_type,
-        "transmission": transmission,
-        "drive_train": drive_train,
-        "cylinder": cylinder,
-        "auction_names": auction_names,
-        "body_style": body_style,
+        "engine_type": normalize_csv_param(engine_type),
+        "transmission": normalize_csv_param(transmission),
+        "drive_train": normalize_csv_param(drive_train),
+        "cylinder": normalize_csv_param(cylinder),
+        "auction_names": normalize_csv_param(auction_names),
+        "body_style": normalize_csv_param(body_style),
     })
 
     return [dict(row) for row in result.fetchall()]
 
 
-@router.get("/top-sellers")
+@router.get("/top-sellers", summary="Top 10 sellers by sold lots", description="Returns the top 10 sellers by lot count, filtered by optional vehicle and sale filters.")
 async def get_top_sellers(
     db: AsyncSession = Depends(get_db),
-    state_codes: Optional[List[str]] = Query(None),
-    cities: Optional[List[str]] = Query(None),
-    auctions: Optional[List[str]] = Query(None),
+    state_codes: Optional[str] = Query(None, description="Comma-separated e.g. 'CA,TX'"),
+    cities: Optional[str] = Query(None),
+    auctions: Optional[str] = Query(None),
     mileage_start: Optional[int] = None,
     mileage_end: Optional[int] = None,
     owners_start: Optional[int] = None,
@@ -180,20 +208,20 @@ async def get_top_sellers(
     accident_end: Optional[int] = None,
     year_start: Optional[int] = None,
     year_end: Optional[int] = None,
-    vehicle_condition: Optional[List[str]] = Query(None),
-    vehicle_types: Optional[List[str]] = Query(None),
+    vehicle_condition: Optional[str] = Query(None),
+    vehicle_types: Optional[str] = Query(None),
     make: Optional[str] = None,
     model: Optional[str] = None,
     predicted_roi_start: Optional[float] = None,
     predicted_roi_end: Optional[float] = None,
     predicted_profit_margin_start: Optional[float] = None,
     predicted_profit_margin_end: Optional[float] = None,
-    engine_type: Optional[List[str]] = Query(None),
-    transmission: Optional[List[str]] = Query(None),
-    drive_train: Optional[List[str]] = Query(None),
-    cylinder: Optional[List[str]] = Query(None),
-    auction_names: Optional[List[str]] = Query(None),
-    body_style: Optional[List[str]] = Query(None),
+    engine_type: Optional[str] = Query(None),
+    transmission: Optional[str] = Query(None),
+    drive_train: Optional[str] = Query(None),
+    cylinder: Optional[str] = Query(None),
+    auction_names: Optional[str] = Query(None),
+    body_style: Optional[str] = Query(None),
     sale_start: Optional[str] = None,
     sale_end: Optional[str] = None,
 ):
@@ -253,9 +281,17 @@ async def get_top_sellers(
     """)
 
     params = {
-        "state_codes": state_codes,
-        "cities": cities,
-        "auctions": auctions,
+        "state_codes": normalize_csv_param(state_codes),
+        "cities": normalize_csv_param(cities),
+        "auctions": normalize_csv_param(auctions),
+        "vehicle_condition": normalize_csv_param(vehicle_condition),
+        "vehicle_types": normalize_csv_param(vehicle_types),
+        "engine_type": normalize_csv_param(engine_type),
+        "transmission": normalize_csv_param(transmission),
+        "drive_train": normalize_csv_param(drive_train),
+        "cylinder": normalize_csv_param(cylinder),
+        "auction_names": normalize_csv_param(auction_names),
+        "body_style": normalize_csv_param(body_style),
         "mileage_start": mileage_start,
         "mileage_end": mileage_end,
         "owners_start": owners_start,
@@ -264,69 +300,95 @@ async def get_top_sellers(
         "accident_end": accident_end,
         "year_start": year_start,
         "year_end": year_end,
-        "vehicle_condition": vehicle_condition,
-        "vehicle_types": vehicle_types,
         "make": make,
         "model": model,
         "predicted_roi_start": predicted_roi_start,
         "predicted_roi_end": predicted_roi_end,
         "predicted_profit_margin_start": predicted_profit_margin_start,
         "predicted_profit_margin_end": predicted_profit_margin_end,
-        "engine_type": engine_type,
-        "transmission": transmission,
-        "drive_train": drive_train,
-        "cylinder": cylinder,
-        "auction_names": auction_names,
-        "body_style": body_style,
-        "sale_start": sale_start,
-        "sale_end": sale_end,
+        "sale_start": normalize_date_param(sale_start),
+        "sale_end": normalize_date_param(sale_end),
     }
 
     result = await db.execute(query, params)
     return [dict(row) for row in result.fetchall()]
 
 
+
+
 @router.get("/analytics/sale-prices", summary="Average Sale Price Over Time", tags=["Analytics"])
 async def get_avg_sale_prices(
-    interval_unit: Literal["day", "week", "month"] = Query("week", description="Time grouping unit: 'day', 'week', or 'month'"),
-    interval_amount: int = Query(12, description="How many units back to look (e.g. 12 weeks or months)"),
-    reference_date: Optional[date] = Query(None, description="End date for interval (default: today)"),
-    state_codes: Optional[List[str]] = Query(None, description="List of US state codes (e.g., ['CA', 'NY'])"),
-    cities: Optional[List[str]] = Query(None, description="List of city names"),
-    auctions: Optional[List[str]] = Query(None, description="Auction names to filter"),
-    mileage_start: Optional[int] = Query(None, description="Minimum mileage"),
-    mileage_end: Optional[int] = Query(None, description="Maximum mileage"),
-    owners_start: Optional[int] = Query(None, description="Minimum number of owners"),
-    owners_end: Optional[int] = Query(None, description="Maximum number of owners"),
-    accident_start: Optional[int] = Query(None, description="Minimum number of accidents"),
-    accident_end: Optional[int] = Query(None, description="Maximum number of accidents"),
-    year_start: Optional[int] = Query(None, description="Minimum vehicle year"),
-    year_end: Optional[int] = Query(None, description="Maximum vehicle year"),
-    vehicle_condition: Optional[List[str]] = Query(None, description="List of vehicle issue descriptions"),
-    vehicle_types: Optional[List[str]] = Query(None, description="Vehicle types (e.g., ['SUV', 'Sedan'])"),
-    make: Optional[str] = Query(None, description="Vehicle make"),
-    model: Optional[str] = Query(None, description="Vehicle model"),
-    predicted_roi_start: Optional[float] = Query(None, description="Min predicted ROI"),
-    predicted_roi_end: Optional[float] = Query(None, description="Max predicted ROI"),
-    predicted_profit_margin_start: Optional[float] = Query(None, description="Min profit margin"),
-    predicted_profit_margin_end: Optional[float] = Query(None, description="Max profit margin"),
-    engine_type: Optional[List[str]] = Query(None, description="List of engine types"),
-    transmission: Optional[List[str]] = Query(None, description="List of transmissions"),
-    drive_train: Optional[List[str]] = Query(None, description="List of drive types"),
-    cylinder: Optional[List[int]] = Query(None, description="List of engine cylinder counts"),
-    auction_names: Optional[List[str]] = Query(None, description="List of auction names"),
-    body_style: Optional[List[str]] = Query(None, description="List of body styles"),
-    sale_start: Optional[date] = Query(None, description="Start date of sale range"),
-    sale_end: Optional[date] = Query(None, description="End date of sale range"),
+    interval_unit: Literal["day", "week", "month"] = Query("week", description="Time grouping unit"),
+    interval_amount: int = Query(12, description="Number of intervals to look back (e.g. 12 weeks)"),
+    reference_date: Optional[date] = Query(None, description="End date of interval (default: today)"),
+    state_codes: Optional[str] = Query(None, description="Comma-separated state codes"),
+    cities: Optional[str] = Query(None, description="Comma-separated city names"),
+    auctions: Optional[str] = Query(None, description="Comma-separated auction names"),
+    mileage_start: Optional[int] = None,
+    mileage_end: Optional[int] = None,
+    owners_start: Optional[int] = None,
+    owners_end: Optional[int] = None,
+    accident_start: Optional[int] = None,
+    accident_end: Optional[int] = None,
+    year_start: Optional[int] = None,
+    year_end: Optional[int] = None,
+    vehicle_condition: Optional[str] = Query(None, description="Comma-separated vehicle conditions"),
+    vehicle_types: Optional[str] = Query(None, description="Comma-separated vehicle types"),
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+    predicted_roi_start: Optional[float] = None,
+    predicted_roi_end: Optional[float] = None,
+    predicted_profit_margin_start: Optional[float] = None,
+    predicted_profit_margin_end: Optional[float] = None,
+    engine_type: Optional[str] = Query(None, description="Comma-separated engine types"),
+    transmission: Optional[str] = Query(None, description="Comma-separated transmissions"),
+    drive_train: Optional[str] = Query(None, description="Comma-separated drive trains"),
+    cylinder: Optional[str] = Query(None, description="Comma-separated cylinder counts"),
+    auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
+    body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
+    sale_start: Optional[date] = None,
+    sale_end: Optional[date] = None,
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Returns average final bid prices grouped by a time interval (day/week/month) over a dynamic historical window.
-
-    Useful for visualizing pricing trends across time, filtered by location, vehicle type, seller attributes, and sale history.
+    Returns average final bid prices grouped by day, week, or month for a given time interval.
+    Useful for tracking pricing trends with flexible filtering by location, specs, and sale info.
     """
 
     ref_date = reference_date or datetime.utcnow().date()
+
+    params = {
+        "interval_unit": interval_unit,
+        "interval_amount": interval_amount,
+        "ref_date": ref_date,
+        "state_codes": normalize_csv_param(state_codes),
+        "cities": normalize_csv_param(cities),
+        "auctions": normalize_csv_param(auctions),
+        "mileage_start": mileage_start,
+        "mileage_end": mileage_end,
+        "owners_start": owners_start,
+        "owners_end": owners_end,
+        "accident_start": accident_start,
+        "accident_end": accident_end,
+        "year_start": year_start,
+        "year_end": year_end,
+        "vehicle_condition": normalize_csv_param(vehicle_condition),
+        "vehicle_types": normalize_csv_param(vehicle_types),
+        "make": make,
+        "model": model,
+        "predicted_roi_start": predicted_roi_start,
+        "predicted_roi_end": predicted_roi_end,
+        "predicted_profit_margin_start": predicted_profit_margin_start,
+        "predicted_profit_margin_end": predicted_profit_margin_end,
+        "engine_type": normalize_csv_param(engine_type),
+        "transmission": normalize_csv_param(transmission),
+        "drive_train": normalize_csv_param(drive_train),
+        "cylinder": normalize_csv_param(cylinder),
+        "auction_names": normalize_csv_param(auction_names),
+        "body_style": normalize_csv_param(body_style),
+        "sale_start": sale_start,
+        "sale_end": sale_end,
+    }
 
     query = """
     WITH us_states AS (
@@ -385,6 +447,5 @@ async def get_avg_sale_prices(
     ORDER BY period;
     """
 
-    params = locals()
     result = await db.execute(query, params)
     return [{"period": row[0], "avg_price": float(row[1])} for row in result.all()]
