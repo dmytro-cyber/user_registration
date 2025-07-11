@@ -274,13 +274,25 @@ async def get_filtered_vehicles(
     total_pages = (total_count + page_size - 1) // page_size
 
     # Агрегація current_bid
-    stats_query = select(
-        func.min(CarModel.current_bid),
-        func.max(CarModel.current_bid),
-        func.avg(CarModel.current_bid)
-    ).select_from(base_query.subquery())
-    result = await db.execute(stats_query)
-    min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
+    bids_info = {}
+
+    if page == 1:
+        stats_query = select(
+            func.min(CarModel.current_bid),
+            func.max(CarModel.current_bid),
+            func.avg(CarModel.current_bid),
+            func.count()
+        ).select_from(base_query.subquery())
+
+        result = await db.execute(stats_query)
+        min_bid, max_bid, avg_bid, total_count = result.fetchone() or (0, 0, 0.0, 0)
+
+        bids_info = {
+            "min_bid": min_bid,
+            "max_bid": max_bid,
+            "avg_bid": avg_bid,
+            "total_count": total_count,
+        }
 
     # Основний запит з liked_expr та сортуванням
     full_query = base_query.add_columns(liked_expr)
@@ -295,11 +307,7 @@ async def get_filtered_vehicles(
         car.liked = bool(liked)
         vehicles_with_liked.append(car)
 
-    return vehicles_with_liked, total_count, total_pages, {
-        "min_bid": min_bid,
-        "max_bid": max_bid,
-        "avg_bid": avg_bid,
-    }
+    return vehicles_with_liked, total_count, total_pages, bids_info
 
 
 async def get_bidding_hub_vehicles(
