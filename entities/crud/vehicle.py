@@ -193,7 +193,6 @@ async def get_filtered_vehicles(
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
         .options(selectinload(CarModel.photos))
         .filter(
-            CarModel.date >= today_naive,
             CarModel.predicted_total_investments.isnot(None),
             CarModel.predicted_total_investments > 0,
             CarModel.suggested_bid.isnot(None),
@@ -260,6 +259,8 @@ async def get_filtered_vehicles(
         if isinstance(date_from, str):
             date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
         base_query = base_query.filter(CarModel.date >= date_from)
+    else:
+        base_query = base_query.filter(CarModel.date >= today_naive)
     if filters.get("date_to"):
         date_to = filters["date_to"]
         if isinstance(date_to, str):
