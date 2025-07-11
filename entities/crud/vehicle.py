@@ -280,12 +280,11 @@ async def get_filtered_vehicles(
         stats_query = select(
             func.min(CarModel.current_bid),
             func.max(CarModel.current_bid),
-            func.avg(CarModel.current_bid),
-            func.count()
+            func.avg(CarModel.current_bid)
         ).select_from(base_query.subquery())
 
         result = await db.execute(stats_query)
-        min_bid, max_bid, avg_bid, total_count = result.fetchone() or (0, 0, 0.0, 0)
+        min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
 
         bids_info = {
             "min_bid": min_bid,
