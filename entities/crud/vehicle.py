@@ -278,11 +278,11 @@ async def get_filtered_vehicles(
     # Агрегація current_bid
     bids_info = {}
     if page == 1:
-        stats_query = base_query.with_only_columns([
+        stats_query = base_query.with_only_columns(
             func.min(CarModel.current_bid),
             func.max(CarModel.current_bid),
             func.avg(CarModel.current_bid),
-        ])
+        )
         result = await db.execute(stats_query)
         min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
         bids_info = {
