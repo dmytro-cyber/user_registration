@@ -115,30 +115,23 @@ async def get_recommended_cars(
     auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
     body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
 ):
-    params = {
-        "mileage_start": mileage_start,
-        "mileage_end": mileage_end,
-        "owners_start": owners_start,
-        "owners_end": owners_end,
-        "accident_start": accident_start,
-        "accident_end": accident_end,
-        "year_start": year_start,
-        "year_end": year_end,
-        "vehicle_condition": normalize_csv_param(vehicle_condition),
-        "vehicle_types": normalize_csv_param(vehicle_types),
-        "make": make,
-        "model": model,
-        "predicted_roi_start": predicted_roi_start,
-        "predicted_roi_end": predicted_roi_end,
-        "predicted_profit_margin_start": predicted_profit_margin_start,
-        "predicted_profit_margin_end": predicted_profit_margin_end,
-        "engine_type": normalize_csv_param(engine_type),
-        "transmission": normalize_csv_param(transmission),
-        "drive_train": normalize_csv_param(drive_train),
-        "cylinder": normalize_csv_param(cylinder),
-        "auction_names": normalize_csv_param(auction_names),
-        "body_style": normalize_csv_param(body_style),
-    }
+    params = [
+        mileage_start, mileage_end,
+        owners_start, owners_end,
+        accident_start, accident_end,
+        year_start, year_end,
+        make, model,
+        predicted_roi_start, predicted_roi_end,
+        predicted_profit_margin_start, predicted_profit_margin_end,
+        normalize_csv_param(vehicle_condition),
+        normalize_csv_param(vehicle_types),
+        normalize_csv_param(engine_type),
+        normalize_csv_param(transmission),
+        normalize_csv_param(drive_train),
+        normalize_csv_param(cylinder),
+        normalize_csv_param(auction_names),
+        normalize_csv_param(body_style)
+    ]
     logger.debug("Query parameters for /recommended-cars: %s", params)
 
     query = text("""
@@ -179,27 +172,31 @@ async def get_recommended_cars(
         WHERE recommendation_status = 'RECOMMENDED'
           AND date >= CURRENT_DATE
           AND seller IS NOT NULL
-          AND (COALESCE(:mileage_start, -1) IS NULL OR COALESCE(:mileage_end, 99999999) IS NULL OR mileage BETWEEN COALESCE(:mileage_start, 0) AND COALESCE(:mileage_end, 99999999))
-          AND (COALESCE(:owners_start, -1) IS NULL OR COALESCE(:owners_end, 999) IS NULL OR owners BETWEEN COALESCE(:owners_start, 0) AND COALESCE(:owners_end, 999))
-          AND (COALESCE(:accident_start, -1) IS NULL OR COALESCE(:accident_end, 999) IS NULL OR accident_count BETWEEN COALESCE(:accident_start, 0) AND COALESCE(:accident_end, 999))
-          AND (COALESCE(:year_start, 1900) IS NULL OR COALESCE(:year_end, 2100) IS NULL OR year BETWEEN COALESCE(:year_start, 1900) AND COALESCE(:year_end, 2100))
-          AND (array_length(:vehicle_condition::TEXT[], 1) = 0 OR ca.issue_description = ANY(:vehicle_condition::TEXT[]))
-          AND (array_length(:vehicle_types::TEXT[], 1) = 0 OR vehicle_type = ANY(:vehicle_types::TEXT[]))
-          AND (:make IS NULL OR make = :make)
-          AND (:model IS NULL OR model = :model)
-          AND (COALESCE(:predicted_roi_start, -100.0) IS NULL OR COALESCE(:predicted_roi_end, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE(:predicted_roi_start, -100.0) AND COALESCE(:predicted_roi_end, 1000.0))
-          AND (COALESCE(:predicted_profit_margin_start, -100.0) IS NULL OR COALESCE(:predicted_profit_margin_end, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE(:predicted_profit_margin_start, -100.0) AND COALESCE(:predicted_profit_margin_end, 1000.0))
-          AND (array_length(:engine_type::TEXT[], 1) = 0 OR engine = ANY(:engine_type::TEXT[]))
-          AND (array_length(:transmission::TEXT[], 1) = 0 OR transmission = ANY(:transmission::TEXT[]))
-          AND (array_length(:drive_train::TEXT[], 1) = 0 OR drive_train = ANY(:drive_train::TEXT[]))
-          AND (array_length(:cylinder::TEXT[], 1) = 0 OR engine_cylinder = ANY(:cylinder::TEXT[]))
-          AND (array_length(:auction_names::TEXT[], 1) = 0 OR auction_name = ANY(:auction_names::TEXT[]))
-          AND (array_length(:body_style::TEXT[], 1) = 0 OR body_style = ANY(:body_style::TEXT[]))
+          AND (COALESCE($1, -1) IS NULL OR COALESCE($2, 99999999) IS NULL OR mileage BETWEEN COALESCE($1, 0) AND COALESCE($2, 99999999))
+          AND (COALESCE($3, -1) IS NULL OR COALESCE($4, 999) IS NULL OR owners BETWEEN COALESCE($3, 0) AND COALESCE($4, 999))
+          AND (COALESCE($5, -1) IS NULL OR COALESCE($6, 999) IS NULL OR accident_count BETWEEN COALESCE($5, 0) AND COALESCE($6, 999))
+          AND (COALESCE($7, 1900) IS NULL OR COALESCE($8, 2100) IS NULL OR year BETWEEN COALESCE($7, 1900) AND COALESCE($8, 2100))
+          AND (array_length($15::TEXT[], 1) = 0 OR ca.issue_description = ANY($15::TEXT[]))
+          AND (array_length($16::TEXT[], 1) = 0 OR vehicle_type = ANY($16::TEXT[]))
+          AND ($9 IS NULL OR make = $9)
+          AND ($10 IS NULL OR model = $10)
+          AND (COALESCE($11, -100.0) IS NULL OR COALESCE($12, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE($11, -100.0) AND COALESCE($12, 1000.0))
+          AND (COALESCE($13, -100.0) IS NULL OR COALESCE($14, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE($13, -100.0) AND COALESCE($14, 1000.0))
+          AND (array_length($17::TEXT[], 1) = 0 OR engine = ANY($17::TEXT[]))
+          AND (array_length($18::TEXT[], 1) = 0 OR transmission = ANY($18::TEXT[]))
+          AND (array_length($19::TEXT[], 1) = 0 OR drive_train = ANY($19::TEXT[]))
+          AND (array_length($20::TEXT[], 1) = 0 OR engine_cylinder = ANY($20::TEXT[]))
+          AND (array_length($21::TEXT[], 1) = 0 OR auction_name = ANY($21::TEXT[]))
+          AND (array_length($22::TEXT[], 1) = 0 OR body_style = ANY($22::TEXT[]))
         LIMIT 50;
     """)
 
-    result = await db.execute(query, params)
-    return [dict(row) for row in result.fetchall()]
+    try:
+        result = await db.execute(query, params)
+        return [dict(row) for row in result.fetchall()]
+    except Exception as e:
+        logger.error("Error executing query for /recommended-cars: %s", str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/top-sellers", summary="Top 10 sellers by sold lots", description="""
 Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.
@@ -256,35 +253,28 @@ async def get_top_sellers(
     sale_start: Optional[str] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
     sale_end: Optional[str] = Query(None, description="End date for sales (YYYY-MM-DD)"),
 ):
-    params = {
-        "state_codes": normalize_csv_param(state_codes),
-        "cities": normalize_csv_param(cities),
-        "auctions": normalize_csv_param(auctions),
-        "vehicle_condition": normalize_csv_param(vehicle_condition),
-        "vehicle_types": normalize_csv_param(vehicle_types),
-        "engine_type": normalize_csv_param(engine_type),
-        "transmission": normalize_csv_param(transmission),
-        "drive_train": normalize_csv_param(drive_train),
-        "cylinder": normalize_csv_param(cylinder),
-        "auction_names": normalize_csv_param(auction_names),
-        "body_style": normalize_csv_param(body_style),
-        "mileage_start": mileage_start,
-        "mileage_end": mileage_end,
-        "owners_start": owners_start,
-        "owners_end": owners_end,
-        "accident_start": accident_start,
-        "accident_end": accident_end,
-        "year_start": year_start,
-        "year_end": year_end,
-        "make": make,
-        "model": model,
-        "predicted_roi_start": predicted_roi_start,
-        "predicted_roi_end": predicted_roi_end,
-        "predicted_profit_margin_start": predicted_profit_margin_start,
-        "predicted_profit_margin_end": predicted_profit_margin_end,
-        "sale_start": normalize_date_param(sale_start),
-        "sale_end": normalize_date_param(sale_end),
-    }
+    params = [
+        normalize_csv_param(state_codes),
+        normalize_csv_param(cities),
+        normalize_csv_param(auctions),
+        mileage_start, mileage_end,
+        owners_start, owners_end,
+        accident_start, accident_end,
+        year_start, year_end,
+        make, model,
+        predicted_roi_start, predicted_roi_end,
+        predicted_profit_margin_start, predicted_profit_margin_end,
+        normalize_csv_param(vehicle_condition),
+        normalize_csv_param(vehicle_types),
+        normalize_csv_param(engine_type),
+        normalize_csv_param(transmission),
+        normalize_csv_param(drive_train),
+        normalize_csv_param(cylinder),
+        normalize_csv_param(auction_names),
+        normalize_csv_param(body_style),
+        normalize_date_param(sale_start),
+        normalize_date_param(sale_end)
+    ]
     logger.debug("Query parameters for /top-sellers: %s", params)
 
     query = text("""
@@ -317,33 +307,37 @@ async def get_top_sellers(
         WHERE seller IS NOT NULL
           AND sh.status = 'Sold'
           AND sh.final_bid IS NOT NULL
-          AND (array_length(:state_codes::TEXT[], 1) = 0 OR state_code = ANY(:state_codes::TEXT[]))
-          AND (array_length(:cities::TEXT[], 1) = 0 OR city = ANY(:cities::TEXT[]))
-          AND (array_length(:auctions::TEXT[], 1) = 0 OR auction = ANY(:auctions::TEXT[]))
-          AND (COALESCE(:mileage_start, -1) IS NULL OR COALESCE(:mileage_end, 99999999) IS NULL OR mileage BETWEEN COALESCE(:mileage_start, 0) AND COALESCE(:mileage_end, 99999999))
-          AND (COALESCE(:owners_start, -1) IS NULL OR COALESCE(:owners_end, 999) IS NULL OR owners BETWEEN COALESCE(:owners_start, 0) AND COALESCE(:owners_end, 999))
-          AND (COALESCE(:accident_start, -1) IS NULL OR COALESCE(:accident_end, 999) IS NULL OR accident_count BETWEEN COALESCE(:accident_start, 0) AND COALESCE(:accident_end, 999))
-          AND (COALESCE(:year_start, 1900) IS NULL OR COALESCE(:year_end, 2100) IS NULL OR year BETWEEN COALESCE(:year_start, 1900) AND COALESCE(:year_end, 2100))
-          AND (array_length(:vehicle_condition::TEXT[], 1) = 0 OR ca.issue_description = ANY(:vehicle_condition::TEXT[]))
-          AND (array_length(:vehicle_types::TEXT[], 1) = 0 OR vehicle_type = ANY(:vehicle_types::TEXT[]))
-          AND (:make IS NULL OR make = :make)
-          AND (:model IS NULL OR model = :model)
-          AND (COALESCE(:predicted_roi_start, -100.0) IS NULL OR COALESCE(:predicted_roi_end, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE(:predicted_roi_start, -100.0) AND COALESCE(:predicted_roi_end, 1000.0))
-          AND (COALESCE(:predicted_profit_margin_start, -100.0) IS NULL OR COALESCE(:predicted_profit_margin_end, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE(:predicted_profit_margin_start, -100.0) AND COALESCE(:predicted_profit_margin_end, 1000.0))
-          AND (array_length(:engine_type::TEXT[], 1) = 0 OR engine = ANY(:engine_type::TEXT[]))
-          AND (array_length(:transmission::TEXT[], 1) = 0 OR transmission = ANY(:transmission::TEXT[]))
-          AND (array_length(:drive_train::TEXT[], 1) = 0 OR drive_train = ANY(:drive_train::TEXT[]))
-          AND (array_length(:cylinder::TEXT[], 1) = 0 OR engine_cylinder = ANY(:cylinder::TEXT[]))
-          AND (array_length(:auction_names::TEXT[], 1) = 0 OR auction_name = ANY(:auction_names::TEXT[]))
-          AND (array_length(:body_style::TEXT[], 1) = 0 OR body_style = ANY(:body_style::TEXT[]))
-          AND (:sale_start IS NULL OR :sale_end IS NULL OR sh.date BETWEEN :sale_start AND :sale_end)
+          AND (array_length($1::TEXT[], 1) = 0 OR state_code = ANY($1::TEXT[]))
+          AND (array_length($2::TEXT[], 1) = 0 OR city = ANY($2::TEXT[]))
+          AND (array_length($3::TEXT[], 1) = 0 OR auction = ANY($3::TEXT[]))
+          AND (COALESCE($4, -1) IS NULL OR COALESCE($5, 99999999) IS NULL OR mileage BETWEEN COALESCE($4, 0) AND COALESCE($5, 99999999))
+          AND (COALESCE($6, -1) IS NULL OR COALESCE($7, 999) IS NULL OR owners BETWEEN COALESCE($6, 0) AND COALESCE($7, 999))
+          AND (COALESCE($8, -1) IS NULL OR COALESCE($9, 999) IS NULL OR accident_count BETWEEN COALESCE($8, 0) AND COALESCE($9, 999))
+          AND (COALESCE($10, 1900) IS NULL OR COALESCE($11, 2100) IS NULL OR year BETWEEN COALESCE($10, 1900) AND COALESCE($11, 2100))
+          AND (array_length($18::TEXT[], 1) = 0 OR ca.issue_description = ANY($18::TEXT[]))
+          AND (array_length($19::TEXT[], 1) = 0 OR vehicle_type = ANY($19::TEXT[]))
+          AND ($12 IS NULL OR make = $12)
+          AND ($13 IS NULL OR model = $13)
+          AND (COALESCE($14, -100.0) IS NULL OR COALESCE($15, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE($14, -100.0) AND COALESCE($15, 1000.0))
+          AND (COALESCE($16, -100.0) IS NULL OR COALESCE($17, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE($16, -100.0) AND COALESCE($17, 1000.0))
+          AND (array_length($20::TEXT[], 1) = 0 OR engine = ANY($20::TEXT[]))
+          AND (array_length($21::TEXT[], 1) = 0 OR transmission = ANY($21::TEXT[]))
+          AND (array_length($22::TEXT[], 1) = 0 OR drive_train = ANY($22::TEXT[]))
+          AND (array_length($23::TEXT[], 1) = 0 OR engine_cylinder = ANY($23::TEXT[]))
+          AND (array_length($24::TEXT[], 1) = 0 OR auction_name = ANY($24::TEXT[]))
+          AND (array_length($25::TEXT[], 1) = 0 OR body_style = ANY($25::TEXT[]))
+          AND ($26 IS NULL OR $27 IS NULL OR sh.date BETWEEN $26 AND $27)
         GROUP BY seller
         ORDER BY Lots DESC
         LIMIT 10
     """)
 
-    result = await db.execute(query, params)
-    return [dict(row) for row in result.fetchall()]
+    try:
+        result = await db.execute(query, params)
+        return [dict(row) for row in result.fetchall()]
+    except Exception as e:
+        logger.error("Error executing query for /top-sellers: %s", str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @router.get("/analytics/sale-prices", summary="Average Sale Price Over Time", tags=["Analytics"], description="""
 Returns the average final bid prices grouped by the specified time interval (day, week, or month) over a given period.
@@ -376,7 +370,7 @@ Returns the average final bid prices grouped by the specified time interval (day
 async def get_avg_sale_prices(
     interval_unit: Literal["day", "week", "month"] = Query("week", description="Time grouping unit (day, week, month)"),
     interval_amount: int = Query(12, description="Number of intervals to look back"),
-    reference_date: Optional[date] = Query(None, description="End date of interval (default: today)"),
+    reference_date: Optional[datetime] = Query(None, description="End date of interval (default: today)"),
     state_codes: Optional[str] = Query(None, description="Comma-separated state codes, e.g., 'CA,TX'"),
     cities: Optional[str] = Query(None, description="Comma-separated city names"),
     auctions: Optional[str] = Query(None, description="Comma-separated auction names"),
@@ -402,103 +396,95 @@ async def get_avg_sale_prices(
     cylinder: Optional[str] = Query(None, description="Comma-separated cylinder counts"),
     auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
     body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
-    sale_start: Optional[date] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
-    sale_end: Optional[date] = Query(None, description="End date for sales (YYYY-MM-DD)"),
+    sale_start: Optional[datetime] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
+    sale_end: Optional[datetime] = Query(None, description="End date for sales (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ):
-    ref_date = reference_date or datetime.utcnow().date()
-    logger.debug("Preparing query with params: interval_unit=%s, interval_amount=%s, ref_date=%s", interval_unit, interval_amount, ref_date)
-
-    params = {
-        "interval_unit": interval_unit,
-        "interval_amount": interval_amount,
-        "ref_date": ref_date,
-        "state_codes": normalize_csv_param(state_codes),
-        "cities": normalize_csv_param(cities),
-        "auctions": normalize_csv_param(auctions),
-        "mileage_start": mileage_start,
-        "mileage_end": mileage_end,
-        "owners_start": owners_start,
-        "owners_end": owners_end,
-        "accident_start": accident_start,
-        "accident_end": accident_end,
-        "year_start": year_start,
-        "year_end": year_end,
-        "vehicle_condition": normalize_csv_param(vehicle_condition),
-        "vehicle_types": normalize_csv_param(vehicle_types),
-        "make": make,
-        "model": model,
-        "predicted_roi_start": predicted_roi_start,
-        "predicted_roi_end": predicted_roi_end,
-        "predicted_profit_margin_start": predicted_profit_margin_start,
-        "predicted_profit_margin_end": predicted_profit_margin_end,
-        "engine_type": normalize_csv_param(engine_type),
-        "transmission": normalize_csv_param(transmission),
-        "drive_train": normalize_csv_param(drive_train),
-        "cylinder": normalize_csv_param(cylinder),
-        "auction_names": normalize_csv_param(auction_names),
-        "body_style": normalize_csv_param(body_style),
-        "sale_start": sale_start,
-        "sale_end": sale_end,
-    }
+    ref_date = reference_date or datetime.utcnow()
+    params = [
+        interval_unit, interval_amount, ref_date,
+        normalize_csv_param(state_codes),
+        normalize_csv_param(cities),
+        normalize_csv_param(auctions),
+        mileage_start, mileage_end,
+        owners_start, owners_end,
+        accident_start, accident_end,
+        year_start, year_end,
+        normalize_csv_param(vehicle_condition),
+        normalize_csv_param(vehicle_types),
+        make, model,
+        predicted_roi_start, predicted_roi_end,
+        predicted_profit_margin_start, predicted_profit_margin_end,
+        normalize_csv_param(engine_type),
+        normalize_csv_param(transmission),
+        normalize_csv_param(drive_train),
+        normalize_csv_param(cylinder),
+        normalize_csv_param(auction_names),
+        normalize_csv_param(body_style),
+        sale_start, sale_end
+    ]
     logger.debug("Query parameters for /analytics/sale-prices: %s", params)
 
     query = text("""
-    WITH us_states AS (
-        SELECT unnest(ARRAY[
-            'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
-            'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
-            'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
-            'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
-            'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY']) AS code
-    ),
-    locations_with_state AS (
-        SELECT cars.*,
-               CASE
-                   WHEN location ~ E'\\([A-Z]{2}\\)' THEN REGEXP_REPLACE(location, E'.*\\(([A-Z]{2})\\).*', E'\\1')
-                   WHEN location ~ E'^[A-Z]{2}\\s*-' THEN LEFT(location, 2)
-                   ELSE NULL
-               END AS state_code,
-               CASE
-                   WHEN location ~ E'\\([A-Z]{2}\\)' THEN TRIM(REGEXP_REPLACE(location, E'\\s*\\([A-Z]{2}\\)', ''))
-                   WHEN location ~ E'^[A-Z]{2}\\s*-' THEN TRIM(SPLIT_PART(location, '-', 2))
-                   ELSE NULL
-               END AS city
-        FROM cars
-    )
-    SELECT DATE_TRUNC(:interval_unit::text, sh.date) AS period,
-           ROUND(AVG(sh.final_bid), 2) AS avg_price
-    FROM locations_with_state l
-    JOIN us_states s ON l.state_code = s.code
-    JOIN car_sale_history sh ON l.id = sh.car_id
-    JOIN condition_assessments ca ON l.id = ca.car_id
-    WHERE sh.status = 'Sold'
-      AND sh.final_bid IS NOT NULL
-      AND sh.date >= :ref_date - (:interval_amount || ' ' || :interval_unit)::interval
-      AND sh.date < :ref_date
-      AND (array_length(:state_codes::TEXT[], 1) = 0 OR state_code = ANY(:state_codes::TEXT[]))
-      AND (array_length(:cities::TEXT[], 1) = 0 OR city = ANY(:cities::TEXT[]))
-      AND (array_length(:auctions::TEXT[], 1) = 0 OR auction = ANY(:auctions::TEXT[]))
-      AND (COALESCE(:mileage_start, -1) IS NULL OR COALESCE(:mileage_end, 99999999) IS NULL OR mileage BETWEEN COALESCE(:mileage_start, 0) AND COALESCE(:mileage_end, 99999999))
-      AND (COALESCE(:owners_start, -1) IS NULL OR COALESCE(:owners_end, 999) IS NULL OR owners BETWEEN COALESCE(:owners_start, 0) AND COALESCE(:owners_end, 999))
-      AND (COALESCE(:accident_start, -1) IS NULL OR COALESCE(:accident_end, 999) IS NULL OR accident_count BETWEEN COALESCE(:accident_start, 0) AND COALESCE(:accident_end, 999))
-      AND (COALESCE(:year_start, 1900) IS NULL OR COALESCE(:year_end, 2100) IS NULL OR year BETWEEN COALESCE(:year_start, 1900) AND COALESCE(:year_end, 2100))
-      AND (array_length(:vehicle_condition::TEXT[], 1) = 0 OR ca.issue_description = ANY(:vehicle_condition::TEXT[]))
-      AND (array_length(:vehicle_types::TEXT[], 1) = 0 OR vehicle_type = ANY(:vehicle_types::TEXT[]))
-      AND (:make IS NULL OR make = :make)
-      AND (:model IS NULL OR model = :model)
-      AND (COALESCE(:predicted_roi_start, -100.0) IS NULL OR COALESCE(:predicted_roi_end, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE(:predicted_roi_start, -100.0) AND COALESCE(:predicted_roi_end, 1000.0))
-      AND (COALESCE(:predicted_profit_margin_start, -100.0) IS NULL OR COALESCE(:predicted_profit_margin_end, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE(:predicted_profit_margin_start, -100.0) AND COALESCE(:predicted_profit_margin_end, 1000.0))
-      AND (array_length(:engine_type::TEXT[], 1) = 0 OR engine = ANY(:engine_type::TEXT[]))
-      AND (array_length(:transmission::TEXT[], 1) = 0 OR transmission = ANY(:transmission::TEXT[]))
-      AND (array_length(:drive_train::TEXT[], 1) = 0 OR drive_train = ANY(:drive_train::TEXT[]))
-      AND (array_length(:cylinder::TEXT[], 1) = 0 OR engine_cylinder = ANY(:cylinder::TEXT[]))
-      AND (array_length(:auction_names::TEXT[], 1) = 0 OR auction_name = ANY(:auction_names::TEXT[]))
-      AND (array_length(:body_style::TEXT[], 1) = 0 OR body_style = ANY(:body_style::TEXT[]))
-      AND (:sale_start IS NULL OR :sale_end IS NULL OR sh.date BETWEEN :sale_start AND :sale_end)
-    GROUP BY period
-    ORDER BY period;
+        WITH us_states AS (
+            SELECT unnest(ARRAY[
+                'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
+                'HI','ID','IL','IN','IA','KS','KY','LA','ME','MD',
+                'MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ',
+                'NM','NY','NC','ND','OH','OK','OR','PA','RI','SC',
+                'SD','TN','TX','UT','VT','VA','WA','WV','WI','WY']) AS code
+        ),
+        locations_with_state AS (
+            SELECT cars.*,
+                   CASE
+                       WHEN location ~ E'\\([A-Z]{2}\\)' THEN REGEXP_REPLACE(location, E'.*\\(([A-Z]{2})\\).*', E'\\1')
+                       WHEN location ~ E'^[A-Z]{2}\\s*-' THEN LEFT(location, 2)
+                       ELSE NULL
+                   END AS state_code,
+                   CASE
+                       WHEN location ~ E'\\([A-Z]{2}\\)' THEN TRIM(REGEXP_REPLACE(location, E'\\s*\\([A-Z]{2}\\)', ''))
+                       WHEN location ~ E'^[A-Z]{2}\\s*-' THEN TRIM(SPLIT_PART(location, '-', 2))
+                       ELSE NULL
+                   END AS city
+            FROM cars
+        )
+        SELECT DATE_TRUNC($1::text, sh.date) AS period,
+               ROUND(AVG(sh.final_bid), 2) AS avg_price
+        FROM locations_with_state l
+        JOIN us_states s ON l.state_code = s.code
+        JOIN car_sale_history sh ON l.id = sh.car_id
+        JOIN condition_assessments ca ON l.id = ca.car_id
+        WHERE sh.status = 'Sold'
+          AND sh.final_bid IS NOT NULL
+          AND sh.date >= $3 - ($2 || ' ' || $1)::interval
+          AND sh.date < $3
+          AND (array_length($4::TEXT[], 1) = 0 OR state_code = ANY($4::TEXT[]))
+          AND (array_length($5::TEXT[], 1) = 0 OR city = ANY($5::TEXT[]))
+          AND (array_length($6::TEXT[], 1) = 0 OR auction = ANY($6::TEXT[]))
+          AND (COALESCE($7, -1) IS NULL OR COALESCE($8, 99999999) IS NULL OR mileage BETWEEN COALESCE($7, 0) AND COALESCE($8, 99999999))
+          AND (COALESCE($9, -1) IS NULL OR COALESCE($10, 999) IS NULL OR owners BETWEEN COALESCE($9, 0) AND COALESCE($10, 999))
+          AND (COALESCE($11, -1) IS NULL OR COALESCE($12, 999) IS NULL OR accident_count BETWEEN COALESCE($11, 0) AND COALESCE($12, 999))
+          AND (COALESCE($13, 1900) IS NULL OR COALESCE($14, 2100) IS NULL OR year BETWEEN COALESCE($13, 1900) AND COALESCE($14, 2100))
+          AND (array_length($15::TEXT[], 1) = 0 OR ca.issue_description = ANY($15::TEXT[]))
+          AND (array_length($16::TEXT[], 1) = 0 OR vehicle_type = ANY($16::TEXT[]))
+          AND ($17 IS NULL OR make = $17)
+          AND ($18 IS NULL OR model = $18)
+          AND (COALESCE($19, -100.0) IS NULL OR COALESCE($20, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE($19, -100.0) AND COALESCE($20, 1000.0))
+          AND (COALESCE($21, -100.0) IS NULL OR COALESCE($22, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE($21, -100.0) AND COALESCE($22, 1000.0))
+          AND (array_length($23::TEXT[], 1) = 0 OR engine = ANY($23::TEXT[]))
+          AND (array_length($24::TEXT[], 1) = 0 OR transmission = ANY($24::TEXT[]))
+          AND (array_length($25::TEXT[], 1) = 0 OR drive_train = ANY($25::TEXT[]))
+          AND (array_length($26::TEXT[], 1) = 0 OR engine_cylinder = ANY($26::TEXT[]))
+          AND (array_length($27::TEXT[], 1) = 0 OR auction_name = ANY($27::TEXT[]))
+          AND (array_length($28::TEXT[], 1) = 0 OR body_style = ANY($28::TEXT[]))
+          AND ($29 IS NULL OR $30 IS NULL OR sh.date BETWEEN $29 AND $30)
+        GROUP BY period
+        ORDER BY period;
     """)
 
-    result = await db.execute(query, params)
-    return [{"period": row[0].isoformat(), "avg_price": float(row[1])} for row in result.all()]
+    try:
+        result = await db.execute(query, params)
+        return [{"period": row[0].isoformat(), "avg_price": float(row[1])} for row in result.all()]
+    except Exception as e:
+        logger.error("Error executing query for /analytics/sale-prices: %s", str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
