@@ -67,6 +67,12 @@ class SalesHistoryBaseSchema(BaseModel):
     status: str | None = None
 
 
+class CarCostsUpdateRequestSchema(BaseModel):
+    maintenance: float | None = None
+    transportation: float | None = None
+    labor: float | None = None
+
+
 class CarDetailResponseSchema(BaseModel):
     id: int
     auction: str | None
@@ -101,6 +107,9 @@ class CarDetailResponseSchema(BaseModel):
     has_correct_vin: bool | None = None
     has_correct_accidents: bool | None = None
     liked: bool | None = False
+    maintenance: float | None = None
+    transportation: float | None = None
+    labor: float | None = None
 
     photos: List[str] = []
 

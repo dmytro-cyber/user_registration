@@ -15,6 +15,7 @@ from schemas.vehicle import (
     PartResponseScheme,
     CarCreateSchema,
     CarFilterOptionsSchema,
+    CarCostsUpdateRequestSchema,
 )
 from models.vehicle import CarModel
 from models.user import UserModel
@@ -510,6 +511,57 @@ async def update_car_status(
 
     logger.info(f"Status updated for car with ID: {car_id}", extra=extra)
     return status_data
+
+
+@router.put("/cars/{car_id}/costs", summary="Update Car Costs", description="""
+Updates specific cost fields (maintenance, transportation, labor) for a car identified by VIN.
+
+### Available Fields:
+- **maintenance**: Optional float value for maintenance costs
+- **transportation**: Optional float value for transportation costs
+- **labor**: Optional float value for labor costs
+
+Only provided fields will be updated; others remain unchanged.
+""")
+async def update_car_costs(
+    car_id: int,
+    car_data: CarCostsUpdateRequestSchema,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Updates the specified cost fields for a car based on its ID using ORM.
+
+    This endpoint performs a partial update, leaving unchanged fields intact.
+    """
+    # Log the update request
+    logger.debug("Updating car costs for ID %s with data: %s", car_id, car_data.dict(exclude_unset=True))
+
+    # Fetch the car from the database
+    db_car = await db.get(CarModel, car_id)
+    if not db_car:
+        raise HTTPException(status_code=404, detail=f"Car with ID {car_id} not found")
+
+    # Update only provided fields
+    update_data = car_data.dict(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No valid fields provided for update")
+
+    for key, value in update_data.items():
+        setattr(db_car, key, value)
+
+    try:
+        await db.commit()
+        await db.refresh(db_car)
+        return {
+            "id": db_car.id,
+            "maintenance": db_car.maintenance,
+            "transportation": db_car.transportation,
+            "labor": db_car.labor,
+        }
+    except Exception as e:
+        await db.rollback()
+        logger.error("Error updating car costs for ID %s: %s", car_id, str(e))
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.get(
