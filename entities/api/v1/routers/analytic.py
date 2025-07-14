@@ -89,8 +89,6 @@ Returns a list of recommended cars with status 'RECOMMENDED' that match the prov
 - **Cylinder**: `cylinder` (comma-separated strings)
 - **Auction Names**: `auction_names` (comma-separated strings)
 - **Body Style**: `body_style` (comma-separated strings)
-
-Only cars with upcoming auction dates and assigned sellers are returned.
 """)
 async def get_recommended_cars(
     db: AsyncSession = Depends(get_db),
@@ -117,6 +115,32 @@ async def get_recommended_cars(
     auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
     body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
 ):
+    params = {
+        "mileage_start": mileage_start,
+        "mileage_end": mileage_end,
+        "owners_start": owners_start,
+        "owners_end": owners_end,
+        "accident_start": accident_start,
+        "accident_end": accident_end,
+        "year_start": year_start,
+        "year_end": year_end,
+        "vehicle_condition": normalize_csv_param(vehicle_condition),
+        "vehicle_types": normalize_csv_param(vehicle_types),
+        "make": make,
+        "model": model,
+        "predicted_roi_start": predicted_roi_start,
+        "predicted_roi_end": predicted_roi_end,
+        "predicted_profit_margin_start": predicted_profit_margin_start,
+        "predicted_profit_margin_end": predicted_profit_margin_end,
+        "engine_type": normalize_csv_param(engine_type),
+        "transmission": normalize_csv_param(transmission),
+        "drive_train": normalize_csv_param(drive_train),
+        "cylinder": normalize_csv_param(cylinder),
+        "auction_names": normalize_csv_param(auction_names),
+        "body_style": normalize_csv_param(body_style),
+    }
+    logger.debug("Query parameters for /recommended-cars: %s", params)
+
     query = text("""
         WITH us_states AS (
             SELECT unnest(ARRAY[
@@ -173,31 +197,6 @@ async def get_recommended_cars(
           AND (array_length(:body_style::TEXT[], 1) = 0 OR body_style = ANY(:body_style::TEXT[]))
         LIMIT 50;
     """)
-
-    params = {
-        "mileage_start": mileage_start,
-        "mileage_end": mileage_end,
-        "owners_start": owners_start,
-        "owners_end": owners_end,
-        "accident_start": accident_start,
-        "accident_end": accident_end,
-        "year_start": year_start,
-        "year_end": year_end,
-        "vehicle_condition": normalize_csv_param(vehicle_condition),
-        "vehicle_types": normalize_csv_param(vehicle_types),
-        "make": make,
-        "model": model,
-        "predicted_roi_start": predicted_roi_start,
-        "predicted_roi_end": predicted_roi_end,
-        "predicted_profit_margin_start": predicted_profit_margin_start,
-        "predicted_profit_margin_end": predicted_profit_margin_end,
-        "engine_type": normalize_csv_param(engine_type),
-        "transmission": normalize_csv_param(transmission),
-        "drive_train": normalize_csv_param(drive_train),
-        "cylinder": normalize_csv_param(cylinder),
-        "auction_names": normalize_csv_param(auction_names),
-        "body_style": normalize_csv_param(body_style),
-    }
 
     result = await db.execute(query, params)
     return [dict(row) for row in result.fetchall()]
@@ -257,6 +256,37 @@ async def get_top_sellers(
     sale_start: Optional[str] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
     sale_end: Optional[str] = Query(None, description="End date for sales (YYYY-MM-DD)"),
 ):
+    params = {
+        "state_codes": normalize_csv_param(state_codes),
+        "cities": normalize_csv_param(cities),
+        "auctions": normalize_csv_param(auctions),
+        "vehicle_condition": normalize_csv_param(vehicle_condition),
+        "vehicle_types": normalize_csv_param(vehicle_types),
+        "engine_type": normalize_csv_param(engine_type),
+        "transmission": normalize_csv_param(transmission),
+        "drive_train": normalize_csv_param(drive_train),
+        "cylinder": normalize_csv_param(cylinder),
+        "auction_names": normalize_csv_param(auction_names),
+        "body_style": normalize_csv_param(body_style),
+        "mileage_start": mileage_start,
+        "mileage_end": mileage_end,
+        "owners_start": owners_start,
+        "owners_end": owners_end,
+        "accident_start": accident_start,
+        "accident_end": accident_end,
+        "year_start": year_start,
+        "year_end": year_end,
+        "make": make,
+        "model": model,
+        "predicted_roi_start": predicted_roi_start,
+        "predicted_roi_end": predicted_roi_end,
+        "predicted_profit_margin_start": predicted_profit_margin_start,
+        "predicted_profit_margin_end": predicted_profit_margin_end,
+        "sale_start": normalize_date_param(sale_start),
+        "sale_end": normalize_date_param(sale_end),
+    }
+    logger.debug("Query parameters for /top-sellers: %s", params)
+
     query = text("""
         WITH us_states AS (
             SELECT unnest(ARRAY[
@@ -311,36 +341,6 @@ async def get_top_sellers(
         ORDER BY Lots DESC
         LIMIT 10
     """)
-
-    params = {
-        "state_codes": normalize_csv_param(state_codes),
-        "cities": normalize_csv_param(cities),
-        "auctions": normalize_csv_param(auctions),
-        "vehicle_condition": normalize_csv_param(vehicle_condition),
-        "vehicle_types": normalize_csv_param(vehicle_types),
-        "engine_type": normalize_csv_param(engine_type),
-        "transmission": normalize_csv_param(transmission),
-        "drive_train": normalize_csv_param(drive_train),
-        "cylinder": normalize_csv_param(cylinder),
-        "auction_names": normalize_csv_param(auction_names),
-        "body_style": normalize_csv_param(body_style),
-        "mileage_start": mileage_start,
-        "mileage_end": mileage_end,
-        "owners_start": owners_start,
-        "owners_end": owners_end,
-        "accident_start": accident_start,
-        "accident_end": accident_end,
-        "year_start": year_start,
-        "year_end": year_end,
-        "make": make,
-        "model": model,
-        "predicted_roi_start": predicted_roi_start,
-        "predicted_roi_end": predicted_roi_end,
-        "predicted_profit_margin_start": predicted_profit_margin_start,
-        "predicted_profit_margin_end": predicted_profit_margin_end,
-        "sale_start": normalize_date_param(sale_start),
-        "sale_end": normalize_date_param(sale_end),
-    }
 
     result = await db.execute(query, params)
     return [dict(row) for row in result.fetchall()]
@@ -406,12 +406,8 @@ async def get_avg_sale_prices(
     sale_end: Optional[date] = Query(None, description="End date for sales (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Returns average final bid prices grouped by the specified time interval.
-
-    This endpoint is useful for analyzing pricing trends over time with flexible filtering options.
-    """
     ref_date = reference_date or datetime.utcnow().date()
+    logger.debug("Preparing query with params: interval_unit=%s, interval_amount=%s, ref_date=%s", interval_unit, interval_amount, ref_date)
 
     params = {
         "interval_unit": interval_unit,
@@ -445,8 +441,9 @@ async def get_avg_sale_prices(
         "sale_start": sale_start,
         "sale_end": sale_end,
     }
+    logger.debug("Query parameters for /analytics/sale-prices: %s", params)
 
-    query = """
+    query = text("""
     WITH us_states AS (
         SELECT unnest(ARRAY[
             'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
@@ -501,7 +498,7 @@ async def get_avg_sale_prices(
       AND (:sale_start IS NULL OR :sale_end IS NULL OR sh.date BETWEEN :sale_start AND :sale_end)
     GROUP BY period
     ORDER BY period;
-    """
+    """)
 
     result = await db.execute(query, params)
     return [{"period": row[0].isoformat(), "avg_price": float(row[1])} for row in result.all()]
