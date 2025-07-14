@@ -101,8 +101,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 3g  # Збільшено з 1.5g (пріоритет)
-    cpus: 1.5  # Збільшено з 0.7 (пріоритет)
+    mem_limit: 2g  # Збільшено з 1.5g (пріоритет)
+    cpus: 1.0  # Збільшено з 0.7 (пріоритет)
     restart: always
     logging:
       driver: "json-file"
@@ -139,7 +139,7 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=solo"]
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=prefork"]
     env_file:
       - ./entities/.env
     environment:
@@ -153,8 +153,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 1g  # Зменшено з 4g (мінімум для роботи)
-    cpus: 0.5  # Зменшено з 1.5 (мінімум для роботи)
+    mem_limit: 1.0g  # Зменшено з 4g (мінімум для роботи)
+    cpus: 2.0  # Зменшено з 1.5 (мінімум для роботи)
     restart: always
     logging:
       driver: "json-file"

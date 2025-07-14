@@ -62,6 +62,7 @@ class Config:
         ],
     }
     CREDENTIALS = {}
+    UPDATING_CREDENTIALS = False
 
     TIMEOUT = 10
     MAX_WAIT_VERIFICATION = 30
@@ -286,15 +287,39 @@ class DealerCenterScraper:
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in (401, 403):
                         logging.info("Saved credentials invalid, performing full login")
-                        await self._perform_login()
+                        if not Config.UPDATING_CREDENTIALS:
+                            Config.UPDATING_CREDENTIALS = True
+                            await self._perform_login()
+                            Config.UPDATING_CREDENTIALS = False
+                        else:
+                            while True:
+                                await asyncio.sleep(5)
+                                if Config.UPDATING_CREDENTIALS:
+                                    break
                     else:
                         raise
                 except Exception as e:
                     logging.error(f"API call failed: {str(e)}")
-                    await self._perform_login()
+                    if not Config.UPDATING_CREDENTIALS:
+                        Config.UPDATING_CREDENTIALS = True
+                        await self._perform_login()
+                        Config.UPDATING_CREDENTIALS = False
+                    else:
+                        while True:
+                            await asyncio.sleep(5)
+                            if Config.UPDATING_CREDENTIALS:
+                                break
         else:
             logging.info("No saved credentials, performing full login")
-            await self._perform_login()
+            if not Config.UPDATING_CREDENTIALS:
+                Config.UPDATING_CREDENTIALS = True
+                await self._perform_login()
+                Config.UPDATING_CREDENTIALS = False
+            else:
+                while True:
+                    await asyncio.sleep(5)
+                    if Config.UPDATING_CREDENTIALS:
+                        break
 
         end_time = time.time()
         logging.info(f"Authentication prepared in {end_time - start_time} seconds")
