@@ -217,7 +217,7 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
-) -> Tuple[List[CarModel], int, int, Dict[str, Any]]:
+) -> tuple[List[CarModel], int, int, dict]:
     """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
@@ -229,6 +229,7 @@ async def get_filtered_vehicles(
     def apply_in_filter(field, values):
         return func.lower(field).in_([v.lower() for v in values])
 
+    # Базовий запит (чиста копія для агрегацій)
     base_query = (
         select(CarModel)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
@@ -241,7 +242,8 @@ async def get_filtered_vehicles(
         )
     )
 
-    # Частковий пошук
+    clean_query = base_query  # Зберігаємо копію для stats_query
+
     if filters.get("vin"):
         vin_value = f"%{filters['vin'].lower()}%"
         base_query = base_query.filter(
@@ -290,32 +292,37 @@ async def get_filtered_vehicles(
             base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
         if filters.get("predicted_roi_max") is not None:
             base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
+
         if filters.get("min_owners_count") is not None:
             base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
         if filters.get("max_owners_count") is not None:
             base_query = base_query.filter(CarModel.owners <= filters["max_owners_count"])
+
         if filters.get("min_accident_count") is not None:
             base_query = base_query.filter(CarModel.accident_count >= filters["min_accident_count"])
         if filters.get("max_accident_count") is not None:
             base_query = base_query.filter(CarModel.accident_count <= filters["max_accident_count"])
+
         if filters.get("min_year") is not None:
             base_query = base_query.filter(CarModel.year >= filters["min_year"])
         if filters.get("max_year") is not None:
             base_query = base_query.filter(CarModel.year <= filters["max_year"])
+
         if filters.get("date_to"):
             date_to = filters["date_to"]
             if isinstance(date_to, str):
                 date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
             base_query = base_query.filter(CarModel.date <= date_to)
-        if filters.get("recommended_only") is True:
+
+        if filters.get("recommended_only"):
             base_query = base_query.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
-        if filters.get("liked") is True:
+
+        if filters.get("liked"):
             if user_id is not None:
                 base_query = base_query.filter(user_likes.c.user_id == user_id)
             else:
                 raise ValueError("user_id is required when filtering by liked=True")
 
-    # Дата від
     if filters.get("date_from"):
         date_from = filters["date_from"]
         if isinstance(date_from, str):
@@ -329,15 +336,17 @@ async def get_filtered_vehicles(
     total_count = await db.scalar(count_query)
     total_pages = (total_count + page_size - 1) // page_size
 
-    # Агрегація current_bid
+    # Агрегація (тільки для page == 1)
     bids_info = {}
     if page == 1:
         stats_query = (
-            base_query.with_only_columns(
+            clean_query.with_only_columns(
                 func.min(CarModel.current_bid),
                 func.max(CarModel.current_bid),
                 func.avg(CarModel.current_bid),
             )
+            .correlate(None)
+            .order_by(None)
         )
         result = await db.execute(stats_query)
         min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
@@ -348,12 +357,12 @@ async def get_filtered_vehicles(
             "total_count": total_count,
         }
 
-    # Основний запит з liked_expr
+    # Основний запит із liked та сортуванням
     full_query = base_query.add_columns(liked_expr)
     order_clause = ORDERING_MAP.get(ordering, desc(CarModel.created_at))
-    full_query = full_query.order_by(order_clause).offset((page - 1) * page_size).limit(page_size)
+    full_query = full_query.order_by(order_clause)
 
-    result = await db.execute(full_query)
+    result = await db.execute(full_query.offset((page - 1) * page_size).limit(page_size))
     rows = result.all()
 
     vehicles_with_liked = []
