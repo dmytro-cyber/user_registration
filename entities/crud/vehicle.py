@@ -216,13 +216,14 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 
 async def get_filtered_vehicles(
-    db: AsyncSession,
-    filters: Dict[str, Any],
-    ordering: str,
-    page: int,
-    page_size: int
-) -> Tuple[List[CarModel], int, int, dict]:
+    db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
+) -> tuple[List[CarModel], int, int, dict]:
     """Get filtered vehicles with pagination and liked status."""
+    from sqlalchemy import or_, func, select, case, desc
+    from sqlalchemy.orm import selectinload
+    from models.vehicle import CarModel, RecommendationStatus
+    from models.user_like import user_likes
+    from datetime import datetime, timezone, time
 
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
@@ -255,7 +256,6 @@ async def get_filtered_vehicles(
                 func.lower(CarModel.vehicle).ilike(vin_value),
             )
         )
-
     else:
         if filters.get("make"):
             base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
@@ -309,6 +309,7 @@ async def get_filtered_vehicles(
             base_query = base_query.filter(CarModel.year >= filters["min_year"])
         if filters.get("max_year") is not None:
             base_query = base_query.filter(CarModel.year <= filters["max_year"])
+
         if filters.get("date_to"):
             date_to = filters["date_to"]
             if isinstance(date_to, str):
@@ -332,12 +333,12 @@ async def get_filtered_vehicles(
     else:
         base_query = base_query.filter(CarModel.date >= today_naive)
 
-    # --- Count query ---
+    # Підрахунок кількості записів
     count_query = select(func.count()).select_from(base_query.subquery())
     total_count = await db.scalar(count_query)
     total_pages = (total_count + page_size - 1) // page_size
 
-    # --- Stats ---
+    # Агрегація current_bid
     bids_info = {}
     if page == 1:
         stats_query = base_query.with_only_columns(
@@ -354,20 +355,10 @@ async def get_filtered_vehicles(
             "total_count": total_count,
         }
 
-    # --- Final query ---
+    # Сортування + liked статус
     order_clause = ORDERING_MAP.get(ordering, [desc(CarModel.created_at)])
-    if not isinstance(order_clause, list):
-        order_clause = [order_clause]
-
-    final_query = (
-        base_query.add_columns(liked_expr)
-        .distinct(CarModel.id)
-        .order_by(*order_clause)
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-    )
-
-    result = await db.execute(final_query)
+    full_query = base_query.add_columns(liked_expr).order_by(*order_clause)
+    result = await db.execute(full_query.offset((page - 1) * page_size).limit(page_size))
     rows = result.all()
 
     vehicles_with_liked = []
