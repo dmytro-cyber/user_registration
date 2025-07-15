@@ -1,5 +1,5 @@
 from datetime import datetime, time, timezone
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from ordering_constr import ORDERING_MAP
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, asc, desc, delete, or_
