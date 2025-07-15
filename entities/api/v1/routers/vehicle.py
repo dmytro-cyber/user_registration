@@ -413,7 +413,7 @@ async def get_cars(
             validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
             logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
             return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
-    else:
+    elif not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
         return CarListResponseSchema(cars=[], page_links={}, last=True)
     base_url = str(request.url.remove_query_params("page"))
