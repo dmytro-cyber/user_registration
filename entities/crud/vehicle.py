@@ -219,11 +219,6 @@ async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
 ) -> tuple[List[CarModel], int, int, dict]:
     """Get filtered vehicles with pagination and liked status."""
-    from sqlalchemy import or_, func, select, case, desc
-    from sqlalchemy.orm import selectinload
-    from models.vehicle import CarModel, RecommendationStatus
-    from models.user_like import user_likes
-    from datetime import datetime, timezone, time
 
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
