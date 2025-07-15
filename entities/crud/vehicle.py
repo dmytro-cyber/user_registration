@@ -220,7 +220,7 @@ async def get_filtered_vehicles(
 ) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
     """Get filtered vehicles with pagination and liked status."""
 
-    today = datetime.now(pytz.UTC).date()
+    today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
     user_id = filters.get("user_id")  # Використовуємо .get() для безпечного доступу
 
