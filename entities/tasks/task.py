@@ -128,11 +128,11 @@ async def _parse_and_update_car_async(
             else:
                 car.has_correct_accidents = True
                 
-            car.recommendation_status = (
-                RecommendationStatus.RECOMMENDED
-                if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
-                else RecommendationStatus.NOT_RECOMMENDED
-            )
+            # car.recommendation_status = (
+            #     RecommendationStatus.RECOMMENDED
+            #     if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
+            #     else RecommendationStatus.NOT_RECOMMENDED
+            # )
 
             car.avg_market_price = (
                 existing_car.avg_market_price
@@ -193,6 +193,8 @@ async def _parse_and_update_car_async(
 
             car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
+            if car.recommendation_status == RecommendationStatus.NOT_RECOMMENDED and not car.recommendation_status_reasons:
+                car.recommendation_status = RecommendationStatus.RECOMMENDED
 
 
             if html_data:
@@ -266,6 +268,12 @@ async def _update_car_bids_async():
                         car.current_bid = int(float(current_bid))
                         if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                            if not car.recommendation_status_reasons:
+                                car.recommendation_status_reasons = "suggested bid < current bid "
+                            elif "suggested bid < current bid" in car.recommendation_status_reasons:
+                                pass
+                            else:
+                                car.recommendation_status_reasons += "suggested bid < current bid "
 
             await db.commit()
             return {"status": "success", "updated_cars": len(data)}

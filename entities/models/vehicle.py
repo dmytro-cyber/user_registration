@@ -70,6 +70,7 @@ class CarModel(Base):
     recommendation_status = Column(
         Enum(RecommendationStatus), nullable=False, default=RecommendationStatus.NOT_RECOMMENDED
     )
+    recommendation_status_reasons = Column(String, nullable=True)
     car_status = Column(Enum(CarStatus), nullable=False, default=CarStatus.NEW)
 
     # List page info

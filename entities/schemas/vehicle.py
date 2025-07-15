@@ -35,6 +35,7 @@ class CarBaseSchema(BaseModel):
     has_correct_accidents: bool | None = None
     liked: bool
     recommendation_status: str | None
+    recommendation_status_reasons: str | None
 
     model_config = ConfigDict(from_attributes=True)
 
