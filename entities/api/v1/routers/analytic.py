@@ -1,94 +1,60 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, File, UploadFile
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
-from fastapi.encoders import jsonable_encoder
 from db.session import get_db
-from typing import Optional, List, Literal
 from sqlalchemy import text
-from datetime import date, datetime
+from datetime import datetime
+from typing import Optional
+from fastapi import Literal  # Додано для interval_unit
+
 import logging
-import logging.handlers
-import os
+import sys
 
-# Configure logging for production environment
+# Configure logging with enhanced debugging (коментуємо логування в файл)
 logger = logging.getLogger("admin_router")
-logger.setLevel(logging.DEBUG)  # Set the default logging level
+logger.setLevel(logging.DEBUG)
 
-# Define formatter for structured logging
+# Ensure logs are visible in console
 formatter = logging.Formatter(
     "%(asctime)s - %(name)s - %(levelname)s - [RequestID: %(request_id)s] - [UserID: %(user_id)s] - %(message)s"
 )
-
-# Comment out file logging setup to disable writing to file
-# log_directory = "logs"
-# if not os.path.exists(log_directory):
-#     os.makedirs(log_directory)
-# file_handler = logging.handlers.RotatingFileHandler(
-#     filename="logs/admin.log",
-#     maxBytes=10 * 1024 * 1024,  # 10 MB
-#     backupCount=5,  # Keep up to 5 backup files
-# )
-# file_handler.setFormatter(formatter)
-# file_handler.setLevel(logging.DEBUG)
-
-# Set up console handler for debug output
-console_handler = logging.StreamHandler()
+console_handler = logging.StreamHandler(stream=sys.stdout)  # Explicitly use stdout
 console_handler.setFormatter(formatter)
-console_handler.setLevel(logging.INFO)
-
-# Add handlers to the logger (only console handler is active)
-# logger.addHandler(file_handler)  # Comment out to disable file logging
+console_handler.setLevel(logging.DEBUG)  # Set to DEBUG for all messages
 logger.addHandler(console_handler)
 
-# Custom filter to add context (RequestID, UserID)
-class ContextFilter(logging.Filter):
-    def filter(self, record):
-        record.request_id = getattr(record, "request_id", "N/A")
-        record.user_id = getattr(record, "user_id", "N/A")
-        return True
-
-logger.addFilter(ContextFilter())
+# class ContextFilter(logging.Filter):
+#     def filter(self, record):
+#         record.request_id = getattr(record, "request_id", "N/A")
+#         record.user_id = getattr(record, "user_id", "N/A")
+#         return True
+#
+# logger.addFilter(ContextFilter())
 
 router = APIRouter(prefix="/analytic")
 
-def normalize_csv_param(val: Optional[str]) -> List[str]:
+def normalize_csv_param(val: Optional[str]) -> list[str]:
     """Normalize a comma-separated string into a list of stripped values."""
+    # logger.debug("Normalizing CSV param: %s", val)
     if val:
-        return [v.strip() for v in val.split(",") if v.strip()]
+        result = [v.strip() for v in val.split(",") if v.strip()]
+        # logger.debug("Normalized result: %s", result)
+        return result
     return []
 
-def normalize_date_param(val: Optional[str]) -> Optional[date]:
-    """Convert a date string to date object or return None if invalid."""
+def normalize_date_param(val: Optional[str]) -> Optional[datetime]:
+    """Convert a date string to datetime object or return None if invalid."""
+    # logger.debug("Normalizing date param: %s", val)
     try:
-        return datetime.strptime(val, "%Y-%m-%d").date() if val else None
-    except ValueError:
+        result = datetime.strptime(val, "%Y-%m-%d") if val else None
+        # logger.debug("Normalized date result: %s", result)
+        return result
+    except ValueError as e:
+        # logger.error("Date normalization failed: %s", str(e))
         return None
 
 @router.get("/recommended-cars", description="""
 Returns a list of recommended cars with status 'RECOMMENDED' that match the provided filters.
-
-📌 Filters can be passed as comma-separated strings for multi-value fields, e.g.:
-- `make=Toyota,Ford`
-- `vehicle_types=Sedan,SUV`
-- `transmission=Automatic,Manual`
-
-### Available Filters:
-- **Mileage Range**: `mileage_start`, `mileage_end` (integers)
-- **Owners Range**: `owners_start`, `owners_end` (integers)
-- **Accident Count Range**: `accident_start`, `accident_end` (integers)
-- **Year Range**: `year_start`, `year_end` (integers)
-- **Vehicle Condition**: `vehicle_condition` (comma-separated strings)
-- **Vehicle Types**: `vehicle_types` (comma-separated strings)
-- **Make**: `make` (string)
-- **Model**: `model` (string)
-- **Predicted ROI Range**: `predicted_roi_start`, `predicted_roi_end` (floats)
-- **Predicted Profit Margin Range**: `predicted_profit_margin_start`, `predicted_profit_margin_end` (floats)
-- **Engine Type**: `engine_type` (comma-separated strings)
-- **Transmission**: `transmission` (comma-separated strings)
-- **Drive Train**: `drive_train` (comma-separated strings)
-- **Cylinder**: `cylinder` (comma-separated strings)
-- **Auction Names**: `auction_names` (comma-separated strings)
-- **Body Style**: `body_style` (comma-separated strings)
+...
 """)
 async def get_recommended_cars(
     db: AsyncSession = Depends(get_db),
@@ -115,6 +81,7 @@ async def get_recommended_cars(
     auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
     body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
 ):
+    # logger.debug("Received request for /recommended-cars with params: mileage_start=%s, mileage_end=%s, ...", mileage_start, mileage_end)
     params = [
         mileage_start, mileage_end,
         owners_start, owners_end,
@@ -132,7 +99,7 @@ async def get_recommended_cars(
         normalize_csv_param(auction_names),
         normalize_csv_param(body_style)
     ]
-    logger.debug("Query parameters for /recommended-cars: %s", params)
+    # logger.debug("Prepared params for query: %s", params)
 
     query = text("""
         WITH us_states AS (
@@ -191,37 +158,14 @@ async def get_recommended_cars(
         LIMIT 50;
     """)
 
-    try:
-        result = await db.execute(query, params)
-        return [dict(row) for row in result.fetchall()]
-    except Exception as e:
-        logger.error("Error executing query for /recommended-cars: %s", str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    # logger.debug("Executing query for /recommended-cars with params: %s", params)
+    result = await db.execute(query, params)
+    # logger.debug("Query executed successfully")
+    return [dict(row) for row in result.fetchall()]
 
 @router.get("/top-sellers", summary="Top 10 sellers by sold lots", description="""
 Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.
-
-### Available Filters:
-- **State Codes**: `state_codes` (comma-separated strings, e.g., 'CA,TX')
-- **Cities**: `cities` (comma-separated strings)
-- **Auctions**: `auctions` (comma-separated strings)
-- **Mileage Range**: `mileage_start`, `mileage_end` (integers)
-- **Owners Range**: `owners_start`, `owners_end` (integers)
-- **Accident Count Range**: `accident_start`, `accident_end` (integers)
-- **Year Range**: `year_start`, `year_end` (integers)
-- **Vehicle Condition**: `vehicle_condition` (comma-separated strings)
-- **Vehicle Types**: `vehicle_types` (comma-separated strings)
-- **Make**: `make` (string)
-- **Model**: `model` (string)
-- **Predicted ROI Range**: `predicted_roi_start`, `predicted_roi_end` (floats)
-- **Predicted Profit Margin Range**: `predicted_profit_margin_start`, `predicted_profit_margin_end` (floats)
-- **Engine Type**: `engine_type` (comma-separated strings)
-- **Transmission**: `transmission` (comma-separated strings)
-- **Drive Train**: `drive_train` (comma-separated strings)
-- **Cylinder**: `cylinder` (comma-separated strings)
-- **Auction Names**: `auction_names` (comma-separated strings)
-- **Body Style**: `body_style` (comma-separated strings)
-- **Sale Date Range**: `sale_start`, `sale_end` (YYYY-MM-DD format)
+...
 """)
 async def get_top_sellers(
     db: AsyncSession = Depends(get_db),
@@ -253,6 +197,7 @@ async def get_top_sellers(
     sale_start: Optional[str] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
     sale_end: Optional[str] = Query(None, description="End date for sales (YYYY-MM-DD)"),
 ):
+    # logger.debug("Received request for /top-sellers with params: state_codes=%s, mileage_start=%s, ...", state_codes, mileage_start)
     params = [
         normalize_csv_param(state_codes),
         normalize_csv_param(cities),
@@ -275,7 +220,7 @@ async def get_top_sellers(
         normalize_date_param(sale_start),
         normalize_date_param(sale_end)
     ]
-    logger.debug("Query parameters for /top-sellers: %s", params)
+    # logger.debug("Prepared params for query: %s", params)
 
     query = text("""
         WITH us_states AS (
@@ -332,40 +277,14 @@ async def get_top_sellers(
         LIMIT 10
     """)
 
-    try:
-        result = await db.execute(query, params)
-        return [dict(row) for row in result.fetchall()]
-    except Exception as e:
-        logger.error("Error executing query for /top-sellers: %s", str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    # logger.debug("Executing query for /top-sellers with params: %s", params)
+    result = await db.execute(query, params)
+    # logger.debug("Query executed successfully")
+    return [dict(row) for row in result.fetchall()]
 
 @router.get("/analytics/sale-prices", summary="Average Sale Price Over Time", tags=["Analytics"], description="""
 Returns the average final bid prices grouped by the specified time interval (day, week, or month) over a given period.
-
-### Available Filters:
-- **Interval Unit**: `interval_unit` (literal: 'day', 'week', 'month')
-- **Interval Amount**: `interval_amount` (integer, number of intervals to look back)
-- **Reference Date**: `reference_date` (date, default: today)
-- **State Codes**: `state_codes` (comma-separated strings, e.g., 'CA,TX')
-- **Cities**: `cities` (comma-separated strings)
-- **Auctions**: `auctions` (comma-separated strings)
-- **Mileage Range**: `mileage_start`, `mileage_end` (integers)
-- **Owners Range**: `owners_start`, `owners_end` (integers)
-- **Accident Count Range**: `accident_start`, `accident_end` (integers)
-- **Year Range**: `year_start`, `year_end` (integers)
-- **Vehicle Condition**: `vehicle_condition` (comma-separated strings)
-- **Vehicle Types**: `vehicle_types` (comma-separated strings)
-- **Make**: `make` (string)
-- **Model**: `model` (string)
-- **Predicted ROI Range**: `predicted_roi_start`, `predicted_roi_end` (floats)
-- **Predicted Profit Margin Range**: `predicted_profit_margin_start`, `predicted_profit_margin_end` (floats)
-- **Engine Type**: `engine_type` (comma-separated strings)
-- **Transmission**: `transmission` (comma-separated strings)
-- **Drive Train**: `drive_train` (comma-separated strings)
-- **Cylinder**: `cylinder` (comma-separated strings)
-- **Auction Names**: `auction_names` (comma-separated strings)
-- **Body Style**: `body_style` (comma-separated strings)
-- **Sale Date Range**: `sale_start`, `sale_end` (YYYY-MM-DD format)
+...
 """)
 async def get_avg_sale_prices(
     interval_unit: Literal["day", "week", "month"] = Query("week", description="Time grouping unit (day, week, month)"),
@@ -400,6 +319,7 @@ async def get_avg_sale_prices(
     sale_end: Optional[datetime] = Query(None, description="End date for sales (YYYY-MM-DD)"),
     db: AsyncSession = Depends(get_db),
 ):
+    # logger.debug("Received request for /analytics/sale-prices with params: interval_unit=%s, interval_amount=%s, ...", interval_unit, interval_amount)
     ref_date = reference_date or datetime.utcnow()
     params = [
         interval_unit, interval_amount, ref_date,
@@ -423,7 +343,7 @@ async def get_avg_sale_prices(
         normalize_csv_param(body_style),
         sale_start, sale_end
     ]
-    logger.debug("Query parameters for /analytics/sale-prices: %s", params)
+    # logger.debug("Prepared params for query: %s", params)
 
     query = text("""
         WITH us_states AS (
@@ -482,9 +402,7 @@ async def get_avg_sale_prices(
         ORDER BY period;
     """)
 
-    try:
-        result = await db.execute(query, params)
-        return [{"period": row[0].isoformat(), "avg_price": float(row[1])} for row in result.all()]
-    except Exception as e:
-        logger.error("Error executing query for /analytics/sale-prices: %s", str(e))
-        raise HTTPException(status_code=500, detail="Internal server error")
+    # logger.debug("Executing query for /analytics/sale-prices with params: %s", params)
+    result = await db.execute(query, params)
+    # logger.debug("Query executed successfully")
+    return [{"period": row[0].isoformat(), "avg_price": float(row[1])} for row in result.all()]
