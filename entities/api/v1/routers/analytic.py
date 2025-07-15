@@ -3,8 +3,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.session import get_db
 from sqlalchemy import text
 from datetime import datetime
-from typing import Optional
-from fastapi import Literal  # Додано для interval_unit
+from typing import Optional, Literal
+
 
 import logging
 import sys
