@@ -193,7 +193,7 @@ async def _parse_and_update_car_async(
 
             car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
-            if car.recommendation_status == RecommendationStatus.NOT_RECOMMENDED and not car.recommendation_status_reasons:
+            if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
 
