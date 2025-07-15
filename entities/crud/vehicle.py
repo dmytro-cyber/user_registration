@@ -217,7 +217,7 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
-) -> tuple[List[CarModel], int, int]:
+) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
     """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
@@ -229,7 +229,6 @@ async def get_filtered_vehicles(
     def apply_in_filter(field, values):
         return func.lower(field).in_([v.lower() for v in values])
 
-    # Базовий запит без liked_expr для subquery
     base_query = (
         select(CarModel)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
@@ -242,19 +241,19 @@ async def get_filtered_vehicles(
         )
     )
 
-    if filters.get("vin"):
-        vin_value = f"%{filters['vin'].lower()}%"
-        base_query = (
-            base_query.filter(
-                or_(
-                    func.lower(CarModel.vin).ilike(vin_value),
-                    func.lower(CarModel.make).ilike(vin_value),
-                    func.lower(CarModel.model).ilike(vin_value),
-                    func.lower(CarModel.vehicle).ilike(vin_value),
-                )
+    keyword_search = filters.get("vin")
+    is_keyword_search = bool(keyword_search)
+
+    if is_keyword_search:
+        vin_value = f"%{keyword_search.lower()}%"
+        base_query = base_query.filter(
+            or_(
+                func.lower(CarModel.vin).ilike(vin_value),
+                func.lower(CarModel.make).ilike(vin_value),
+                func.lower(CarModel.model).ilike(vin_value),
+                func.lower(CarModel.vehicle).ilike(vin_value),
             )
-            .distinct(CarModel.id)
-        )
+        ).distinct(CarModel.id)
     else:
         if filters.get("make"):
             base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
@@ -280,7 +279,6 @@ async def get_filtered_vehicles(
             base_query = base_query.filter(apply_in_filter(CarModel.auction_name, filters["auction_name"]))
         if filters.get("location"):
             base_query = base_query.filter(apply_in_filter(CarModel.location, filters["location"]))
-
         if filters.get("mileage_min") is not None:
             base_query = base_query.filter(CarModel.mileage >= filters["mileage_min"])
         if filters.get("mileage_max") is not None:
@@ -293,30 +291,25 @@ async def get_filtered_vehicles(
             base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
         if filters.get("predicted_roi_max") is not None:
             base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
-
         if filters.get("min_owners_count") is not None:
             base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
         if filters.get("max_owners_count") is not None:
             base_query = base_query.filter(CarModel.owners <= filters["max_owners_count"])
-
         if filters.get("min_accident_count") is not None:
             base_query = base_query.filter(CarModel.accident_count >= filters["min_accident_count"])
         if filters.get("max_accident_count") is not None:
             base_query = base_query.filter(CarModel.accident_count <= filters["max_accident_count"])
-
         if filters.get("min_year") is not None:
             base_query = base_query.filter(CarModel.year >= filters["min_year"])
         if filters.get("max_year") is not None:
             base_query = base_query.filter(CarModel.year <= filters["max_year"])
-            
         if filters.get("date_to"):
             date_to = filters["date_to"]
             if isinstance(date_to, str):
                 date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
             base_query = base_query.filter(CarModel.date <= date_to)
         if filters.get("recommended_only"):
-            base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
-
+            base_query = base_query.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
         if filters.get("liked"):
             if user_id is not None:
                 base_query = base_query.filter(user_likes.c.user_id == user_id)
@@ -331,19 +324,25 @@ async def get_filtered_vehicles(
     else:
         base_query = base_query.filter(CarModel.date >= today_naive)
 
-
     # Підрахунок кількості записів
     count_query = select(func.count()).select_from(base_query.subquery())
     total_count = await db.scalar(count_query)
     total_pages = (total_count + page_size - 1) // page_size
 
-    # Агрегація current_bid
     bids_info = {}
-    if page == 1:
-        stats_query = base_query.with_only_columns(
-            func.min(CarModel.current_bid),
-            func.max(CarModel.current_bid),
-            func.avg(CarModel.current_bid),
+    if page == 1 and not is_keyword_search:
+        stats_query = (
+            select(
+                func.min(CarModel.current_bid),
+                func.max(CarModel.current_bid),
+                func.avg(CarModel.current_bid),
+            )
+            .select_from(CarModel)
+            .filter(CarModel.predicted_total_investments.isnot(None))
+            .filter(CarModel.predicted_total_investments > 0)
+            .filter(CarModel.suggested_bid.isnot(None))
+            .filter(CarModel.suggested_bid > 0)
+            .filter(CarModel.date >= filters.get("date_from") or today_naive)
         )
         result = await db.execute(stats_query)
         min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
@@ -354,7 +353,6 @@ async def get_filtered_vehicles(
             "total_count": total_count,
         }
 
-    # Основний запит з liked_expr та сортуванням
     full_query = base_query.add_columns(liked_expr)
     order_clause = ORDERING_MAP.get(ordering, desc(CarModel.created_at))
     full_query = full_query.order_by(order_clause)
@@ -368,6 +366,7 @@ async def get_filtered_vehicles(
         vehicles_with_liked.append(car)
 
     return vehicles_with_liked, total_count, total_pages, bids_info
+
 
 
 async def get_bidding_hub_vehicles(
