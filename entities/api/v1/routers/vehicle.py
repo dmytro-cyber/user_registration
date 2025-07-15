@@ -331,7 +331,6 @@ async def get_cars(
 ) -> CarListResponseSchema:
     """
     Retrieve a paginated list of cars based on filters.
-
     Args:
         request (Request): The FastAPI request object for context.
         auction (List[str], optional): List of auction names (e.g., CoPart, IAAI).
@@ -361,7 +360,6 @@ async def get_cars(
     request_id = str(id(request))
     extra = {"request_id": request_id, "user_id": "N/A"}
     filters = {
-        "vin": vin,
         "auction": auction,
         "auction_name": auction_name,
         "location": location,
@@ -394,26 +392,32 @@ async def get_cars(
         
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
+    if vin and len(vin.replace(" ", "")) == 17:
+        vin = vin.replace(" ", "")
+        logger.info(f"Searching for vehicle with VIN: {vin}", extra=extra)
+        async with db.begin():
+            vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
+            if vehicle:
+                logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
+                vehicle_data = car_to_dict(vehicle)
+                vehicle_data["liked"] = vehicle.liked
+                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
+            else:
+                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
+                validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
+                vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
+                await db.commit()
+                vehicle_data = car_to_dict(vehicle)
+                vehicle_data["liked"] = vehicle.liked
+                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+                logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
+                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
     vehicles, total_count, total_pages, additional = await get_filtered_vehicles(
         db=db, filters=filters, ordering=ordering, page=page, page_size=page_size
     )
-    if not vehicles and vin and len(vin.replace(" ", "")) == 17:
-        vin = vin.replace(" ", "")
-        logger.info(f"Searching for vehicle with VIN: {vin}", extra=extra)
-        async with db.begin():
-            logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
-            validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
-            if not validated_vehicle:
-                return CarListResponseSchema(cars=[], page_links={}, last=True)
-            vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
-            await db.commit()
-            vehicle_data = car_to_dict(vehicle)
-            vehicle_data["liked"] = vehicle.liked
-            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-            logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
-            return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
-    elif not vehicles:
+    if not vehicles:
         logger.info("No vehicles found with the given filters", extra=extra)
         return CarListResponseSchema(cars=[], page_links={}, last=True)
     base_url = str(request.url.remove_query_params("page"))
