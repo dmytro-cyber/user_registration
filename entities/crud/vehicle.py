@@ -2,7 +2,7 @@ from datetime import datetime, time, timezone
 from typing import List, Dict, Any, Optional
 from ordering_constr import ORDERING_MAP
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, asc, desc, delete
+from sqlalchemy import select, func, asc, desc, delete, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy import case, literal_column
@@ -242,59 +242,86 @@ async def get_filtered_vehicles(
         )
     )
 
-    # Застосування фільтрів
-    if filters.get("make"):
-        base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
-    if filters.get("body_style"):
-        base_query = base_query.filter(apply_in_filter(CarModel.body_style, filters["body_style"]))
-    if filters.get("vehicle_type"):
-        base_query = base_query.filter(apply_in_filter(CarModel.vehicle_type, filters["vehicle_type"]))
-    if filters.get("transmission"):
-        base_query = base_query.filter(apply_in_filter(CarModel.transmision, filters["transmission"]))
-    if filters.get("drive_type"):
-        base_query = base_query.filter(apply_in_filter(CarModel.drive_type, filters["drive_type"]))
-    if filters.get("engine_cylinder"):
-        base_query = base_query.filter(apply_in_filter(CarModel.engine_cylinder, filters["engine_cylinder"]))
-    if filters.get("fuel_type"):
-        base_query = base_query.filter(apply_in_filter(CarModel.fuel_type, filters["fuel_type"]))
-    if filters.get("condition"):
-        base_query = base_query.filter(apply_in_filter(CarModel.condition, filters["condition"]))
-    if filters.get("model"):
-        base_query = base_query.filter(apply_in_filter(CarModel.model, filters["model"]))
-    if filters.get("auction"):
-        base_query = base_query.filter(apply_in_filter(CarModel.auction, filters["auction"]))
-    if filters.get("auction_name"):
-        base_query = base_query.filter(apply_in_filter(CarModel.auction_name, filters["auction_name"]))
-    if filters.get("location"):
-        base_query = base_query.filter(apply_in_filter(CarModel.location, filters["location"]))
+    if filters.get("vin"):
+        vin_value = f"%{filters['vin'].lower()}%"
+        base_query = (
+            base_query.filter(
+                or_(
+                    func.lower(CarModel.vin).ilike(vin_value),
+                    func.lower(CarModel.make).ilike(vin_value),
+                    func.lower(CarModel.model).ilike(vin_value),
+                    func.lower(CarModel.vehicle).ilike(vin_value),
+                )
+            )
+            .distinct(CarModel.id)
+        )
+    else:
+        if filters.get("make"):
+            base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
+        if filters.get("body_style"):
+            base_query = base_query.filter(apply_in_filter(CarModel.body_style, filters["body_style"]))
+        if filters.get("vehicle_type"):
+            base_query = base_query.filter(apply_in_filter(CarModel.vehicle_type, filters["vehicle_type"]))
+        if filters.get("transmission"):
+            base_query = base_query.filter(apply_in_filter(CarModel.transmision, filters["transmission"]))
+        if filters.get("drive_type"):
+            base_query = base_query.filter(apply_in_filter(CarModel.drive_type, filters["drive_type"]))
+        if filters.get("engine_cylinder"):
+            base_query = base_query.filter(apply_in_filter(CarModel.engine_cylinder, filters["engine_cylinder"]))
+        if filters.get("fuel_type"):
+            base_query = base_query.filter(apply_in_filter(CarModel.fuel_type, filters["fuel_type"]))
+        if filters.get("condition"):
+            base_query = base_query.filter(apply_in_filter(CarModel.condition, filters["condition"]))
+        if filters.get("model"):
+            base_query = base_query.filter(apply_in_filter(CarModel.model, filters["model"]))
+        if filters.get("auction"):
+            base_query = base_query.filter(apply_in_filter(CarModel.auction, filters["auction"]))
+        if filters.get("auction_name"):
+            base_query = base_query.filter(apply_in_filter(CarModel.auction_name, filters["auction_name"]))
+        if filters.get("location"):
+            base_query = base_query.filter(apply_in_filter(CarModel.location, filters["location"]))
 
-    if filters.get("mileage_min") is not None:
-        base_query = base_query.filter(CarModel.mileage >= filters["mileage_min"])
-    if filters.get("mileage_max") is not None:
-        base_query = base_query.filter(CarModel.mileage <= filters["mileage_max"])
-    if filters.get("predicted_profit_margin_min") is not None:
-        base_query = base_query.filter(CarModel.predicted_profit_margin >= filters["predicted_profit_margin_min"])
-    if filters.get("predicted_profit_margin_max") is not None:
-        base_query = base_query.filter(CarModel.predicted_profit_margin <= filters["predicted_profit_margin_max"])
-    if filters.get("predicted_roi_min") is not None:
-        base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
-    if filters.get("predicted_roi_max") is not None:
-        base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
+        if filters.get("mileage_min") is not None:
+            base_query = base_query.filter(CarModel.mileage >= filters["mileage_min"])
+        if filters.get("mileage_max") is not None:
+            base_query = base_query.filter(CarModel.mileage <= filters["mileage_max"])
+        if filters.get("predicted_profit_margin_min") is not None:
+            base_query = base_query.filter(CarModel.predicted_profit_margin >= filters["predicted_profit_margin_min"])
+        if filters.get("predicted_profit_margin_max") is not None:
+            base_query = base_query.filter(CarModel.predicted_profit_margin <= filters["predicted_profit_margin_max"])
+        if filters.get("predicted_roi_min") is not None:
+            base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
+        if filters.get("predicted_roi_max") is not None:
+            base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
 
-    if filters.get("min_owners_count") is not None:
-        base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
-    if filters.get("max_owners_count") is not None:
-        base_query = base_query.filter(CarModel.owners <= filters["max_owners_count"])
+        if filters.get("min_owners_count") is not None:
+            base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
+        if filters.get("max_owners_count") is not None:
+            base_query = base_query.filter(CarModel.owners <= filters["max_owners_count"])
 
-    if filters.get("min_accident_count") is not None:
-        base_query = base_query.filter(CarModel.accident_count >= filters["min_accident_count"])
-    if filters.get("max_accident_count") is not None:
-        base_query = base_query.filter(CarModel.accident_count <= filters["max_accident_count"])
+        if filters.get("min_accident_count") is not None:
+            base_query = base_query.filter(CarModel.accident_count >= filters["min_accident_count"])
+        if filters.get("max_accident_count") is not None:
+            base_query = base_query.filter(CarModel.accident_count <= filters["max_accident_count"])
 
-    if filters.get("min_year") is not None:
-        base_query = base_query.filter(CarModel.year >= filters["min_year"])
-    if filters.get("max_year") is not None:
-        base_query = base_query.filter(CarModel.year <= filters["max_year"])
+        if filters.get("min_year") is not None:
+            base_query = base_query.filter(CarModel.year >= filters["min_year"])
+        if filters.get("max_year") is not None:
+            base_query = base_query.filter(CarModel.year <= filters["max_year"])
+            
+        if filters.get("date_to"):
+            date_to = filters["date_to"]
+            if isinstance(date_to, str):
+                date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
+            base_query = base_query.filter(CarModel.date <= date_to)
+        if filters.get("recommended_only"):
+            base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
+
+        if filters.get("liked"):
+            if user_id is not None:
+                base_query = base_query.filter(user_likes.c.user_id == user_id)
+            else:
+                raise ValueError("user_id is required when filtering by liked=True")
 
     if filters.get("date_from"):
         date_from = filters["date_from"]
@@ -303,19 +330,7 @@ async def get_filtered_vehicles(
         base_query = base_query.filter(CarModel.date >= date_from)
     else:
         base_query = base_query.filter(CarModel.date >= today_naive)
-    if filters.get("date_to"):
-        date_to = filters["date_to"]
-        if isinstance(date_to, str):
-            date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-        base_query = base_query.filter(CarModel.date <= date_to)
-    if filters.get("recommended_only"):
-        base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
 
-    if filters.get("liked"):
-        if user_id is not None:
-            base_query = base_query.filter(user_likes.c.user_id == user_id)
-        else:
-            raise ValueError("user_id is required when filtering by liked=True")
 
     # Підрахунок кількості записів
     count_query = select(func.count()).select_from(base_query.subquery())
