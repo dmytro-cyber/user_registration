@@ -217,26 +217,23 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
-) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
+) -> tuple[List[CarModel], int, int]:
     """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
-    user_id = filters.get("user_id")  # Використовуємо .get() для безпечного доступу
+    user_id = filters["user_id"]
 
     liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
     def apply_in_filter(field, values):
-        if not values:
-            return literal_column("TRUE")  # Повертаємо умову, яка завжди істинна для порожнього списку
         return func.lower(field).in_([v.lower() for v in values])
 
-    # Базовий запит з DISTINCT для уникнення дублювання
+    # Базовий запит без liked_expr для subquery
     base_query = (
         select(CarModel)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
         .options(selectinload(CarModel.photos))
-        .distinct(CarModel.id)  # Єдиний необхідний DISTINCT
         .filter(
             CarModel.predicted_total_investments.isnot(None),
             CarModel.predicted_total_investments > 0,
@@ -247,14 +244,17 @@ async def get_filtered_vehicles(
 
     if filters.get("vin"):
         vin_value = f"%{filters['vin'].lower()}%"
-        base_query = base_query.filter(
-            or_(
-                func.lower(CarModel.vin).ilike(vin_value),
-                func.lower(CarModel.make).ilike(vin_value),
-                func.lower(CarModel.model).ilike(vin_value),
-                func.lower(CarModel.vehicle).ilike(vin_value),
+        base_query = (
+            base_query.filter(
+                or_(
+                    func.lower(CarModel.vin).ilike(vin_value),
+                    func.lower(CarModel.make).ilike(vin_value),
+                    func.lower(CarModel.model).ilike(vin_value),
+                    func.lower(CarModel.vehicle).ilike(vin_value),
+                )
             )
-        )  # Видаляємо другий DISTINCT
+            .distinct(CarModel.id)
+        )
     else:
         if filters.get("make"):
             base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
@@ -315,7 +315,7 @@ async def get_filtered_vehicles(
                 date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
             base_query = base_query.filter(CarModel.date <= date_to)
         if filters.get("recommended_only"):
-            base_query = base_query.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
+            base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
 
         if filters.get("liked"):
             if user_id is not None:
@@ -331,21 +331,19 @@ async def get_filtered_vehicles(
     else:
         base_query = base_query.filter(CarModel.date >= today_naive)
 
-    # Підрахунок кількості записів з DISTINCT
+
+    # Підрахунок кількості записів
     count_query = select(func.count()).select_from(base_query.subquery())
     total_count = await db.scalar(count_query)
     total_pages = (total_count + page_size - 1) // page_size
 
-    # Агрегація current_bid з GROUP BY для уникнення помилок
+    # Агрегація current_bid
     bids_info = {}
     if page == 1:
-        stats_query = (
-            base_query.with_only_columns(
-                func.min(CarModel.current_bid).label("min_bid"),
-                func.max(CarModel.current_bid).label("max_bid"),
-                func.avg(CarModel.current_bid).label("avg_bid"),
-            )
-            .group_by(CarModel.id)  # Додаємо GROUP BY для уникнення помилок
+        stats_query = base_query.with_only_columns(
+            func.min(CarModel.current_bid),
+            func.max(CarModel.current_bid),
+            func.avg(CarModel.current_bid),
         )
         result = await db.execute(stats_query)
         min_bid, max_bid, avg_bid = result.fetchone() or (0, 0, 0.0)
