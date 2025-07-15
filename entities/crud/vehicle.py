@@ -299,14 +299,15 @@ async def get_filtered_vehicles(
         date_from = filters["date_from"]
         if isinstance(date_from, str):
             date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-        base_query = base_query.filter(CarModel.date >= date_from)
+        base_query = base_query.filter(CarModel.date >= datetime.combine(date_from, time.min))
     else:
         base_query = base_query.filter(CarModel.date >= today_naive)
+
     if filters.get("date_to"):
         date_to = filters["date_to"]
         if isinstance(date_to, str):
             date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-        base_query = base_query.filter(CarModel.date <= date_to)
+        base_query = base_query.filter(CarModel.date <= datetime.combine(date_to, time.max))
     if filters.get("recommended_only"):
         base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
 
