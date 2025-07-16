@@ -111,6 +111,7 @@ class CarDetailResponseSchema(BaseModel):
     maintenance: float | None = None
     transportation: float | None = None
     labor: float | None = None
+    condition: str | None = None
 
     photos: List[str] = []
 

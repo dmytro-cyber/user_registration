@@ -38,9 +38,9 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         car = await get_vehicle_by_id(db, car_id)
         car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
         if not car.recommendation_status_reasons:
-            car.recommendation_status_reasons = f"sales at auction in the last 3 years: {len(sale_history_data)} "
+            car.recommendation_status_reasons = f"sales at auction in the last 3 years: {len(sale_history_data)};"
         else:
-            car.recommendation_status_reasons += f"sales at auction in the last 3 years: {len(sale_history_data)} "
+            car.recommendation_status_reasons += f"sales at auction in the last 3 years: {len(sale_history_data)};"
         db.add(car)
         await db.flush()
     for history_data in sale_history_data:
@@ -62,18 +62,18 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                 exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
             ).items():
                 setattr(existing_vehicle, field, value)
-                if field == "fuel_type" and value != "Gasoline":
+                if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"fuel: {value} "
+                        existing_vehicle.recommendation_status_reasons = f"{value};"
                     else:
-                        existing_vehicle.recommendation_status_reasons += f"fuel: {value} "
+                        existing_vehicle.recommendation_status_reasons += f"{value};"
                 if field == "transmision" and value != "Automatic":
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"transmission: {value} "
+                        existing_vehicle.recommendation_status_reasons = f"{value};"
                     else:
-                        existing_vehicle.recommendation_status_reasons += f"transmission: {value} "
+                        existing_vehicle.recommendation_status_reasons += f"{value};"
 
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
             new_photos = []
@@ -107,9 +107,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                     if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Unknown", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons = f"issue: {assessment.issue_description} "
+                            existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
                         else:
-                            existing_vehicle.recommendation_status_reasons += f"issue: {assessment.issue_description} "
+                            existing_vehicle.recommendation_status_reasons += f"i{assessment.issue_description};"
                         
                         
             if (
@@ -132,18 +132,18 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
         )
         db.add(vehicle)
         await db.flush()
-        if vehicle.fuel_type != "Gasoline":
+        if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
             vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
             if not vehicle.recommendation_status_reasons:
-                vehicle.recommendation_status_reasons = f"fuel: {vehicle.fuel_type} "
+                vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
             else:
-                vehicle.recommendation_status_reasons += f"fuel: {vehicle.fuel_type} "
+                vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
         if vehicle.transmision != "Automatic":
             vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
             if not vehicle.recommendation_status_reasons:
-                vehicle.recommendation_status_reasons = f"transmission: {vehicle.transmision} "
+                vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
             else:
-                vehicle.recommendation_status_reasons += f"transmission: {vehicle.transmision} "
+                vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
 
         if vehicle_data.condition_assessments:
             for assessment in vehicle_data.condition_assessments:
@@ -157,9 +157,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                 if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Unknown", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
                     vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not vehicle.recommendation_status_reasons:
-                        vehicle.recommendation_status_reasons = f"issue: {assessment.issue_description} "
+                        vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
                     else:
-                        vehicle.recommendation_status_reasons += f"issue: {assessment.issue_description} "
+                        vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
 
         if vehicle_data.photos:
             db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
