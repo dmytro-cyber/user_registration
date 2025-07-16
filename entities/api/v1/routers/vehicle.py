@@ -17,7 +17,7 @@ from schemas.vehicle import (
     CarFilterOptionsSchema,
     CarCostsUpdateRequestSchema,
 )
-from models.vehicle import CarModel
+from models.vehicle import CarModel, ConditionAssessmentModel
 from models.user import UserModel
 from sqlalchemy import select, func, distinct
 from core.config import Settings
@@ -159,6 +159,11 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None))
             auctions_result = await db.execute(auction_query)
             auctions = [row[0] for row in auctions_result.fetchall()]
+            
+            # Fetch unique condition assesstments
+            condition_assesstments_query = select(distinct(ConditionAssessmentModel.issue_description)).where(ConditionAssessmentModel.issue_description.isnot(None))
+            condition_assesstments_result = await db.execute(condition_assesstments_query)
+            condition_assesstments = [row[0] for row in condition_assesstments_result.fetchall()]
 
             # Fetch unique auction_name values
             auction_name_query = select(distinct(CarModel.auction_name)).where(CarModel.auction_name.isnot(None))
@@ -258,6 +263,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             mileage_range=mileage_range,
             accident_count_range=accident_count_range,
             owners_range=owners_range,
+            condition_assesstments=condition_assesstments,
             body_styles=body_styles,
             vehicle_types=vehicle_types,
             transmissions=transmissions,
@@ -289,9 +295,9 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
 )
 async def get_cars(
     request: Request,
-    auction: List[str] = Query(None, description="Auction (CoPart/IAAI)"),
-    auction_name: List[str] = Query(None, description="Auction name"),
-    location: List[str] = Query(None, description="Location"),
+    auction: Optional[str] = Query(None, description="Auction (CoPart/IAAI)"),
+    auction_name: Optional[str] = Query(None, description="Auction name"),
+    location: Optional[str] = Query(None, description="Location"),
     mileage_min: Optional[int] = Query(None, description="Min mileage"),
     mileage_max: Optional[int] = Query(None, description="Max mileage"),
     min_accident_count: Optional[int] = Query(None, description="Min accident count"),
@@ -302,8 +308,8 @@ async def get_cars(
     max_year: Optional[int] = Query(None, description="Max year"),
     date_from: Optional[date] = Query(None, description="Date from (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="Date to (YYYY-MM-DD)"),
-    make: List[str] = Query(None, description="Make"),
-    model: List[str] = Query(None, description="Model"),
+    make: Optional[str] = Query(None, description="Make"),
+    model: Optional[str] = Query(None, description="Model"),
     predicted_profit_margin_min: Optional[float] = Query(None, description="Min predicted profit margin"),
     predicted_profit_margin_max: Optional[float] = Query(None, description="Max predicted profit margin"),
     predicted_roi_min: Optional[float] = Query(None, description="Min predicted ROI"),
@@ -315,6 +321,7 @@ async def get_cars(
     engine_cylinder: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
+    condition_assesstments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
     recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
     
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
@@ -360,9 +367,9 @@ async def get_cars(
     request_id = str(id(request))
     extra = {"request_id": request_id, "user_id": "N/A"}
     filters = {
-        "auction": auction,
-        "auction_name": auction_name,
-        "location": location,
+        "auction": auction.split(",") if auction else None,
+        "auction_name": auction_name.split(",") if auction_name else None,
+        "location": location.split(",") if location else None,
         "mileage_min": mileage_min,
         "mileage_max": mileage_max,
         "min_accident_count": min_accident_count,
@@ -373,8 +380,8 @@ async def get_cars(
         "max_year": max_year,
         "date_from": date_from,
         "date_to": date_to,
-        "make": make,
-        "model": model,
+        "make": make.split(",") if make else None,
+        "model": model.split(",") if model else None,
         "liked": liked,
         "predicted_profit_margin_min": predicted_profit_margin_min,
         "predicted_profit_margin_max": predicted_profit_margin_max,
@@ -388,6 +395,7 @@ async def get_cars(
         "engine_cylinder": [int(c) for c in engine_cylinder.split(",")] if engine_cylinder else None,
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
+        "condition_assesstments": condition_assesstments.split(",") if condition_assesstments else None,
         "recommended_only": recommended_only,
         
     }

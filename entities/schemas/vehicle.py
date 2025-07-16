@@ -292,6 +292,7 @@ class CarFilterOptionsSchema(BaseModel):
     auction_names: List[str] | None = []
     makes: List[str] | None = []
     models: List[str] | None = []
+    condition_assesstments: List[str] | None = []
     years: Dict[str, int] | None = []
     locations: List[str] | None = []
     mileage_range: Dict[str, int] | None = {}

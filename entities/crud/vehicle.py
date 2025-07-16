@@ -217,7 +217,7 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
-) -> tuple[List[CarModel], int, int]:
+) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
     """Get filtered vehicles with pagination and liked status."""
 
     today = datetime.now(timezone.utc).date()
@@ -229,7 +229,7 @@ async def get_filtered_vehicles(
     def apply_in_filter(field, values):
         return func.lower(field).in_([v.lower() for v in values])
 
-    # Базовий запит без liked_expr для subquery
+    # Базовий запит
     base_query = (
         select(CarModel)
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
@@ -242,7 +242,20 @@ async def get_filtered_vehicles(
         )
     )
 
-    # Застосування фільтрів
+    # JOIN до condition_assessments за потреби
+    if filters.get("condition_assessments"):
+        base_query = base_query.outerjoin(
+            ConditionAssessmentModel,
+            ConditionAssessmentModel.car_id == CarModel.id
+        )
+
+        issue_filters = [
+            func.lower(ConditionAssessmentModel.issue_description).ilike(f"%{keyword.lower()}%")
+            for keyword in filters["condition_assessments"]
+        ]
+        base_query = base_query.filter(or_(*issue_filters))
+
+    # Застосування решти фільтрів
     if filters.get("make"):
         base_query = base_query.filter(apply_in_filter(CarModel.make, filters["make"]))
     if filters.get("body_style"):
@@ -295,6 +308,7 @@ async def get_filtered_vehicles(
     if filters.get("max_year") is not None:
         base_query = base_query.filter(CarModel.year <= filters["max_year"])
 
+    # Фільтр по даті
     if filters.get("date_from"):
         date_from = filters["date_from"]
         if isinstance(date_from, str):
@@ -308,8 +322,9 @@ async def get_filtered_vehicles(
         if isinstance(date_to, str):
             date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
         base_query = base_query.filter(CarModel.date <= datetime.combine(date_to, time.max))
+
     if filters.get("recommended_only"):
-        base_query = base_query.filter(CarModel.recommendation_status==RecommendationStatus.RECOMMENDED)
+        base_query = base_query.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
 
     if filters.get("liked"):
         if user_id is not None:
@@ -317,12 +332,12 @@ async def get_filtered_vehicles(
         else:
             raise ValueError("user_id is required when filtering by liked=True")
 
-    # Підрахунок кількості записів
+    # Підрахунок кількості
     count_query = select(func.count()).select_from(base_query.subquery())
     total_count = await db.scalar(count_query)
     total_pages = (total_count + page_size - 1) // page_size
 
-    # Агрегація current_bid
+    # Агрегація
     bids_info = {}
     if page == 1:
         stats_query = base_query.with_only_columns(
@@ -339,7 +354,7 @@ async def get_filtered_vehicles(
             "total_count": total_count,
         }
 
-    # Основний запит з liked_expr та сортуванням
+    # Підставляємо сортування та виконуємо основний запит
     full_query = base_query.add_columns(liked_expr)
     order_clause = ORDERING_MAP.get(ordering, desc(CarModel.created_at))
     full_query = full_query.order_by(order_clause)
