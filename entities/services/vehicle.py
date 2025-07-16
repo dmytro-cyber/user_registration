@@ -114,7 +114,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         labor=car.labor,
         transportation=car.transportation,
         maintenance=car.maintenance,
-        condition=car.condition
+        condition=car.condition,
         photos=[photo.url for photo in car.photos_hd] if car.photos_hd else [],
         condition_assessments=[
             ConditionAssessmentResponseSchema(
