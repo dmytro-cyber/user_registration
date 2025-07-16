@@ -104,7 +104,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                             car_id=existing_vehicle.id,
                         )
                     )
-                    if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Unknown", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
+                    if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
@@ -147,19 +147,20 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
 
         if vehicle_data.condition_assessments:
             for assessment in vehicle_data.condition_assessments:
-                db.add(
-                    ConditionAssessmentModel(
-                        type_of_damage=assessment.type_of_damage,
-                        issue_description=assessment.issue_description,
-                        car_id=vehicle.id,
+                if assessment.issue_description != "Unknown":
+                    db.add(
+                        ConditionAssessmentModel(
+                            type_of_damage=assessment.type_of_damage,
+                            issue_description=assessment.issue_description,
+                            car_id=vehicle.id,
+                        )
                     )
-                )
-                if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Unknown", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
-                    vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not vehicle.recommendation_status_reasons:
-                        vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
-                    else:
-                        vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+                    if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
+                        vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not vehicle.recommendation_status_reasons:
+                            vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
+                        else:
+                            vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
 
         if vehicle_data.photos:
             db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
