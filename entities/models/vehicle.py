@@ -136,6 +136,18 @@ class CarModel(Base):
     def engine_and_cylinder(self) -> str:
         return f"{self.engine} / {self.engine_cylinder}"
 
+    @property
+    def sum_of_investments(self) -> float:
+        return sum(
+            val for val in [
+                self.auction_fee,
+                self.transportation,
+                self.labor,
+                self.maintenance,
+                self.parts_cost,
+            ] if val is not None
+        )
+
 
 class HistoryModel(Base):
     __tablename__ = "history"

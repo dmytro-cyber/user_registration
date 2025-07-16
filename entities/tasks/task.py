@@ -268,7 +268,9 @@ async def _update_car_bids_async():
                         car.current_bid = int(float(current_bid))
                         if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                            
+                            car.predicted_total_investments = car.sum_of_investments + car.current_bid
+                            car.predicted_roi = (car.avg_market_price - car.predicted_total_investments) / car.predicted_total_investments * 100
+                            car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
                             if not car.recommendation_status_reasons:
                                 car.recommendation_status_reasons = "suggested bid < current bid;"
                             elif "suggested bid < current bid" in car.recommendation_status_reasons:
