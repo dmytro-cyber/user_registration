@@ -399,6 +399,7 @@ async def get_cars(
         "recommended_only": recommended_only,
         
     }
+    logger.info(f"aaaaaaaaaaaaaaaaaaaa {filters.get("condition_assesstments")}")
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
     if vin and len(vin.replace(" ", "")) == 17:
         vin = vin.replace(" ", "")
