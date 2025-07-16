@@ -250,11 +250,8 @@ async def get_filtered_vehicles(
             ConditionAssessmentModel.car_id == CarModel.id
         )
 
-        issue_filters = [
-            func.lower(ConditionAssessmentModel.issue_description).ilike(f"%{keyword.lower()}%")
-            for keyword in filters["condition_assessments"]
-        ]
-        base_query = base_query.filter(or_(*issue_filters))
+        issue_filters = ConditionAssessmentModel.issue_description.in_(filters["condition_assessments"])
+        base_query = base_query.filter(issue_filters)
 
     # Застосування решти фільтрів
     if filters.get("make"):

@@ -321,7 +321,7 @@ async def get_cars(
     engine_cylinder: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
-    condition_assesstments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
+    condition_assessments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
     recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
     
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
@@ -395,11 +395,10 @@ async def get_cars(
         "engine_cylinder": [int(c) for c in engine_cylinder.split(",")] if engine_cylinder else None,
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
-        "condition_assesstments": condition_assesstments.split(",") if condition_assesstments else None,
+        "condition_assessments": condition_assessments.split(",") if condition_assessments else None,
         "recommended_only": recommended_only,
         
     }
-    logger.info(f"aaaaaaaaaaaaaaaaaaaa {filters.get("condition_assesstments")}")
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
     if vin and len(vin.replace(" ", "")) == 17:
         vin = vin.replace(" ", "")
