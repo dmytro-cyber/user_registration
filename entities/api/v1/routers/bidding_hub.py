@@ -189,7 +189,7 @@ async def delete_vehicle(
 
 
 @router.post(
-    "/current_bid/{car_id}",
+    "/actual-bid/{car_id}",
     status_code=status.HTTP_200_OK,
     summary="Update current bid for a vehicle",
     description="Update the current bid for a vehicle in the bidding hub and log the action in history.",
@@ -230,12 +230,13 @@ async def update_actual_bid(
 
         hub_history = HistoryModel(
             car_id=car_id,
-            action=f"Updated current bid from {vehicle.actual_bid} to {data.actual_bid}",
+            action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
             user_id=current_user.id,
             comment=data.comment,
         )
         db.add(hub_history)
         vehicle.actual_bid = data.actual_bid
+        db.add(vehicle)
         await db.commit()
         await db.refresh(vehicle)
         logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
