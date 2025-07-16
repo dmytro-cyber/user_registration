@@ -269,11 +269,11 @@ async def _update_car_bids_async():
                         if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                             if not car.recommendation_status_reasons:
-                                car.recommendation_status_reasons = "suggested bid < current bid "
+                                car.recommendation_status_reasons = "suggested bid < current bid;"
                             elif "suggested bid < current bid" in car.recommendation_status_reasons:
                                 pass
                             else:
-                                car.recommendation_status_reasons += "suggested bid < current bid "
+                                car.recommendation_status_reasons += "suggested bid < current bid;"
 
             await db.commit()
             return {"status": "success", "updated_cars": len(data)}

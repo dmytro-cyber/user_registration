@@ -251,7 +251,7 @@ class CarBiddinHubResponseSchema(BaseModel):
             id=obj.id,
             vehicle=obj.vehicle,
             auction=obj.auction,
-            auction_name=obj.auction_name,
+            auction_name=f"{obj.location} / {obj.seller}",
             mileage=obj.mileage,
             date=obj.date,
             lot=obj.lot,
@@ -292,7 +292,7 @@ class CarFilterOptionsSchema(BaseModel):
     auction_names: List[str] | None = []
     makes: List[str] | None = []
     models: List[str] | None = []
-    condition_assesstments: List[str] | None = []
+    condition_assesstments: List[str] | None = None
     years: Dict[str, int] | None = []
     locations: List[str] | None = []
     mileage_range: Dict[str, int] | None = {}
