@@ -90,6 +90,7 @@ class CarDetailResponseSchema(BaseModel):
     transmision: str | None
     vehicle_type: str | None
     auction_name: str | None
+    seller: str | None = None
     exterior_color: str | None
     body_style: str | None
     interior_color: str | None

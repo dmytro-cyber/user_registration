@@ -97,6 +97,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         body_style=car.body_style,
         interior_color=car.interior_color,
         style_id=car.style_id,
+        seller=car.seller,
         lot=car.lot,
         owners=car.owners,
         accident_count=car.accident_count,
