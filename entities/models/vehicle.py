@@ -35,6 +35,7 @@ class CarModel(Base):
     date = Column(DateTime, nullable=True)
     lot = Column(Integer, nullable=True)
     seller = Column(String, nullable=True)
+    seller_type = Column(String, nullable=True)
     owners = Column(Integer, nullable=True)
     location = Column(String, nullable=True)
     engine_title = Column(String, nullable=True)

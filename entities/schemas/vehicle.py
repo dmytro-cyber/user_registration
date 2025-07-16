@@ -174,6 +174,7 @@ class CarCreateSchema(BaseModel):
     date: datetime | None = None
     lot: int | None = None
     seller: str | None = None
+    seller_type: str | None = None
     owners: int | None = None
     location: str | None = None
     engine_title: str | None = None

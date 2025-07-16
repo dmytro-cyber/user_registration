@@ -52,6 +52,7 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         "auction_date": "date",
         "lot_id": "lot",
         "seller": "seller",
+        "seller_type": "seller_type",
         "link": "link",
         "location": "location",
         "engine": "engine_title",

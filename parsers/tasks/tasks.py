@@ -186,6 +186,7 @@ def fetch_api_data():
                 "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
                 "lot": formatted_vehicle.get("lot"),
                 "seller": formatted_vehicle.get("seller"),
+                "seller_type": formatted_vehicle.get("seller_type"),
                 "location": formatted_vehicle.get("location"),
                 "current_bid": formatted_vehicle.get("current_bid"),
                 "engine": formatted_vehicle.get("engine"),
