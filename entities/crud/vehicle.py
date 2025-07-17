@@ -228,7 +228,7 @@ async def get_filtered_vehicles(
     liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
     def apply_in_filter(field, values):
-        return func.lower(field).in_([v.lower() for v in values])
+        return func.lower(field).in_([v.lower() for v in values if isinstance()])
 
     # Базовий запит
     base_query = (

@@ -236,6 +236,7 @@ class CarBiddinHubResponseSchema(BaseModel):
     current_bid: float | None = None
     actual_bid: float | None = None
     suggested_bid: float | None = None
+    sum_of_investments: float | None = None
     last_user: str | None = None
     car_status: CarStatus | None = None
 
@@ -260,6 +261,7 @@ class CarBiddinHubResponseSchema(BaseModel):
             avg_market_price=obj.avg_market_price,
             predicted_total_investments=obj.predicted_total_investments,
             predicted_profit_margin=obj.predicted_profit_margin,
+            sum_of_investments=obj.sum_of_investments,
             predicted_roi=obj.predicted_roi,
             current_bid=obj.current_bid,
             actual_bid=obj.actual_bid,
