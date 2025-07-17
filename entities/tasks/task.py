@@ -191,7 +191,7 @@ async def _parse_and_update_car_async(
                     # Add fixed fee
                     car.auction_fee += fee.amount
 
-            car.suggested_bid = int(car.predicted_total_investments - car.auction_fee)
+            car.suggested_bid = int(car.predicted_total_investments - car.sum_of_investments)
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED

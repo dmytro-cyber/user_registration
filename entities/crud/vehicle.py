@@ -546,7 +546,7 @@ async def add_part_to_vehicle(
         logger.info(f"Incremented car.parts_cost by {new_part.value}, new value: {car.parts_cost}")
 
     if car.suggested_bid is not None:
-        car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
@@ -593,7 +593,7 @@ async def update_part(
         logger.info(f"Adjusted car.parts_cost by {existing_part.value - temp_value}, new value: {car.parts_cost}")
 
     if car.suggested_bid is not None:
-        car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
@@ -632,7 +632,7 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool
     logger.info(f"Decremented car.parts_cost by {part.value}, new value: {car.parts_cost}")
 
     if car.suggested_bid is not None:
-        car.suggested_bid = car.predicted_total_investments - car.parts_cost - (car.auction_fee or 0)
+        car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
