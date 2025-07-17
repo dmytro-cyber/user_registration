@@ -438,6 +438,8 @@ async def get_bidding_hub_vehicles(
                 "predicted_roi": CarModel.predicted_roi,
                 "actual_bid": CarModel.actual_bid,
                 "status": CarModel.car_status,
+                "current_bid": CarModel.current_bid,
+                "suggested_bid": CarModel.suggested_bid,
             }
             sort_field = sort_field_mapping.get(sort_by)
             
