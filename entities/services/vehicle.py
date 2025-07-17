@@ -99,6 +99,7 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
         style_id=car.style_id,
         seller=car.seller,
         lot=car.lot,
+        actual_bid=car.actual_bid,
         owners=car.owners,
         accident_count=car.accident_count,
         date=car.date,

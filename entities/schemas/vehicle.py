@@ -96,6 +96,7 @@ class CarDetailResponseSchema(BaseModel):
     interior_color: str | None
     style_id: int | None
     date: datetime | None = None
+    actual_bid: float | None = None
     lot: int | None = None
     owners: int | None = None
     accident_count: int | None = None
