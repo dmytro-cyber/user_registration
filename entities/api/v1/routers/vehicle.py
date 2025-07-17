@@ -549,19 +549,10 @@ async def update_car_costs(
     if not update_data:
         raise HTTPException(status_code=400, detail="No valid fields provided for update")
 
-    # Recalculate suggested_bid for each field
-    for field in ["maintenance", "transportation", "labor"]:
-        new_value = getattr(car_data, field, None)
-        if new_value is not None:
-            old_value = getattr(db_car, field, None)
-            if old_value is not None:
-                db_car.suggested_bid += old_value - new_value
-            else:
-                db_car.suggested_bid -= new_value
-
     # Update fields
     for key, value in update_data.items():
         setattr(db_car, key, value)
+    db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
 
     try:
         await db.commit()
