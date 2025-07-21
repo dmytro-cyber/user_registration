@@ -80,7 +80,7 @@ async def get_bidding_hub(
     page_size: int = Query(10, ge=1, le=100, description="Number of vehicles per page (1 to 100)"),
     sort_by: str = Query(
         "date",
-        description="Field to sort by: vehicle, auction, location, date, lot, avg_market_price, user, status, predicted_total_investments, predicted_profit_margin, predicted_roi, actual_bid",
+        description="Field to sort by: vehicle, auction, location, date, lot, avg_market_price, user, status, predicted_total_investments, predicted_profit_margin, predicted_roi, actual_bid, currnent_bid, suggested_bid",
     ),
     sort_order: str = Query("desc", description="Sort order: asc or desc", regex="^(asc|desc)$"),
     current_user: Settings = Depends(get_current_user),

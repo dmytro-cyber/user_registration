@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum
+from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum, Index
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 from models import Base
@@ -391,3 +391,22 @@ class InvoiceModel(Base):
     created_at = Column(DateTime, default=func.now(), nullable=False)
 
     part_inventory = relationship("PartInventoryModel", back_populates="invoices")
+
+
+class USZipModel(Base):
+    __tablename__ = "us_zips"
+
+    zip = Column(String, primary_key=True, index=True)
+    lat = Column(Float, nullable=False, index=True)
+    lng = Column(Float, nullable=False, index=True)
+    city = Column(String, nullable=False, index=True)
+    state_id = Column(String, nullable=False, index=True)
+    state_name = Column(String, nullable=False, index=True)
+
+    copart_name = Column(String, nullable=True, index=True)
+    iaai_name = Column(String, nullable=True, index=True)
+
+    __table_args__ = (
+        Index("idx_city_state", "city", "state_id"),
+        Index("idx_lat_lng", "lat", "lng"),
+    )

@@ -4,7 +4,7 @@ from models.user import UserRoleEnum, UserRoleModel
 from db.session import SessionLocal
 from sqlalchemy.orm import selectinload
 from passlib.context import CryptContext
-from models import UserModel, UserRoleModel, UserRoleEnum
+from models import UserModel, UserRoleModel, UserRoleEnum, USZipModel
 from sqlalchemy.exc import IntegrityError
 import csv
 from datetime import datetime, date
@@ -12,6 +12,42 @@ from models.vehicle import CarModel, PartModel
 import os
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+
+
+
+async def import_us_zips_from_csv(csv_path: str = "uszips.csv"):
+    async with SessionLocal() as session:
+        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+            reader = csv.DictReader(csvfile)
+            objects = []
+
+            for row in reader:
+                try:
+                    zip_code = row["zip"].strip()
+                    lat = float(row["lat"])
+                    lng = float(row["lng"])
+                    city = row["city"].strip()
+                    state_id = row["state_id"].strip()
+                    state_name = row["state_name"].strip()
+
+                    zip_obj = USZipModel(
+                        zip=zip_code,
+                        lat=lat,
+                        lng=lng,
+                        city=city,
+                        state_id=state_id,
+                        state_name=state_name,
+                        copart_name=None,
+                        iaai_name=None
+                    )
+                    objects.append(zip_obj)
+                except Exception as e:
+                    print(f"⚠️  Skipped: {e}")
+
+            session.add_all(objects)
+            await session.commit()
+            print(f"✅ Created {len(objects)} ZIPs")
 
 
 async def create_roles():

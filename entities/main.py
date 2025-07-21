@@ -6,7 +6,7 @@ from api.v1.routers.admin import router as admin_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
 from api.v1.routers.analytic import router as analytics_router
-from core.setup import create_roles
+from core.setup import create_roles, import_us_zips_from_csv
 from fastapi.middleware.cors import CORSMiddleware
 from tasks.task import _update_car_fees_async
 
@@ -18,6 +18,11 @@ app = FastAPI(title="Cars&Beyond API",
 # @app.on_event("startup")
 # async def on_startup():
 #     await create_roles()
+
+
+@app.on_event("startup")
+async def on_startup():
+    await import_us_zips_from_csv()
 
 
 # @app.on_event("startup")
