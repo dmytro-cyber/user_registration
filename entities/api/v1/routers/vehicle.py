@@ -365,6 +365,11 @@ async def get_cars(
     Raises:
         HTTPException: 404 if no vehicles are found.
     """
+    if zip_search:
+        zip_search = zip_search.split(";")
+        if len(zip_search) != 2:
+            raise HTTPException(status_code=400, detail="Both ZIP & Radius arguments are required")
+        zip_search[1] = int(zip_search[1])
     request_id = str(id(request))
     extra = {"request_id": request_id, "user_id": "N/A"}
     filters = {
@@ -397,7 +402,7 @@ async def get_cars(
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
         "condition_assessments": condition_assessments.split(",") if condition_assessments else None,
-        "zip_search": [int(val) for val in zip_search.split(";")] if zip_search else None,
+        "zip_search": zip_search if zip_search else None,
         "recommended_only": recommended_only,
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
