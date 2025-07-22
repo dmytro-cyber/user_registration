@@ -182,7 +182,10 @@ def get_location_coordinates(query):
     data_dict = json.loads(data.decode("utf-8"))
     places = data_dict.get("places", [])
     if places:
-        return places[0]["latitude"], places[0]["longitude"]
+        try:
+            return places[0]["latitude"], places[0]["longitude"]
+        except Exception:
+            pass
     return None, None
 
 def similar(a, b):
