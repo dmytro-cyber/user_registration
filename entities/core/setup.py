@@ -1,15 +1,21 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from sqlalchemy import select, and_, distinct
 from models.user import UserRoleEnum, UserRoleModel
 from db.session import SessionLocal
 from sqlalchemy.orm import selectinload
 from passlib.context import CryptContext
-from models import UserModel, UserRoleModel, UserRoleEnum, USZipModel
+from models import UserModel, UserRoleModel, UserRoleEnum, USZipModel, CarModel
 from sqlalchemy.exc import IntegrityError
 import csv
 from datetime import datetime, date
 from models.vehicle import CarModel, PartModel
 import os
+import http.client
+import json
+from math import radians, sin, cos, sqrt, atan2
+from difflib import SequenceMatcher
+
+EARTH_RADIUS_MI = 3958.8
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
@@ -153,3 +159,61 @@ def safe_float(value):
 #                         await session.commit()
 #                     except Exception:
 #                         pass
+
+
+def haversine(lat1, lon1, lat2, lon2):
+    lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
+    a = sin(dlat / 2) ** 2 + cos(lat1) * cos(lat2) * sin(dlon / 2) ** 2
+    c = 2 * atan2(sqrt(a), sqrt(1 - a))
+    return EARTH_RADIUS_MI * c
+
+def get_location_coordinates(query):
+    conn = http.client.HTTPSConnection("google.serper.dev")
+    payload = json.dumps({"q": query, "location": "United States"})
+    headers = {
+        'X-API-KEY': 'd9b2f54b9bed2611b48823eb727651c67575cfea',
+        'Content-Type': 'application/json'
+    }
+    conn.request("POST", "/places", payload, headers)
+    res = conn.getresponse()
+    data = res.read()
+    data_dict = json.loads(data.decode("utf-8"))
+    places = data_dict.get("places", [])
+    if places:
+        return places[0]["latitude"], places[0]["longitude"]
+    return None, None
+
+def similar(a, b):
+    """Порівнює схожість між назвами"""
+    return SequenceMatcher(None, a.lower(), b.lower()).ratio()
+
+async def match_and_update_locations():
+    async with SessionLocal() as db:
+        stmt = (
+            select(CarModel.location, CarModel.auction).distinct()
+            .where(and_(CarModel.location.isnot(None), CarModel.auction.isnot(None)))
+        )
+        result = await db.execute(stmt)
+        rows = result.all()
+
+        for location, auction in rows:
+            lat, lon = get_location_coordinates(location)
+            if not lat or not lon:
+                continue
+
+            zip_stmt = await db.execute(select(USZipModel))
+            all_zips = zip_stmt.scalars().all()
+
+            if all_zips:
+                for zip_entry in all_zips:
+                    dist = haversine(lat, lon, float(zip_entry.lat), float(zip_entry.lng))
+                    if dist <= 20:
+                        if similar(zip_entry.city, location) > 0.8 and zip_entry.state_id.lower() in location.lower():
+                            if auction.lower() == "copart" and not zip_entry.copart_name:
+                                zip_entry.copart_name = location
+                            elif auction.lower() == "iaai" and not zip_entry.iaai_name:
+                                zip_entry.iaai_name = location
+
+                await db.commit()
