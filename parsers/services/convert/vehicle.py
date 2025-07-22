@@ -2,7 +2,7 @@ import os
 import json
 import logging
 from datetime import datetime
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 # Налаштування логування
 logging.basicConfig(
@@ -23,9 +23,13 @@ def is_salvage_from_document(document: str) -> bool:
     """Convert document field to boolean is_salvage."""
     return document.lower() == "salvage"
 
-def parse_auction_date(date_str: str) -> datetime:
+def parse_auction_date(date_str: str) -> Optional[datetime]:
     """Parse ISO 8601 date string to datetime."""
-    return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+    try:
+        return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
+    except ValueError as e:
+        logger.warning(f"Invalid auction_date format: {date_str} -> {e}")
+        return None
 
 def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     """

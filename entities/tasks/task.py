@@ -133,27 +133,12 @@ async def _parse_and_update_car_async(
             #     if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
             #     else RecommendationStatus.NOT_RECOMMENDED
             # )
+            prices = [int(data.get(key)) for key in ["jd", "d_max", "manheim"] if data.get(key)]
 
-            car.avg_market_price = (
-                existing_car.avg_market_price
-                if existing_car
-                else (
-                    int(
-                        sum(
-                            [
-                                int(p)
-                                for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)]
-                                if p
-                            ]
-                        )
-                        / len([p for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)] if p])
-                        if [p for p in [data.get(k) for k in ["jd", "d_max", "manheim"] if data.get(k)] if p]
-                        else [0]
-                    )
-                    if not existing_car
-                    else existing_car.avg_market_price
-                )
-            )
+            if existing_car and existing_car.avg_market_price:
+                car.avg_market_price = existing_car.avg_market_price
+            else:
+                car.avg_market_price = int(sum(prices) / len(prices) if prices else [0])
 
             roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
             default_roi = roi_result.scalars().first()
