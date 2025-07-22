@@ -295,15 +295,17 @@ async def get_filtered_vehicles(
                 a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
                 c = 2 * asin(sqrt(a))
                 dist = 6371 * c
-                if dist <= int(radius):
+                if dist <= radius:
                     if z.copart_name:
                         nearby_locations.add(z.copart_name.lower())
                     if z.iaai_name:
                         nearby_locations.add(z.iaai_name.lower())
-
             if nearby_locations:
                 base_query = base_query.filter(apply_str_in_filter(CarModel.location, nearby_locations))
                 logger.info(f"Nearby locations ----> {nearby_locations}")
+            else:
+                base_query = base_query.filter(False)
+                logger.warning(f"No nearby auction locations found for ZIP={zip_code} within radius={radius}")
         else:
             raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
 
