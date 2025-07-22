@@ -1,4 +1,4 @@
-from services.parsers.dc_scraper import DealerCenterScraper
+from parsers.services.parsers.dc_scraper_local import DealerCenterScraper
 from services.parsers.copart_current_bid_parser import get_current_bid
 from services.fees.copart_fees_parser import scrape_copart_fees
 from services.fees.iaai_fees_parser import scrape_iaai_fees

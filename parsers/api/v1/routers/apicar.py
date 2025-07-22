@@ -8,7 +8,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query
 import httpx
 
-from services.parsers.dc_scraper import DealerCenterScraper
+from parsers.services.parsers.dc_scraper_local import DealerCenterScraper
 from services.convert.vehicle import format_car_data
 from schemas.schemas import DCResponseSchema
 from core.dependencies import get_token
