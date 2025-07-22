@@ -278,7 +278,7 @@ async def get_filtered_vehicles(
         logger.info(f"ZIP SEARCH DATA {filters.get("zip_search")}")
 
         zip_code, radius = filters["zip_search"]
-        zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == str(zip_code)))
+        zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == zip_code))
         zip_data = zip_row.scalar_one_or_none()
 
         if zip_data:
@@ -295,7 +295,7 @@ async def get_filtered_vehicles(
                 a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
                 c = 2 * asin(sqrt(a))
                 dist = 6371 * c
-                if dist <= radius:
+                if dist <= int(radius):
                     if z.copart_name:
                         nearby_locations.add(z.copart_name.lower())
                     if z.iaai_name:
