@@ -304,6 +304,8 @@ async def get_filtered_vehicles(
             if nearby_locations:
                 base_query = base_query.filter(apply_str_in_filter(CarModel.location, nearby_locations))
                 logger.info(f"Nearby locations ----> {nearby_locations}")
+        else:
+            raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
 
     # String filters
     for field_name, column in {
