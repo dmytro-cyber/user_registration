@@ -176,7 +176,7 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=solo"]
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=prefork"]
     env_file:
       - ./entities/.env
     environment:

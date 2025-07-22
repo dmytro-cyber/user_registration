@@ -189,6 +189,29 @@ def similar(a, b):
     """Порівнює схожість між назвами"""
     return SequenceMatcher(None, a.lower(), b.lower()).ratio()
 
+
+async def match_and_update_location(location: str, auction: str):
+    async with SessionLocal() as db:
+        lat, lon = get_location_coordinates(location)
+        if not lat or not lon:
+            return
+
+        zip_stmt = await db.execute(select(USZipModel))
+        all_zips = zip_stmt.scalars().all()
+
+        if all_zips:
+            for zip_entry in all_zips:
+                dist = haversine(lat, lon, float(zip_entry.lat), float(zip_entry.lng))
+                if dist <= 20:
+                    if similar(zip_entry.city, location) > 0.8 and zip_entry.state_id.lower() in location.lower():
+                        if auction.lower() == "copart" and not zip_entry.copart_name:
+                            zip_entry.copart_name = location
+                        elif auction.lower() == "iaai" and not zip_entry.iaai_name:
+                            zip_entry.iaai_name = location
+
+            await db.commit()
+    
+
 async def match_and_update_locations():
     async with SessionLocal() as db:
         stmt = (

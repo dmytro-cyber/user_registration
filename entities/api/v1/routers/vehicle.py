@@ -322,6 +322,7 @@ async def get_cars(
     fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition_assessments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
+    zip_search: Optional[str] = Query(None, description="e.g., 12345;200"),
     recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
     
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
@@ -396,8 +397,8 @@ async def get_cars(
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
         "condition_assessments": condition_assessments.split(",") if condition_assessments else None,
+        "zip_search": [int(val) for val in zip_search.split(";")] if zip_search else None,
         "recommended_only": recommended_only,
-        
     }
     logger.info(f"Fetching cars with filters: {filters}, page: {page}, page_size: {page_size}", extra=extra)
     if vin and len(vin.replace(" ", "")) == 17:

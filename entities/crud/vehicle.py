@@ -7,6 +7,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload, aliased
 from sqlalchemy import case, literal_column
 from sqlalchemy.sql import over
+from core.setup import match_and_update_location
 from models.vehicle import (
     CarModel,
     PhotoModel,
@@ -19,7 +20,9 @@ from models.vehicle import (
     CarInventoryModel,
     FeeModel,
     RecommendationStatus,
+    USZipModel
 )
+from math import radians, cos, sin, asin, sqrt
 from models.user import UserModel, UserRoleEnum, user_likes
 from schemas.vehicle import CarCreateSchema
 from fastapi import HTTPException
@@ -74,6 +77,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                         existing_vehicle.recommendation_status_reasons = f"{value};"
                     else:
                         existing_vehicle.recommendation_status_reasons += f"{value};"
+
 
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
             new_photos = []
@@ -144,6 +148,17 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                 vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
             else:
                 vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
+
+        query = select(USZipModel).where(
+            or_(
+                USZipModel.copart_name == vehicle.location,
+                USZipModel.iaai_name == vehicle.location
+            )
+        )
+        result = await db.execute(query)
+        locations = result.scalars().all()
+        if not locations:
+            await match_and_update_location(vehicle.location, vehicle.auction)
 
         if vehicle_data.condition_assessments:
             for assessment in vehicle_data.condition_assessments:
@@ -257,6 +272,38 @@ async def get_filtered_vehicles(
         )
         issue_filters = ConditionAssessmentModel.issue_description.in_(filters["condition_assessments"])
         base_query = base_query.filter(issue_filters)
+
+    # Location filter via zip_search
+    if filters.get("zip_search"):
+        logger.info(f"ZIP SEARCH DATA {filters.get("zip_search")}")
+
+        zip_code, radius = filters["zip_search"]
+        zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == str(zip_code)))
+        zip_data = zip_row.scalar_one_or_none()
+
+        if zip_data:
+            logger.info(f"Find ZIP {zip_data.city}")
+            lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
+            zip_rows = await db.execute(select(USZipModel))
+            zips = zip_rows.scalars().all()
+
+            nearby_locations = set()
+            for z in zips:
+                lat2, lon2 = float(z.lat), float(z.lng)
+                dlat = radians(lat2 - lat1)
+                dlon = radians(lon2 - lon1)
+                a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+                c = 2 * asin(sqrt(a))
+                dist = 6371 * c
+                if dist <= radius:
+                    if z.copart_name:
+                        nearby_locations.add(z.copart_name.lower())
+                    if z.iaai_name:
+                        nearby_locations.add(z.iaai_name.lower())
+
+            if nearby_locations:
+                base_query = base_query.filter(apply_str_in_filter(CarModel.location, nearby_locations))
+                logger.info(f"Nearby locations ----> {nearby_locations}")
 
     # String filters
     for field_name, column in {
