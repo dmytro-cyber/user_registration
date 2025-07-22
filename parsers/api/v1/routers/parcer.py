@@ -1,4 +1,3 @@
-from parsers.services.parsers.dc_scraper_local import DealerCenterScraper
 from services.parsers.copart_current_bid_parser import get_current_bid
 from services.fees.copart_fees_parser import scrape_copart_fees
 from services.fees.iaai_fees_parser import scrape_iaai_fees
@@ -18,6 +17,12 @@ from schemas.schemas import (
 import logging
 import json
 from concurrent.futures import ThreadPoolExecutor
+from core.config import settings
+if settings.ENVIRON == "dev":
+    from parsers.services.parsers.dc_scraper_local import DealerCenterScraper
+else:
+    from parsers.services.parsers.dc_scraper import DealerCenterScraper
+    
 
 router = APIRouter()
 executor = ThreadPoolExecutor()
