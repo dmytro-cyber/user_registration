@@ -19,9 +19,9 @@ import json
 from concurrent.futures import ThreadPoolExecutor
 from core.config import settings
 if settings.ENVIRON == "dev":
-    from parsers.services.parsers.dc_scraper_local import DealerCenterScraper
+    from services.parsers.dc_scraper_local import DealerCenterScraper
 else:
-    from parsers.services.parsers.dc_scraper import DealerCenterScraper
+    from services.parsers.dc_scraper import DealerCenterScraper
     
 
 router = APIRouter()
