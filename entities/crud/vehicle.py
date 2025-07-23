@@ -4,7 +4,7 @@ from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select
+from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select, bindparam
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
@@ -250,12 +250,9 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
 ) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
-    """Get filtered vehicles with pagination and liked status."""
-
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
     user_id = filters["user_id"]
-
     liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
     def apply_str_in_filter(field, values):
@@ -276,56 +273,49 @@ async def get_filtered_vehicles(
         )
     )
 
-    # JOIN condition_assessments
+    # Condition Assessments
     if filters.get("condition_assessments"):
         base_query = base_query.outerjoin(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
         issue_filters = ConditionAssessmentModel.issue_description.in_(filters["condition_assessments"])
         base_query = base_query.filter(issue_filters)
 
-    # Location filter via zip_search (optimized SQL-based filtering)
+    # ZIP Search (по БД, у милях)
     if filters.get("zip_search"):
-        logger.info(f"ZIP SEARCH DATA {filters.get('zip_search')}")
-
         zip_code, radius = filters["zip_search"]
         zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == zip_code))
         zip_data = zip_row.scalar_one_or_none()
 
-        if zip_data:
-            logger.info(f"Find ZIP {zip_data.city}")
-            lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
-            approx_range_deg = radius / 111  # approx degrees
-
-            # Only get ZIPs roughly within a bounding box
-            zip_rows = await db.execute(
-                select(USZipModel).where(
-                    USZipModel.lat.between(lat1 - approx_range_deg, lat1 + approx_range_deg),
-                    USZipModel.lng.between(lon1 - approx_range_deg, lon1 + approx_range_deg)
-                )
-            )
-            zips = zip_rows.scalars().all()
-
-            nearby_locations = set()
-            for z in zips:
-                lat2, lon2 = float(z.lat), float(z.lng)
-                dlat = radians(lat2 - lat1)
-                dlon = radians(lon2 - lon1)
-                a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
-                c = 2 * asin(sqrt(a))
-                dist = 6371 * c
-                if dist <= radius:
-                    if z.copart_name:
-                        nearby_locations.add(z.copart_name.lower())
-                    if z.iaai_name:
-                        nearby_locations.add(z.iaai_name.lower())
-
-            if nearby_locations:
-                base_query = base_query.filter(apply_str_in_filter(CarModel.location, nearby_locations))
-                logger.info(f"Nearby locations ----> {nearby_locations}")
-            else:
-                base_query = base_query.filter(False)
-                logger.warning(f"No nearby auction locations found for ZIP={zip_code} within radius={radius}")
-        else:
+        if not zip_data:
             raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
+
+        lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
+
+        # Haversine formula in miles
+        distance_expr = (
+            3958.8 * func.acos(
+                func.sin(func.radians(bindparam("lat1"))) * func.sin(func.radians(USZipModel.lat)) +
+                func.cos(func.radians(bindparam("lat1"))) * func.cos(func.radians(USZipModel.lat)) *
+                func.cos(func.radians(USZipModel.lng) - func.radians(bindparam("lon1")))
+            )
+        ).label("distance")
+
+        zip_subq = (
+            select(USZipModel.copart_name, USZipModel.iaai_name)
+            .where(distance_expr <= bindparam("radius"))
+        ).params(lat1=lat1, lon1=lon1, radius=radius)
+
+        zip_result = await db.execute(zip_subq)
+        zip_names = set()
+        for copart, iaai in zip_result.all():
+            if copart:
+                zip_names.add(copart.lower())
+            if iaai:
+                zip_names.add(iaai.lower())
+
+        if zip_names:
+            base_query = base_query.filter(apply_str_in_filter(CarModel.location, zip_names))
+        else:
+            base_query = base_query.filter(False)
 
     # String filters
     for field_name, column in {
@@ -344,42 +334,34 @@ async def get_filtered_vehicles(
         if filters.get(field_name):
             base_query = base_query.filter(apply_str_in_filter(column, filters[field_name]))
 
-    # Integer filters (list of values)
+    # Integer filters
     if filters.get("engine_cylinder"):
         base_query = base_query.filter(apply_int_in_filter(CarModel.engine_cylinder, filters["engine_cylinder"]))
 
     # Numeric range filters
-    if filters.get("mileage_min") is not None:
-        base_query = base_query.filter(CarModel.mileage >= filters["mileage_min"])
-    if filters.get("mileage_max") is not None:
-        base_query = base_query.filter(CarModel.mileage <= filters["mileage_max"])
+    for key, col in {
+        "mileage_min": CarModel.mileage,
+        "predicted_profit_margin_min": CarModel.predicted_profit_margin,
+        "predicted_roi_min": CarModel.predicted_roi,
+        "min_owners_count": CarModel.owners,
+        "min_accident_count": CarModel.accident_count,
+        "min_year": CarModel.year,
+    }.items():
+        if filters.get(key) is not None:
+            base_query = base_query.filter(col >= filters[key])
 
-    if filters.get("predicted_profit_margin_min") is not None:
-        base_query = base_query.filter(CarModel.predicted_profit_margin >= filters["predicted_profit_margin_min"])
-    if filters.get("predicted_profit_margin_max") is not None:
-        base_query = base_query.filter(CarModel.predicted_profit_margin <= filters["predicted_profit_margin_max"])
+    for key, col in {
+        "mileage_max": CarModel.mileage,
+        "predicted_profit_margin_max": CarModel.predicted_profit_margin,
+        "predicted_roi_max": CarModel.predicted_roi,
+        "max_owners_count": CarModel.owners,
+        "max_accident_count": CarModel.accident_count,
+        "max_year": CarModel.year,
+    }.items():
+        if filters.get(key) is not None:
+            base_query = base_query.filter(col <= filters[key])
 
-    if filters.get("predicted_roi_min") is not None:
-        base_query = base_query.filter(CarModel.predicted_roi >= filters["predicted_roi_min"])
-    if filters.get("predicted_roi_max") is not None:
-        base_query = base_query.filter(CarModel.predicted_roi <= filters["predicted_roi_max"])
-
-    if filters.get("min_owners_count") is not None:
-        base_query = base_query.filter(CarModel.owners >= filters["min_owners_count"])
-    if filters.get("max_owners_count") is not None:
-        base_query = base_query.filter(CarModel.owners <= filters["max_owners_count"])
-
-    if filters.get("min_accident_count") is not None:
-        base_query = base_query.filter(CarModel.accident_count >= filters["min_accident_count"])
-    if filters.get("max_accident_count") is not None:
-        base_query = base_query.filter(CarModel.accident_count <= filters["max_accident_count"])
-
-    if filters.get("min_year") is not None:
-        base_query = base_query.filter(CarModel.year >= filters["min_year"])
-    if filters.get("max_year") is not None:
-        base_query = base_query.filter(CarModel.year <= filters["max_year"])
-
-    # Date filters
+    # Date range
     if filters.get("date_from"):
         date_from = filters["date_from"]
         if isinstance(date_from, str):
