@@ -481,6 +481,26 @@ async def get_car_detail(
     return await prepare_car_detail_response(car)
 
 
+@router.patch("/cars/{car_id}/check")
+async def update_car_is_checked(
+    car_id: int,
+    session: AsyncSession = Depends(get_db),
+):
+    result = await session.execute(select(CarModel).where(CarModel.id == car_id))
+    car = result.scalar_one_or_none()
+
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+
+    car.is_checked = not car.is_checked
+    session.add(car)
+    await session.commit()
+    await session.refresh(car)
+
+    return {"car_id": car.id, "is_checked": car.is_checked}
+
+
 @router.put(
     "/{car_id}/status/",
     response_model=UpdateCarStatusSchema,
