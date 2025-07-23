@@ -29,8 +29,15 @@ dependencies = [
     "boto3 (>=1.38.8,<2.0.0)",
     "asgiref (>=3.8.1,<4.0.0)",
     "nest-asyncio (>=1.6.0,<2.0.0)",
+    "ruff (>=0.12.4,<0.13.0)",
 ]
 
+[tool.ruff]
+line-length = 119
+target-version = "py312"
+select = ["I"]
+fixable = ["I"]
+unfixable = ["F401", "F841"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

@@ -1,16 +1,16 @@
+from unittest.mock import AsyncMock
+
 import pytest
-from httpx import AsyncClient
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from unittest.mock import AsyncMock
-from sqlalchemy import text
 
 from core.dependencies import get_settings
-from main import app  # Оновлений імпорт (з кореня проєкту)
 from core.security.token_manager import JWTAuthManager
 from db.test_session import get_test_db_session
-from models.user import UserModel, UserRoleModel, UserRoleEnum
-from httpx import ASGITransport
+from main import app  # Оновлений імпорт (з кореня проєкту)
+from models.user import UserModel, UserRoleEnum, UserRoleModel
 
 
 @pytest.fixture(scope="session")

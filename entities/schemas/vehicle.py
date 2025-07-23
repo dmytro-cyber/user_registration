@@ -1,6 +1,8 @@
-from typing import List, Optional, Dict
-from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
+from typing import Dict, List, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
+
 from models.vehicle import CarStatus
 from schemas.user import UserResponseSchema
 

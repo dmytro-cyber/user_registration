@@ -4,26 +4,25 @@ import logging.handlers
 import os
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from schemas.vehicle import (
-    CarBiddinHubResponseSchema,
-    CarBiddinHubListResponseSchema,
-    BiddingHubHistoryListResponseSchema,
-    BiddingHubHistorySchema,
-    UpdateActualBidSchema,
-)
-from models.user import UserModel
-from models.vehicle import CarStatus
-from schemas.user import UserResponseSchema
 from core.config import Settings
 from core.dependencies import get_current_user
+from crud.vehicle import get_bidding_hub_vehicles, get_vehicle_by_id, update_vehicle_status
 from db.session import get_db
-from crud.vehicle import get_vehicle_by_id, update_vehicle_status, get_bidding_hub_vehicles
-from models.vehicle import HistoryModel
+from models.user import UserModel
+from models.vehicle import CarStatus, HistoryModel
+from schemas.user import UserResponseSchema
+from schemas.vehicle import (
+    BiddingHubHistoryListResponseSchema,
+    BiddingHubHistorySchema,
+    CarBiddinHubListResponseSchema,
+    CarBiddinHubResponseSchema,
+    UpdateActualBidSchema,
+)
 
 # Configure logging for production environment
 logger = logging.getLogger("bidding_hub_router")

@@ -1,8 +1,10 @@
-from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Enum, Index
+import enum
+
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
+
 from models import Base
-import enum
 from models.user import user_likes
 
 
@@ -140,13 +142,15 @@ class CarModel(Base):
     @property
     def sum_of_investments(self) -> float:
         return sum(
-            val for val in [
+            val
+            for val in [
                 self.auction_fee,
                 self.transportation,
                 self.labor,
                 self.maintenance,
                 self.parts_cost,
-            ] if val is not None
+            ]
+            if val is not None
         )
 
 

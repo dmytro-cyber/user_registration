@@ -1,15 +1,15 @@
-from fastapi import FastAPI, UploadFile, File, HTTPException
 import json
-from datetime import datetime
 import logging
+import os
+import re
+from datetime import datetime
 from io import BytesIO
-from PIL import Image
+
 import pytesseract
 from bs4 import BeautifulSoup
-import re
-import os
 from cairosvg import svg2png
-
+from fastapi import FastAPI, File, HTTPException, UploadFile
+from PIL import Image
 
 # Set up logging for debugging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

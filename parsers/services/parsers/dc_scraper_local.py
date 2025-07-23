@@ -1,23 +1,23 @@
+import asyncio
+import email
+import imaplib
 import json
+import logging
 import os
 import re
 import time
 from typing import Optional, Tuple
-from dotenv import load_dotenv
-from bs4 import BeautifulSoup
+
 import httpx
+from bs4 import BeautifulSoup
+from dotenv import load_dotenv
 from playwright.async_api import async_playwright
-import logging
-import asyncio
-import imaplib
-import email
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 load_dotenv()
+
 
 # Configuration class for constants
 class Config:
@@ -69,6 +69,7 @@ class Config:
     POLL_INTERVAL = 4
     VIEWPORT = {"width": 1280, "height": 720}
 
+
 # Separate Email Client
 class EmailClient:
     def __init__(self, email: str, password: str, imap_server: str = "imap.gmail.com"):
@@ -78,7 +79,9 @@ class EmailClient:
         self.password = password
         self.imap_server = imap_server
 
-    def get_verification_code(self, max_wait: int = Config.MAX_WAIT_VERIFICATION, poll_interval: int = Config.POLL_INTERVAL) -> Optional[str]:
+    def get_verification_code(
+        self, max_wait: int = Config.MAX_WAIT_VERIFICATION, poll_interval: int = Config.POLL_INTERVAL
+    ) -> Optional[str]:
         """Poll the inbox for the verification code with a maximum wait time."""
         start_time = time.time()
         while time.time() - start_time < max_wait:
@@ -124,8 +127,19 @@ class EmailClient:
         logging.error("Failed to retrieve verification code within the timeout period.")
         return None
 
+
 class DealerCenterScraper:
-    def __init__(self, vin: str, vehicle_name: str = None, engine: str = None, year: int = None, make: str = None, model: str = None, odometer: int = None, transmission: str = None):
+    def __init__(
+        self,
+        vin: str,
+        vehicle_name: str = None,
+        engine: str = None,
+        year: int = None,
+        make: str = None,
+        model: str = None,
+        odometer: int = None,
+        transmission: str = None,
+    ):
         self.vin = vin
         self.vehicle_name = vehicle_name
         self.engine = engine
@@ -325,7 +339,9 @@ class DealerCenterScraper:
         logging.info(f"Authentication prepared in {end_time - start_time} seconds")
         return proxy, headers, cookies_dict, payload
 
-    async def get_market_data(self, proxy: Optional[httpx.Proxy], headers: dict, cookies_dict: dict, initial_payload: dict) -> dict:
+    async def get_market_data(
+        self, proxy: Optional[httpx.Proxy], headers: dict, cookies_dict: dict, initial_payload: dict
+    ) -> dict:
         """Retrieve market data including AutoCheck report, JD valuation, and market price statistics."""
         start_time = time.time()
         response = await httpx.AsyncClient(proxy=proxy).post(
@@ -359,9 +375,7 @@ class DealerCenterScraper:
 
         odometer_value = None
         try:
-            odometer_element = soup.select_one(
-                "p:contains('Last reported odometer:') span.font-weight-bold"
-            )
+            odometer_element = soup.select_one("p:contains('Last reported odometer:') span.font-weight-bold")
             odometer_value = int(odometer_element.text.replace(",", "")) if odometer_element else self.odometer
         except:
             logging.error("Failed to extract odometer value")
@@ -529,9 +543,7 @@ class DealerCenterScraper:
 
         odometer_value = None
         try:
-            odometer_element = soup.select_one(
-                "p:contains('Last reported odometer:') span.font-weight-bold"
-            )
+            odometer_element = soup.select_one("p:contains('Last reported odometer:') span.font-weight-bold")
             odometer_value = int(odometer_element.text.replace(",", "")) if odometer_element else self.odometer
         except:
             logging.error("Failed to extract odometer value")
@@ -584,7 +596,16 @@ if __name__ == "__main__":
     model = "CR-V"
     odometer = 100000
     transmission = "Automatic"
-    dc = DealerCenterScraper(vin=vin, vehicle_name=name, engine=engine, year=year, make=make, model=model, odometer=odometer, transmission=transmission)
+    dc = DealerCenterScraper(
+        vin=vin,
+        vehicle_name=name,
+        engine=engine,
+        year=year,
+        make=make,
+        model=model,
+        odometer=odometer,
+        transmission=transmission,
+    )
     result = asyncio.run(dc.get_history_and_market_data_async())
     for k, v in result.items():
         if v is not None and len(str(v)) < 100:

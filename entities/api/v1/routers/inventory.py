@@ -1,56 +1,57 @@
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc
 from sqlalchemy.orm import selectinload
-from typing import List, Optional
+
+from core.dependencies import get_current_user
 from crud.inventory import (
+    create_car_inventory,
+    create_car_investment,
+    create_part_inventory,
+    delete_car_inventory,
+    delete_car_investment,
+    delete_invoice,
+    delete_part_inventory,
     get_car_inventories,
     get_car_inventory,
-    update_car_inventory,
-    delete_car_inventory,
-    get_car_investments_by_inventory,
     get_car_investment,
-    create_car_investment,
-    update_car_investment,
-    delete_car_investment,
-    create_part_inventory,
-    get_part_inventory,
+    get_car_investments_by_inventory,
     get_part_inventories,
-    update_part_inventory,
-    delete_part_inventory,
+    get_part_inventory,
+    update_car_inventory,
+    update_car_investment,
     update_invoice,
-    upload_invoice,
-    delete_invoice,
+    update_part_inventory,
     update_part_status,
-    create_car_inventory,
+    upload_invoice,
 )
+from db.session import get_db
 from models.user import UserModel
+from models.vehicle import HistoryModel, PartInventoryModel
 from schemas.inventory import (
     CarInventoryCreate,
+    CarInventoryDetailResponse,
+    CarInventoryInvestmentsCreate,
+    CarInventoryInvestmentsResponse,
+    CarInventoryInvestmentsUpdate,
+    CarInventoryResponse,
     CarInventoryUpdate,
     CarInventoryUpdateStatus,
-    CarInventoryResponse,
-    CarInventoryInvestmentsCreate,
-    CarInventoryInvestmentsUpdate,
-    CarInventoryInvestmentsResponse,
-    PartInventoryCreate,
-    PartInventoryUpdate,
-    PartInventoryResponse,
     HistoryResponse,
-    PartInventoryStatusUpdate,
     InvoiceResponse,
-    CarInventoryDetailResponse,
+    PartInventoryCreate,
+    PartInventoryResponse,
+    PartInventoryStatusUpdate,
+    PartInventoryUpdate,
 )
+from schemas.user import UserResponseSchema
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
     BiddingHubHistorySchema,
 )
-from schemas.user import UserResponseSchema
-from models.vehicle import PartInventoryModel, HistoryModel
-from models.user import UserModel
-from db.session import get_db
-from core.dependencies import get_current_user
 
 router = APIRouter(prefix="/inventory")
 

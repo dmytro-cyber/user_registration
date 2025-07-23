@@ -1,10 +1,10 @@
-from pydantic import BaseModel, ConfigDict, EmailStr, field_validator, Field
-from typing import List
-
-from models.validators import user as validators
-
 import datetime
 from datetime import date
+from typing import List
+
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+
+from models.validators import user as validators
 
 
 class BaseEmailPasswordSchema(BaseModel):

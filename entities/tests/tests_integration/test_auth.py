@@ -1,12 +1,13 @@
+import os
+from datetime import datetime, timedelta
+
 import pytest
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from datetime import datetime, timedelta
-import os
 
-from models.user import UserModel, UserRoleModel, UserRoleEnum  # Додаємо UserRoleModel
 from exceptions.security import BaseSecurityError
+from models.user import UserModel, UserRoleEnum, UserRoleModel  # Додаємо UserRoleModel
 
 
 @pytest.mark.asyncio

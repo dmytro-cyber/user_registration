@@ -2,52 +2,53 @@ import logging
 import logging.handlers
 import os
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request, Query
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.dependencies import get_current_user, get_jwt_auth_manager
+from core.security.interfaces import JWTAuthManagerInterface
+from crud.user import (
+    get_all_roles,
+    get_filtered_users,
+    get_role_by_name,
+    get_user_by_email,
+    get_user_by_id,
+    update_user_info,
+    update_user_password,
+    update_user_role,
+)
+from db.session import get_db
+from models.user import UserModel, UserRoleEnum
+from schemas.message import MessageResponseSchema
 from schemas.user import (
+    ChangePasswordRequestSchema,
+    PasswordResetConfirmSchema,
+    PasswordResetRequestSchema,
+    SendInviteRequestSchema,
+    UpdateEmailSchema,
+    UserAdminListResponseSchema,
     UserInvitationRequestSchema,
     UserInvitationResponseSchema,
-    UserRoleListResponseSchema,
     UserResponseSchema,
+    UserRoleListResponseSchema,
     UserUpdateRequestSchema,
-    ChangePasswordRequestSchema,
-    UpdateEmailSchema,
-    PasswordResetRequestSchema,
-    PasswordResetConfirmSchema,
-    SendInviteRequestSchema,
-    UserAdminListResponseSchema,
-)
-from schemas.message import MessageResponseSchema
-from core.dependencies import get_jwt_auth_manager
-from models.user import UserModel, UserRoleEnum
-from core.security.interfaces import JWTAuthManagerInterface
-from core.dependencies import get_current_user
-from db.session import get_db
-from crud.user import (
-    get_user_by_email,
-    get_all_roles,
-    get_role_by_name,
-    update_user_role,
-    update_user_password,
-    update_user_info,
-    get_filtered_users,
-    get_user_by_id,
-)
-from services.user import (
-    check_admin_privileges,
-    generate_invite_link,
-    validate_and_change_password,
-    validate_and_update_user_info,
-    request_email_change,
-    confirm_email_change,
-    request_password_reset,
-    confirm_password_reset,
-    send_invite_email,
-    prepare_user_list_response,
-    prepare_user_response,
-    prepare_roles_response,
 )
 from services.email import send_email
+from services.user import (
+    check_admin_privileges,
+    confirm_email_change,
+    confirm_password_reset,
+    generate_invite_link,
+    prepare_roles_response,
+    prepare_user_list_response,
+    prepare_user_response,
+    request_email_change,
+    request_password_reset,
+    send_invite_email,
+    validate_and_change_password,
+    validate_and_update_user_info,
+)
 
 # Configure logging for production environment
 logger = logging.getLogger("users_router")

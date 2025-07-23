@@ -1,11 +1,13 @@
 # services/auth.py
-from fastapi import HTTPException, status
-from core.dependencies import get_jwt_auth_manager
-from schemas.user import UserRegistrationRequestSchema
-from core.security.interfaces import JWTAuthManagerInterface
-from exceptions.security import BaseSecurityError
 import datetime
 import logging
+
+from fastapi import HTTPException, status
+
+from core.dependencies import get_jwt_auth_manager
+from core.security.interfaces import JWTAuthManagerInterface
+from exceptions.security import BaseSecurityError
+from schemas.user import UserRegistrationRequestSchema
 
 # Configure logging
 logger = logging.getLogger(__name__)

@@ -1,28 +1,31 @@
-from services.parsers.copart_current_bid_parser import get_current_bid
-from services.fees.copart_fees_parser import scrape_copart_fees
-from services.fees.iaai_fees_parser import scrape_iaai_fees
-from fastapi import APIRouter, Depends, Query, UploadFile, File, HTTPException
-import os
-from datetime import datetime
 import asyncio
-from services.fees.iaai_fees_image_parser import parse_svg_table
+import json
+import logging
+import os
+from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+
+from core.config import settings
 from core.dependencies import get_token
 from schemas.schemas import (
     DCResponseSchema,
-    UpdateCurrentBidRequestSchema,
-    UpdateCurrentBidResponseSchema,
     UpdateCurrentBidListRequestSchema,
     UpdateCurrentBidListResponseSchema,
+    UpdateCurrentBidRequestSchema,
+    UpdateCurrentBidResponseSchema,
 )
-import logging
-import json
-from concurrent.futures import ThreadPoolExecutor
-from core.config import settings
+from services.fees.copart_fees_parser import scrape_copart_fees
+from services.fees.iaai_fees_image_parser import parse_svg_table
+from services.fees.iaai_fees_parser import scrape_iaai_fees
+from services.parsers.copart_current_bid_parser import get_current_bid
+
 if settings.ENVIRON == "dev":
     from services.parsers.dc_scraper_local import DealerCenterScraper
 else:
     from services.parsers.dc_scraper import DealerCenterScraper
-    
+
 
 router = APIRouter()
 executor = ThreadPoolExecutor()
@@ -57,7 +60,16 @@ async def scrape_dc(
     while attempts < max_attempts:
         logger.info(f"Starting scrape for VIN {car_vin}, attempt {attempts + 1}/{max_attempts}")
         try:
-            scraper = DealerCenterScraper(vin=car_vin, vehicle_name=car_name, engine=car_engine, make=car_make, model=car_model, year=car_year, transmission=car_transmison, odometer=car_mileage)
+            scraper = DealerCenterScraper(
+                vin=car_vin,
+                vehicle_name=car_name,
+                engine=car_engine,
+                make=car_make,
+                model=car_model,
+                year=car_year,
+                transmission=car_transmison,
+                odometer=car_mileage,
+            )
             if only_history:
                 result = await scraper.get_history_only_async()
             else:
@@ -73,7 +85,6 @@ async def scrape_dc(
             else:
                 logger.error(f"Failed to scrape after {max_attempts} attempts for VIN {car_vin}")
                 return DCResponseSchema(error=str(e))
-
 
     logger.error(f"Unexpected exit after {max_attempts} attempts for VIN {car_vin}")
     return DCResponseSchema(error="Unexpected error during scraping")
@@ -118,22 +129,16 @@ async def scrape_fees():
 
 
 @router.post("/scrape/iaai/fees")
-async def parse_fees(
-    high_volume: UploadFile = File(...),
-    internet_bid: UploadFile = File(...)
-):
+async def parse_fees(high_volume: UploadFile = File(...), internet_bid: UploadFile = File(...)):
     """Endpoint to parse fees from two uploaded images (SVG or PNG)."""
     try:
         logger.info(f"Received files: high_volume={high_volume.filename}, internet_bid={internet_bid.filename}")
-        
+
         # Define expected file extensions
         expected_extensions = {".png", ".svg"}
 
         # Save uploaded files
-        files = {
-            "high_volume": high_volume,
-            "internet_bid": internet_bid
-        }
+        files = {"high_volume": high_volume, "internet_bid": internet_bid}
 
         saved_paths = {}
         for name, file in files.items():
@@ -157,18 +162,24 @@ async def parse_fees(
                 fees[f"{name}_buyer_fees"] = {
                     "fees": parsed_fees,
                     "currency": "USD",
-                    "description": f"Parsed fees for {name.replace('_', ' ').title()} section"
+                    "description": f"Parsed fees for {name.replace('_', ' ').title()} section",
                 }
                 logger.info(f"Parsed {name} fees: {parsed_fees}")
             else:
                 logger.warning(f"No fees parsed from {name} image.")
 
         # Add fixed fees
-        fees.update({
-            "service_fee": {"amount": 95.0, "currency": "USD", "description": "Per unit for vehicle handling"},
-            "environmental_fee": {"amount": 15.0, "currency": "USD", "description": "Per unit for environmental regulations"},
-            "title_handling_fee": {"amount": 20.0, "currency": "USD", "description": "Applied to all purchases"}
-        })
+        fees.update(
+            {
+                "service_fee": {"amount": 95.0, "currency": "USD", "description": "Per unit for vehicle handling"},
+                "environmental_fee": {
+                    "amount": 15.0,
+                    "currency": "USD",
+                    "description": "Per unit for environmental regulations",
+                },
+                "title_handling_fee": {"amount": 20.0, "currency": "USD", "description": "Applied to all purchases"},
+            }
+        )
         logger.info("Added fixed fees: Service Fee, Environmental Fee, Title Handling Fee")
 
         result = {

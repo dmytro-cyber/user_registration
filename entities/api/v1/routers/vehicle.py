@@ -3,47 +3,48 @@ import logging
 import logging.handlers
 import os
 from datetime import date
-from fastapi import APIRouter, Depends, Query, Request, HTTPException, status
+from typing import Dict, List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from sqlalchemy import distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+
+from core.config import Settings
+from core.dependencies import get_current_user, get_settings, get_token
+from crud.vehicle import (
+    add_part_to_vehicle,
+    bulk_save_vehicles,
+    delete_part,
+    get_filtered_vehicles,
+    get_parts_by_vehicle_id,
+    get_vehicle_by_id,
+    get_vehicle_by_vin,
+    update_part,
+    update_vehicle_status,
+)
+from db.session import get_db
+from models.user import UserModel
+from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, HistoryModel
 from schemas.vehicle import (
     CarBaseSchema,
-    CarListResponseSchema,
+    CarCostsUpdateRequestSchema,
+    CarCreateSchema,
     CarDetailResponseSchema,
-    UpdateCarStatusSchema,
+    CarFilterOptionsSchema,
+    CarListResponseSchema,
     PartRequestScheme,
     PartResponseScheme,
-    CarCreateSchema,
-    CarFilterOptionsSchema,
-    CarCostsUpdateRequestSchema,
-)
-from models.vehicle import CarModel, ConditionAssessmentModel
-from models.user import UserModel
-from sqlalchemy import select, func, distinct
-from core.config import Settings
-from core.dependencies import get_settings, get_token, get_current_user
-from db.session import get_db
-from crud.vehicle import (
-    get_vehicle_by_vin,
-    get_filtered_vehicles,
-    get_vehicle_by_id,
-    update_vehicle_status,
-    add_part_to_vehicle,
-    update_part,
-    delete_part,
-    bulk_save_vehicles,
-    get_parts_by_vehicle_id,
+    UpdateCarStatusSchema,
 )
 from services.vehicle import (
-    scrape_and_save_vehicle,
-    prepare_response,
-    prepare_car_detail_response,
-    scrape_and_save_sales_history,
     car_to_dict,
+    prepare_car_detail_response,
+    prepare_response,
+    scrape_and_save_sales_history,
+    scrape_and_save_vehicle,
 )
-from models.vehicle import HistoryModel, AutoCheckModel
 from tasks.task import parse_and_update_car
-from typing import List, Optional, Dict
 
 # Configure logging for production environment
 logger = logging.getLogger("vehicles_router")
@@ -159,9 +160,11 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None))
             auctions_result = await db.execute(auction_query)
             auctions = [row[0] for row in auctions_result.fetchall()]
-            
+
             # Fetch unique condition assesstments
-            condition_assesstments_query = select(distinct(ConditionAssessmentModel.issue_description)).where(ConditionAssessmentModel.issue_description.isnot(None))
+            condition_assesstments_query = select(distinct(ConditionAssessmentModel.issue_description)).where(
+                ConditionAssessmentModel.issue_description.isnot(None)
+            )
             condition_assesstments_result = await db.execute(condition_assesstments_query)
             condition_assesstments = [row[0] for row in condition_assesstments_result.fetchall()]
 
@@ -184,7 +187,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             transmission_query = select(distinct(CarModel.transmision)).where(CarModel.transmision.isnot(None))
             transmission_result = await db.execute(transmission_query)
             transmissions = [row[0] for row in transmission_result.fetchall()]
-            
+
             # Fetch unique body_style values
             body_style_query = select(distinct(CarModel.body_style)).where(CarModel.body_style.isnot(None))
             body_style_result = await db.execute(body_style_query)
@@ -199,19 +202,21 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             fuel_type_query = select(distinct(CarModel.fuel_type)).where(CarModel.fuel_type.isnot(None))
             fuel_type_result = await db.execute(fuel_type_query)
             fuel_types = [row[0] for row in fuel_type_result.fetchall()]
-            
+
             # Fetch unique drive_type values
             drive_type_query = select(distinct(CarModel.drive_type)).where(CarModel.drive_type.isnot(None))
             drive_type_result = await db.execute(drive_type_query)
             drive_types = [row[0] for row in drive_type_result.fetchall()]
-            
+
             # Fetch unique condition values
             condition_query = select(distinct(CarModel.condition)).where(CarModel.condition.isnot(None))
             condition_result = await db.execute(condition_query)
             conditions = [row[0] for row in condition_result.fetchall()]
 
             # Fetch unique engine_cylinder values
-            engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(CarModel.engine_cylinder.isnot(None))
+            engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(
+                CarModel.engine_cylinder.isnot(None)
+            )
             engine_cylinder_result = await db.execute(engine_cylinder_query)
             engine_cylinders = [row[0] for row in engine_cylinder_result.fetchall()]
 
@@ -324,7 +329,6 @@ async def get_cars(
     condition_assessments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
     zip_search: Optional[str] = Query(None, description="e.g., 12345;200"),
     recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
-    
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
     liked: bool = Query(False, description="Filter by liked cars"),
     ordering: str = Query(
@@ -525,7 +529,10 @@ async def update_car_status(
     return status_data
 
 
-@router.put("/cars/{car_id}/costs", summary="Update Car Costs", description="""
+@router.put(
+    "/cars/{car_id}/costs",
+    summary="Update Car Costs",
+    description="""
 Updates specific cost fields (maintenance, transportation, labor) for a car identified by VIN.
 
 ### Available Fields:
@@ -534,12 +541,9 @@ Updates specific cost fields (maintenance, transportation, labor) for a car iden
 - **labor**: Optional float value for labor costs
 
 Only provided fields will be updated; others remain unchanged.
-""")
-async def update_car_costs(
-    car_id: int,
-    car_data: CarCostsUpdateRequestSchema,
-    db: AsyncSession = Depends(get_db)
-):
+""",
+)
+async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, db: AsyncSession = Depends(get_db)):
     """
     Updates the specified cost fields for a car based on its ID using ORM.
 
@@ -574,7 +578,6 @@ async def update_car_costs(
         await db.rollback()
         logger.error("Error updating car costs for ID %s: %s", car_id, str(e))
         raise HTTPException(status_code=500, detail="Internal server error")
-
 
 
 @router.get(

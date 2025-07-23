@@ -1,30 +1,30 @@
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, and_, distinct
-from models.user import UserRoleEnum, UserRoleModel
-from db.session import SessionLocal
-from sqlalchemy.orm import selectinload
-from passlib.context import CryptContext
-from models import UserModel, UserRoleModel, UserRoleEnum, USZipModel, CarModel
-from sqlalchemy.exc import IntegrityError
 import csv
-from datetime import datetime, date
-from models.vehicle import CarModel, PartModel
-import os
 import http.client
 import json
-from math import radians, sin, cos, sqrt, atan2
+import os
+from datetime import date, datetime
 from difflib import SequenceMatcher
+from math import atan2, cos, radians, sin, sqrt
+
+from passlib.context import CryptContext
+from sqlalchemy import and_, distinct, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+
+from db.session import SessionLocal
+from models import CarModel, UserModel, UserRoleEnum, UserRoleModel, USZipModel
+from models.user import UserRoleEnum, UserRoleModel
+from models.vehicle import CarModel, PartModel
 
 EARTH_RADIUS_MI = 3958.8
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-
-
 async def import_us_zips_from_csv(csv_path: str = "uszips.csv"):
     async with SessionLocal() as session:
-        with open(csv_path, newline='', encoding='utf-8') as csvfile:
+        with open(csv_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
             objects = []
 
@@ -45,7 +45,7 @@ async def import_us_zips_from_csv(csv_path: str = "uszips.csv"):
                         state_id=state_id,
                         state_name=state_name,
                         copart_name=None,
-                        iaai_name=None
+                        iaai_name=None,
                     )
                     objects.append(zip_obj)
                 except Exception as e:
@@ -169,13 +169,11 @@ def haversine(lat1, lon1, lat2, lon2):
     c = 2 * atan2(sqrt(a), sqrt(1 - a))
     return EARTH_RADIUS_MI * c
 
+
 def get_location_coordinates(query):
     conn = http.client.HTTPSConnection("google.serper.dev")
     payload = json.dumps({"q": query, "location": "United States"})
-    headers = {
-        'X-API-KEY': 'd9b2f54b9bed2611b48823eb727651c67575cfea',
-        'Content-Type': 'application/json'
-    }
+    headers = {"X-API-KEY": "d9b2f54b9bed2611b48823eb727651c67575cfea", "Content-Type": "application/json"}
     conn.request("POST", "/places", payload, headers)
     res = conn.getresponse()
     data = res.read()
@@ -187,6 +185,7 @@ def get_location_coordinates(query):
         except Exception:
             pass
     return None, None
+
 
 def similar(a, b):
     """Порівнює схожість між назвами"""
@@ -213,12 +212,13 @@ async def match_and_update_location(location: str, auction: str):
                             zip_entry.iaai_name = location
 
             await db.commit()
-    
+
 
 async def match_and_update_locations():
     async with SessionLocal() as db:
         stmt = (
-            select(CarModel.location, CarModel.auction).distinct()
+            select(CarModel.location, CarModel.auction)
+            .distinct()
             .where(and_(CarModel.location.isnot(None), CarModel.auction.isnot(None)))
         )
         result = await db.execute(stmt)

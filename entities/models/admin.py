@@ -1,5 +1,6 @@
-from sqlalchemy import Column, Integer, String, DateTime, Float, func
+from sqlalchemy import Column, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import validates
+
 from models import Base
 
 

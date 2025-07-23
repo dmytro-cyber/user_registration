@@ -1,6 +1,6 @@
-from sqlalchemy import asc, desc, cast, Date
-from models.vehicle import CarModel
+from sqlalchemy import Date, asc, cast, desc
 
+from models.vehicle import CarModel
 
 ORDERING_MAP = {
     "created_at_asc": asc(CarModel.created_at),

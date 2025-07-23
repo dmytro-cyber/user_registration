@@ -1,11 +1,13 @@
 import asyncio
-from playwright.async_api import async_playwright
-from bs4 import BeautifulSoup
 import logging
-import time
-import httpx
-from schemas.schemas import UpdateCurrentBidListResponseSchema, UpdateCurrentBidRequestSchema
 import os
+import time
+
+import httpx
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+
+from schemas.schemas import UpdateCurrentBidListResponseSchema, UpdateCurrentBidRequestSchema
 
 # Configure logging with a specific format and level
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

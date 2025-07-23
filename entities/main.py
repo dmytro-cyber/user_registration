@@ -1,18 +1,20 @@
 from fastapi import FastAPI
-from api.v1.routers.auth import router as auth_router
-from api.v1.routers.user import router as user_router
-from api.v1.routers.vehicle import router as vehicle_router
+from fastapi.middleware.cors import CORSMiddleware
+
 from api.v1.routers.admin import router as admin_router
+from api.v1.routers.analytic import router as analytics_router
+from api.v1.routers.auth import router as auth_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
-from api.v1.routers.analytic import router as analytics_router
+from api.v1.routers.user import router as user_router
+from api.v1.routers.vehicle import router as vehicle_router
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
-from fastapi.middleware.cors import CORSMiddleware
 from tasks.task import _update_car_fees_async
 
-
-app = FastAPI(title="Cars&Beyond API",
-              description="Cars&Beyond API for managing vehicles, users, and bidding",)
+app = FastAPI(
+    title="Cars&Beyond API",
+    description="Cars&Beyond API for managing vehicles, users, and bidding",
+)
 
 
 # @app.on_event("startup")

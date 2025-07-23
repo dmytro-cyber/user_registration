@@ -1,6 +1,7 @@
-from models.vehicle import CarInventoryInvestmentsModel, CarInventoryModel
-from sqlalchemy import select, func, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from models.vehicle import CarInventoryInvestmentsModel, CarInventoryModel
 
 
 async def update_inventory_financials(db: AsyncSession, inventory_id: int):

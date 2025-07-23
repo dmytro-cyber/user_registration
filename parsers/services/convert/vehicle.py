@@ -1,27 +1,30 @@
-import os
 import json
 import logging
+import os
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Any, Dict, Optional
 
 # Налаштування логування
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler()  # Вивід до консолі
         # Додайте logging.FileHandler('data_processing.log') для логування у файл, якщо потрібно
-    ]
+    ],
 )
 logger = logging.getLogger(__name__)
+
 
 def str_to_bool(value: str) -> bool:
     """Convert 'Yes'/'No' string to boolean."""
     return value.lower() == "yes"
 
+
 def is_salvage_from_document(document: str) -> bool:
     """Convert document field to boolean is_salvage."""
     return document.lower() == "salvage"
+
 
 def parse_auction_date(date_str: str) -> Optional[datetime]:
     """Parse ISO 8601 date string to datetime."""
@@ -30,6 +33,7 @@ def parse_auction_date(date_str: str) -> Optional[datetime]:
     except ValueError as e:
         logger.warning(f"Invalid auction_date format: {date_str} -> {e}")
         return None
+
 
 def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -104,10 +108,25 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     logger.debug("Set default values for required fields")
 
     optional_fields = [
-        "owners", "accident_count", "actual_bid", "price_sold", "suggested_bid",
-        "total_investment", "net_profit", "profit_margin", "roi", "parts_cost",
-        "maintenance", "auction_fee", "transportation", "labor", "parts_needed",
-        "predicted_roi", "predicted_profit_margin", "interior_color", "style_id",
+        "owners",
+        "accident_count",
+        "actual_bid",
+        "price_sold",
+        "suggested_bid",
+        "total_investment",
+        "net_profit",
+        "profit_margin",
+        "roi",
+        "parts_cost",
+        "maintenance",
+        "auction_fee",
+        "transportation",
+        "labor",
+        "parts_needed",
+        "predicted_roi",
+        "predicted_profit_margin",
+        "interior_color",
+        "style_id",
     ]
     for field in optional_fields:
         car_data.setdefault(field, None)

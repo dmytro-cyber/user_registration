@@ -1,15 +1,17 @@
+import json
 import logging
+import os
+import time
+from datetime import datetime
+from urllib.parse import urlencode
+from zoneinfo import ZoneInfo
+
+import httpx
 from celery import Celery
 from celery.schedules import crontab
-import httpx
-import os
-import json
-from datetime import datetime
-from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
+
 from services.convert.vehicle import format_car_data
-from urllib.parse import urlencode
-import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -271,35 +273,35 @@ def fetch_api_data():
 #                     "engine": formatted_vehicle["engine"],
 #                 }
 #             )
-            # adapted_vehicle = {
-            #     "vin": formatted_vehicle["vin"],
-            #     "vehicle": formatted_vehicle["vehicle"],
-            #     "make": formatted_vehicle["make"],
-            #     "model": formatted_vehicle["model"],
-            #     "year": formatted_vehicle.get("year"),
-            #     "mileage": formatted_vehicle.get("mileage"),
-            #     "auction": formatted_vehicle.get("auction"),
-            #     "auction_name": formatted_vehicle.get("auction_name"),
-            #     "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
-            #     "lot": formatted_vehicle.get("lot"),
-            #     "seller": formatted_vehicle.get("seller"),
-            #     "location": formatted_vehicle.get("location"),
-            #     "bid": formatted_vehicle.get("bid"),
-            #     "engine": formatted_vehicle.get("engine"),
-            #     "has_keys": formatted_vehicle.get("has_keys"),
-            #     "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
-            #     "drive_type": formatted_vehicle.get("drive_type"),
-            #     "exterior_color": formatted_vehicle.get("exterior_color"),
-            #     "body_style": formatted_vehicle.get("body_style"),
-            #     "transmision": formatted_vehicle.get("transmision"),
-            #     "vehicle_type": formatted_vehicle.get("vehicle_type"),
-            #     "link": formatted_vehicle.get("link"),
-            #     "is_salvage": formatted_vehicle.get("is_salvage", False),
-            #     "photos": formatted_vehicle.get("photos", []),
-            #     "photos_hd": formatted_vehicle.get("photos_hd", []),
-            #     "condition_assessments": formatted_vehicle.get("condition_assessments", []),
-            # }
-            # processed_vehicles.append(adapted_vehicle)
+# adapted_vehicle = {
+#     "vin": formatted_vehicle["vin"],
+#     "vehicle": formatted_vehicle["vehicle"],
+#     "make": formatted_vehicle["make"],
+#     "model": formatted_vehicle["model"],
+#     "year": formatted_vehicle.get("year"),
+#     "mileage": formatted_vehicle.get("mileage"),
+#     "auction": formatted_vehicle.get("auction"),
+#     "auction_name": formatted_vehicle.get("auction_name"),
+#     "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
+#     "lot": formatted_vehicle.get("lot"),
+#     "seller": formatted_vehicle.get("seller"),
+#     "location": formatted_vehicle.get("location"),
+#     "bid": formatted_vehicle.get("bid"),
+#     "engine": formatted_vehicle.get("engine"),
+#     "has_keys": formatted_vehicle.get("has_keys"),
+#     "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
+#     "drive_type": formatted_vehicle.get("drive_type"),
+#     "exterior_color": formatted_vehicle.get("exterior_color"),
+#     "body_style": formatted_vehicle.get("body_style"),
+#     "transmision": formatted_vehicle.get("transmision"),
+#     "vehicle_type": formatted_vehicle.get("vehicle_type"),
+#     "link": formatted_vehicle.get("link"),
+#     "is_salvage": formatted_vehicle.get("is_salvage", False),
+#     "photos": formatted_vehicle.get("photos", []),
+#     "photos_hd": formatted_vehicle.get("photos_hd", []),
+#     "condition_assessments": formatted_vehicle.get("condition_assessments", []),
+# }
+# processed_vehicles.append(adapted_vehicle)
 
 #         print(f"Processed vehicles: {asd}")
 #         httpx_client = httpx.Client(timeout=5.0)

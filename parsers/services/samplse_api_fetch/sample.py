@@ -1,12 +1,14 @@
-import logging
-import httpx
 import asyncio
-from core.celery_config import app
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
-from models.vehicle import CarModel
-from schemas.vehicle import CarBaseSchema
+import logging
+
+import httpx
 from db.session import get_db
+from models.vehicle import CarModel
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.celery_config import app
+from schemas.vehicle import CarBaseSchema
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)

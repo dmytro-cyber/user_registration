@@ -1,25 +1,26 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Request
+import logging
+import logging.handlers
+import os
+
+from dotenv import load_dotenv
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.dependencies import Settings, get_current_user, get_jwt_auth_manager, get_settings
+from core.security.interfaces import JWTAuthManagerInterface
+from crud.user import create_user, get_user_by_email, get_user_by_id
+from db.session import get_db
+from exceptions.security import BaseSecurityError
+from models.user import UserModel
+from models.validators.user import validate_phone_number
+from schemas.message import MessageResponseSchema
 from schemas.user import (
     UserLoginRequestSchema,
     UserRegistrationRequestSchema,
     UserRegistrationResponseSchema,
 )
-from models.user import UserModel
-from schemas.message import MessageResponseSchema
-from core.dependencies import get_jwt_auth_manager
-from models.validators.user import validate_phone_number
-from core.dependencies import Settings, get_current_user, get_settings
-from core.security.interfaces import JWTAuthManagerInterface
-from exceptions.security import BaseSecurityError
-from db.session import get_db
 from services.auth import verify_invite
-from services.cookie import set_token_cookie, delete_token_cookie
-from crud.user import create_user, get_user_by_email, get_user_by_id
-from dotenv import load_dotenv
-import os
-import logging
-import logging.handlers
+from services.cookie import delete_token_cookie, set_token_cookie
 
 load_dotenv()
 

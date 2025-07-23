@@ -1,13 +1,13 @@
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy.ext.asyncio import AsyncSession
-from db.session import get_db
-from sqlalchemy import text
-from datetime import datetime
-from typing import Optional, Literal
-
-
 import logging
 import sys
+from datetime import datetime
+from typing import Literal, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.session import get_db
 
 # Configure logging with enhanced debugging (коментуємо логування в файл)
 logger = logging.getLogger("admin_router")
@@ -32,6 +32,7 @@ logger.addHandler(console_handler)
 
 router = APIRouter(prefix="/analytic")
 
+
 def normalize_csv_param(val: Optional[str]) -> list[str]:
     """Normalize a comma-separated string into a list of stripped values."""
     # logger.debug("Normalizing CSV param: %s", val)
@@ -40,6 +41,7 @@ def normalize_csv_param(val: Optional[str]) -> list[str]:
         # logger.debug("Normalized result: %s", result)
         return result
     return []
+
 
 def normalize_date_param(val: Optional[str]) -> Optional[datetime]:
     """Convert a date string to datetime object or return None if invalid."""
@@ -52,10 +54,14 @@ def normalize_date_param(val: Optional[str]) -> Optional[datetime]:
         # logger.error("Date normalization failed: %s", str(e))
         return None
 
-@router.get("/recommended-cars", description="""
+
+@router.get(
+    "/recommended-cars",
+    description="""
 Returns a list of recommended cars with status 'RECOMMENDED' that match the provided filters.
 ...
-""")
+""",
+)
 async def get_recommended_cars(
     db: AsyncSession = Depends(get_db),
     mileage_start: Optional[int] = Query(None, description="Minimum mileage"),
@@ -83,13 +89,20 @@ async def get_recommended_cars(
 ):
     # logger.debug("Received request for /recommended-cars with params: mileage_start=%s, mileage_end=%s, ...", mileage_start, mileage_end)
     params = [
-        mileage_start, mileage_end,
-        owners_start, owners_end,
-        accident_start, accident_end,
-        year_start, year_end,
-        make, model,
-        predicted_roi_start, predicted_roi_end,
-        predicted_profit_margin_start, predicted_profit_margin_end,
+        mileage_start,
+        mileage_end,
+        owners_start,
+        owners_end,
+        accident_start,
+        accident_end,
+        year_start,
+        year_end,
+        make,
+        model,
+        predicted_roi_start,
+        predicted_roi_end,
+        predicted_profit_margin_start,
+        predicted_profit_margin_end,
         normalize_csv_param(vehicle_condition),
         normalize_csv_param(vehicle_types),
         normalize_csv_param(engine_type),
@@ -97,11 +110,12 @@ async def get_recommended_cars(
         normalize_csv_param(drive_train),
         normalize_csv_param(cylinder),
         normalize_csv_param(auction_names),
-        normalize_csv_param(body_style)
+        normalize_csv_param(body_style),
     ]
     # logger.debug("Prepared params for query: %s", params)
 
-    query = text("""
+    query = text(
+        """
         WITH us_states AS (
             SELECT unnest(ARRAY[
                 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA',
@@ -156,17 +170,23 @@ async def get_recommended_cars(
           AND (array_length($21::TEXT[], 1) = 0 OR auction_name = ANY($21::TEXT[]))
           AND (array_length($22::TEXT[], 1) = 0 OR body_style = ANY($22::TEXT[]))
         LIMIT 50;
-    """)
+    """
+    )
 
     # logger.debug("Executing query for /recommended-cars with params: %s", params)
     result = await db.execute(query, params)
     # logger.debug("Query executed successfully")
     return [dict(row) for row in result.fetchall()]
 
-@router.get("/top-sellers", summary="Top 10 sellers by sold lots", description="""
+
+@router.get(
+    "/top-sellers",
+    summary="Top 10 sellers by sold lots",
+    description="""
 Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.
 ...
-""")
+""",
+)
 async def get_top_sellers(
     db: AsyncSession = Depends(get_db),
     state_codes: Optional[str] = Query(None, description="Comma-separated state codes, e.g., 'CA,TX'"),
@@ -202,13 +222,20 @@ async def get_top_sellers(
         normalize_csv_param(state_codes),
         normalize_csv_param(cities),
         normalize_csv_param(auctions),
-        mileage_start, mileage_end,
-        owners_start, owners_end,
-        accident_start, accident_end,
-        year_start, year_end,
-        make, model,
-        predicted_roi_start, predicted_roi_end,
-        predicted_profit_margin_start, predicted_profit_margin_end,
+        mileage_start,
+        mileage_end,
+        owners_start,
+        owners_end,
+        accident_start,
+        accident_end,
+        year_start,
+        year_end,
+        make,
+        model,
+        predicted_roi_start,
+        predicted_roi_end,
+        predicted_profit_margin_start,
+        predicted_profit_margin_end,
         normalize_csv_param(vehicle_condition),
         normalize_csv_param(vehicle_types),
         normalize_csv_param(engine_type),
@@ -218,11 +245,12 @@ async def get_top_sellers(
         normalize_csv_param(auction_names),
         normalize_csv_param(body_style),
         normalize_date_param(sale_start),
-        normalize_date_param(sale_end)
+        normalize_date_param(sale_end),
     ]
     # logger.debug("Prepared params for query: %s", params)
 
-    query = text("""
+    query = text(
+        """
         WITH us_states AS (
             SELECT unnest(ARRAY[
                 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA',
@@ -275,19 +303,28 @@ async def get_top_sellers(
         GROUP BY seller
         ORDER BY Lots DESC
         LIMIT 10
-    """)
+    """
+    )
 
     # logger.debug("Executing query for /top-sellers with params: %s", params)
     result = await db.execute(query, params)
     # logger.debug("Query executed successfully")
     return [dict(row) for row in result.fetchall()]
 
-@router.get("/analytics/sale-prices", summary="Average Sale Price Over Time", tags=["Analytics"], description="""
+
+@router.get(
+    "/analytics/sale-prices",
+    summary="Average Sale Price Over Time",
+    tags=["Analytics"],
+    description="""
 Returns the average final bid prices grouped by the specified time interval (day, week, or month) over a given period.
 ...
-""")
+""",
+)
 async def get_avg_sale_prices(
-    interval_unit: Literal["day", "week", "month"] = Query("week", description="Time grouping unit (day, week, month)"),
+    interval_unit: Literal["day", "week", "month"] = Query(
+        "week", description="Time grouping unit (day, week, month)"
+    ),
     interval_amount: int = Query(12, description="Number of intervals to look back"),
     reference_date: Optional[datetime] = Query(None, description="End date of interval (default: today)"),
     state_codes: Optional[str] = Query(None, description="Comma-separated state codes, e.g., 'CA,TX'"),
@@ -322,30 +359,41 @@ async def get_avg_sale_prices(
     # logger.debug("Received request for /analytics/sale-prices with params: interval_unit=%s, interval_amount=%s, ...", interval_unit, interval_amount)
     ref_date = reference_date or datetime.utcnow()
     params = [
-        interval_unit, interval_amount, ref_date,
+        interval_unit,
+        interval_amount,
+        ref_date,
         normalize_csv_param(state_codes),
         normalize_csv_param(cities),
         normalize_csv_param(auctions),
-        mileage_start, mileage_end,
-        owners_start, owners_end,
-        accident_start, accident_end,
-        year_start, year_end,
+        mileage_start,
+        mileage_end,
+        owners_start,
+        owners_end,
+        accident_start,
+        accident_end,
+        year_start,
+        year_end,
         normalize_csv_param(vehicle_condition),
         normalize_csv_param(vehicle_types),
-        make, model,
-        predicted_roi_start, predicted_roi_end,
-        predicted_profit_margin_start, predicted_profit_margin_end,
+        make,
+        model,
+        predicted_roi_start,
+        predicted_roi_end,
+        predicted_profit_margin_start,
+        predicted_profit_margin_end,
         normalize_csv_param(engine_type),
         normalize_csv_param(transmission),
         normalize_csv_param(drive_train),
         normalize_csv_param(cylinder),
         normalize_csv_param(auction_names),
         normalize_csv_param(body_style),
-        sale_start, sale_end
+        sale_start,
+        sale_end,
     ]
     # logger.debug("Prepared params for query: %s", params)
 
-    query = text("""
+    query = text(
+        """
         WITH us_states AS (
             SELECT unnest(ARRAY[
                 'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA',
@@ -400,7 +448,8 @@ async def get_avg_sale_prices(
           AND ($29 IS NULL OR $30 IS NULL OR sh.date BETWEEN $29 AND $30)
         GROUP BY period
         ORDER BY period;
-    """)
+    """
+    )
 
     # logger.debug("Executing query for /analytics/sale-prices with params: %s", params)
     result = await db.execute(query, params)

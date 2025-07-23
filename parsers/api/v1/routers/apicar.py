@@ -1,28 +1,27 @@
-import os
+import asyncio
 import json
 import logging
+import os
 from datetime import datetime
-import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
 import httpx
+from fastapi import APIRouter, Depends, Query
 
-from services.parsers.dc_scraper_local import DealerCenterScraper
-from services.convert.vehicle import format_car_data
-from schemas.schemas import DCResponseSchema
 from core.dependencies import get_token
+from schemas.schemas import DCResponseSchema
+from services.convert.vehicle import format_car_data
+from services.parsers.dc_scraper_local import DealerCenterScraper
 
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[logging.StreamHandler()],
 )
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="", tags=["apicar"])
+
 
 @router.get(
     "/apicar/get/{car_vin}",
@@ -33,10 +32,10 @@ async def get_sales_history(car_vin: str):
     Get data from apicar.
     """
     logger.info(f"Received request to fetch sales history for VIN: {car_vin}")
-    
+
     url = f"https://api.apicar.store/api/sale-histories/vin?vin={car_vin}"
     logger.debug(f"Fetching data from URL: {url}")
-    
+
     try:
         response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
         response.raise_for_status()
@@ -44,7 +43,6 @@ async def get_sales_history(car_vin: str):
     except httpx.HTTPError as e:
         logger.error(f"Failed to fetch API data for VIN {car_vin}: {e}")
         return None
-
 
     formatted_vehicle = format_car_data(data.get("data"))
     adapted_vehicle = {

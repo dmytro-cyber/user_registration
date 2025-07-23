@@ -1,8 +1,10 @@
-from pydantic import BaseModel, Field, validator, root_validator
 from datetime import datetime
-from typing import List, Optional
 from enum import Enum
-from models.vehicle import CarInventoryStatus, CarInventoryInvestmentsType, PartInventoryStatus
+from typing import List, Optional
+
+from pydantic import BaseModel, Field, root_validator, validator
+
+from models.vehicle import CarInventoryInvestmentsType, CarInventoryStatus, PartInventoryStatus
 
 
 class CarInventoryBase(BaseModel):
@@ -75,7 +77,7 @@ class CarInventoryResponse(BaseModel):
                 "predicted_profit_margin",
                 "predicted_profit_margin_percent",
                 "predicted_roi",
-                "avg_market_price"
+                "avg_market_price",
             ]:
                 if hasattr(car_data, field):
                     values[field] = getattr(car_data, field)

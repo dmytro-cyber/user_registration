@@ -1,26 +1,28 @@
-from typing import List, Dict, Any
+from logging import getLogger
+from typing import Any, Dict, List
+
 import httpx
 from fastapi import HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from core.config import Settings
+from crud.vehicle import (
+    get_vehicle_by_id,
+    get_vehicle_by_vin,
+    save_sale_history,
+    save_vehicle,
+    save_vehicle_with_photos,
+)
+from models.vehicle import CarModel
 from schemas.vehicle import (
-    CarListResponseSchema,
     CarBaseSchema,
     CarCreateSchema,
     CarDetailResponseSchema,
+    CarListResponseSchema,
+    ConditionAssessmentResponseSchema,
     PartResponseScheme,
     SalesHistoryBaseSchema,
-    ConditionAssessmentResponseSchema,
 )
-from models.vehicle import CarModel
-from crud.vehicle import (
-    get_vehicle_by_vin,
-    save_vehicle,
-    get_vehicle_by_id,
-    save_sale_history,
-    save_vehicle_with_photos,
-)
-from logging import getLogger
-from core.config import Settings
 
 logger = getLogger(__name__)
 
@@ -77,7 +79,9 @@ async def prepare_response(
             raise HTTPException(status_code=500, detail=f"Validation error for car VIN {car.vin}: {str(e)}")
 
     page_links = {i: f"{base_url}&page={i}" for i in range(1, total_pages + 1) if i != page}
-    return CarListResponseSchema(cars=validated_cars, page_links=page_links, last=(total_pages == page), bid_info=bid_info)
+    return CarListResponseSchema(
+        cars=validated_cars, page_links=page_links, last=(total_pages == page), bid_info=bid_info
+    )
 
 
 async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:

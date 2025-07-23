@@ -1,17 +1,18 @@
 import json
-from datetime import datetime
 import logging
-from playwright.sync_api import sync_playwright
-import requests
-from io import BytesIO
-from PIL import Image
-import pytesseract
-from bs4 import BeautifulSoup
-import re
 import os
-import time
 import random
+import re
+import time
+from datetime import datetime
+from io import BytesIO
+
+import pytesseract
+import requests
+from bs4 import BeautifulSoup
 from cairosvg import svg2png
+from PIL import Image
+from playwright.sync_api import sync_playwright
 from twocaptcha import TwoCaptcha
 
 # Set up logging for debugging
@@ -64,7 +65,7 @@ class IAABuyerFeeScraper:
             logger.info(f"Saved screenshot as {screenshot_path} for debugging.")
 
             # Detect and switch to the main iframe
-            captcha_iframe = self.page.query_selector('#main-iframe')
+            captcha_iframe = self.page.query_selector("#main-iframe")
             if captcha_iframe:
                 self.page.frame(captcha_iframe)
                 with open(html_path, "w", encoding="utf-8") as f:

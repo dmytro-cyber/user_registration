@@ -1,7 +1,7 @@
 from fastapi import FastAPI
-from api.v1.routers.parcer import router as parcer_router
-from api.v1.routers.apicar import router as apicar_router
 
+from api.v1.routers.apicar import router as apicar_router
+from api.v1.routers.parcer import router as parcer_router
 
 app = FastAPI(title="My Async FastAPI Project")
 

@@ -1,25 +1,27 @@
 import logging
 from datetime import timedelta
+from typing import Dict, List, Optional
+
 from fastapi import HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from core.security.passwords import pwd_context
-from models.validators.user import validate_password_strength, validate_email, validate_phone_number
-from models.user import UserModel, UserRoleEnum, UserRoleModel
+
 from core.security.interfaces import JWTAuthManagerInterface
-from services.email import send_email
+from core.security.passwords import pwd_context
+from models.user import UserModel, UserRoleEnum, UserRoleModel
+from models.validators.user import validate_email, validate_password_strength, validate_phone_number
 from schemas.user import (
-    UserInvitationRequestSchema,
-    UserRoleResponseSchema,
-    UserRoleListResponseSchema,
     ChangePasswordRequestSchema,
-    UserUpdateRequestSchema,
-    UpdateEmailSchema,
     PasswordResetConfirmSchema,
     SendInviteRequestSchema,
-    UserResponseSchema,
+    UpdateEmailSchema,
     UserAdminListResponseSchema,
+    UserInvitationRequestSchema,
+    UserResponseSchema,
+    UserRoleListResponseSchema,
+    UserRoleResponseSchema,
+    UserUpdateRequestSchema,
 )
-from typing import List, Optional, Dict
+from services.email import send_email
 
 # Configure logging
 logger = logging.getLogger(__name__)

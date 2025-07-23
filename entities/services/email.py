@@ -1,5 +1,7 @@
-import aiosmtplib
 from email.message import EmailMessage
+
+import aiosmtplib
+
 from core.config import settings
 
 

@@ -1,12 +1,14 @@
 import datetime
 import logging
+from typing import List, Optional, Tuple
+
+from sqlalchemy import func
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func
 from sqlalchemy.orm import selectinload
+
 from models.user import UserModel, UserRoleModel
-from typing import List, Optional, Tuple
 
 # Configure logging
 logger = logging.getLogger(__name__)

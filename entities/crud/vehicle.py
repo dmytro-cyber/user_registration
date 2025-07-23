@@ -1,32 +1,33 @@
-from datetime import datetime, time, timezone
-from typing import List, Dict, Any, Optional, Tuple
-from ordering_constr import ORDERING_MAP
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func, asc, desc, delete, or_, and_
-from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import selectinload, aliased
-from sqlalchemy import case, literal_column
-from sqlalchemy.sql import over
-from core.setup import match_and_update_location
-from models.vehicle import (
-    CarModel,
-    PhotoModel,
-    CarSaleHistoryModel,
-    PartModel,
-    CarStatus,
-    HistoryModel,
-    ConditionAssessmentModel,
-    CarInventoryStatus,
-    CarInventoryModel,
-    FeeModel,
-    RecommendationStatus,
-    USZipModel
-)
-from math import radians, cos, sin, asin, sqrt
-from models.user import UserModel, UserRoleEnum, user_likes
-from schemas.vehicle import CarCreateSchema
-from fastapi import HTTPException
 import logging
+from datetime import datetime, time, timezone
+from math import asin, cos, radians, sin, sqrt
+from typing import Any, Dict, List, Optional, Tuple
+
+from fastapi import HTTPException
+from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased, selectinload
+from sqlalchemy.sql import over
+
+from core.setup import match_and_update_location
+from models.user import UserModel, UserRoleEnum, user_likes
+from models.vehicle import (
+    CarInventoryModel,
+    CarInventoryStatus,
+    CarModel,
+    CarSaleHistoryModel,
+    CarStatus,
+    ConditionAssessmentModel,
+    FeeModel,
+    HistoryModel,
+    PartModel,
+    PhotoModel,
+    RecommendationStatus,
+    USZipModel,
+)
+from ordering_constr import ORDERING_MAP
+from schemas.vehicle import CarCreateSchema
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -78,7 +79,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                     else:
                         existing_vehicle.recommendation_status_reasons += f"{value};"
 
-
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
             new_photos = []
 
@@ -108,14 +108,23 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                             car_id=existing_vehicle.id,
                         )
                     )
-                    if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
+                    if assessment.issue_description in [
+                        "Rejected Repair",
+                        "Burn Engine",
+                        "Mechanical",
+                        "Replaced Vin",
+                        "Burn",
+                        "Undercarriage",
+                        "Water/Flood",
+                        "Burn Interior",
+                        "Rollover",
+                    ]:
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
                         else:
                             existing_vehicle.recommendation_status_reasons += f"i{assessment.issue_description};"
-                        
-                        
+
             if (
                 vehicle_data.current_bid is not None
                 and existing_vehicle.suggested_bid is not None
@@ -150,10 +159,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                 vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
 
         query = select(USZipModel).where(
-            or_(
-                USZipModel.copart_name == vehicle.location,
-                USZipModel.iaai_name == vehicle.location
-            )
+            or_(USZipModel.copart_name == vehicle.location, USZipModel.iaai_name == vehicle.location)
         )
         result = await db.execute(query)
         locations = result.scalars().all()
@@ -170,7 +176,17 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
                             car_id=vehicle.id,
                         )
                     )
-                    if assessment.issue_description in ["Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover"]:
+                    if assessment.issue_description in [
+                        "Rejected Repair",
+                        "Burn Engine",
+                        "Mechanical",
+                        "Replaced Vin",
+                        "Burn",
+                        "Undercarriage",
+                        "Water/Flood",
+                        "Burn Interior",
+                        "Rollover",
+                    ]:
                         vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not vehicle.recommendation_status_reasons:
                             vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
@@ -243,14 +259,10 @@ async def get_filtered_vehicles(
     liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
     def apply_str_in_filter(field, values):
-        return func.lower(field).in_([
-            v.lower() for v in values if isinstance(v, str)
-        ])
+        return func.lower(field).in_([v.lower() for v in values if isinstance(v, str)])
 
     def apply_int_in_filter(field, values):
-        return field.in_([
-            int(v) for v in values if isinstance(v, int) or (isinstance(v, str) and v.isdigit())
-        ])
+        return field.in_([int(v) for v in values if isinstance(v, int) or (isinstance(v, str) and v.isdigit())])
 
     base_query = (
         select(CarModel)
@@ -266,10 +278,7 @@ async def get_filtered_vehicles(
 
     # JOIN condition_assessments
     if filters.get("condition_assessments"):
-        base_query = base_query.outerjoin(
-            ConditionAssessmentModel,
-            ConditionAssessmentModel.car_id == CarModel.id
-        )
+        base_query = base_query.outerjoin(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
         issue_filters = ConditionAssessmentModel.issue_description.in_(filters["condition_assessments"])
         base_query = base_query.filter(issue_filters)
 
@@ -292,7 +301,7 @@ async def get_filtered_vehicles(
                 lat2, lon2 = float(z.lat), float(z.lng)
                 dlat = radians(lat2 - lat1)
                 dlon = radians(lon2 - lon1)
-                a = sin(dlat/2)**2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon/2)**2
+                a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlon / 2) ** 2
                 c = 2 * asin(sqrt(a))
                 dist = 6371 * c
                 if dist <= radius:
@@ -423,7 +432,6 @@ async def get_filtered_vehicles(
     return vehicles_with_liked, total_count, total_pages, bids_info
 
 
-
 async def get_bidding_hub_vehicles(
     db: AsyncSession,
     page: int,
@@ -493,7 +501,7 @@ async def get_bidding_hub_vehicles(
                 "suggested_bid": CarModel.suggested_bid,
             }
             sort_field = sort_field_mapping.get(sort_by)
-            
+
             if sort_field:
                 query = query.order_by(order_func(sort_field))
             else:

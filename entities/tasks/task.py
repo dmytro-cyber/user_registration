@@ -1,23 +1,23 @@
-import os
-import logging
-import httpx
 import asyncio
-import anyio
+import base64
+import logging
+import os
 from datetime import datetime
 from io import BytesIO
-import base64
 
-from core.celery_config import app
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+import anyio
+import httpx
+from sqlalchemy import and_, delete, func
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload, sessionmaker
-from sqlalchemy import delete, func, and_
-from sqlalchemy.exc import SQLAlchemyError
 
-from models.vehicle import CarModel, AutoCheckModel, FeeModel, RecommendationStatus
-from models.admin import ROIModel
-from db.session import POSTGRESQL_DATABASE_URL
+from core.celery_config import app
 from core.config import settings
+from db.session import POSTGRESQL_DATABASE_URL
+from models.admin import ROIModel
+from models.vehicle import AutoCheckModel, CarModel, FeeModel, RecommendationStatus
 from storages import S3StorageClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -106,7 +106,12 @@ async def _parse_and_update_car_async(
 
             html_data = data.get("html_data", None)
 
-            query = select(CarModel).where(CarModel.vin == vin).options(selectinload(CarModel.condition_assessments)).with_for_update()
+            query = (
+                select(CarModel)
+                .where(CarModel.vin == vin)
+                .options(selectinload(CarModel.condition_assessments))
+                .with_for_update()
+            )
             result = await db.execute(query)
             car = result.scalars().first()
             if not car:
@@ -127,7 +132,7 @@ async def _parse_and_update_car_async(
                 car.has_correct_accidents = False
             else:
                 car.has_correct_accidents = True
-                
+
             # car.recommendation_status = (
             #     RecommendationStatus.RECOMMENDED
             #     if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
@@ -180,7 +185,6 @@ async def _parse_and_update_car_async(
             car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
-
 
             if html_data:
                 s3_storage = S3StorageClient(
@@ -254,7 +258,11 @@ async def _update_car_bids_async():
                         if car.suggested_bid and car.current_bid > car.suggested_bid:
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                             car.predicted_total_investments = car.sum_of_investments + car.current_bid
-                            car.predicted_roi = (car.avg_market_price - car.predicted_total_investments) / car.predicted_total_investments * 100
+                            car.predicted_roi = (
+                                (car.avg_market_price - car.predicted_total_investments)
+                                / car.predicted_total_investments
+                                * 100
+                            )
                             car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
                             if not car.recommendation_status_reasons:
                                 car.recommendation_status_reasons = "suggested bid < current bid;"

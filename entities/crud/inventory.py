@@ -1,32 +1,34 @@
-from datetime import datetime
 import logging
 import logging.handlers
 import os
-from utils import update_inventory_financials
+from datetime import datetime
+
+from sqlalchemy import desc
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from sqlalchemy import desc
 from sqlalchemy.orm import selectinload
+
+from core.config import settings
+from core.dependencies import get_s3_storage_client
+from models.user import UserModel
 from models.vehicle import (
-    CarInventoryModel,
     CarInventoryInvestmentsModel,
+    CarInventoryModel,
     CarInventoryStatus,
-    PartInventoryModel,
     HistoryModel,
     InvoiceModel,
+    PartInventoryModel,
 )
-from core.config import settings
-from models.user import UserModel
-from core.dependencies import get_s3_storage_client
 from schemas.inventory import (
     CarInventoryCreate,
-    CarInventoryUpdate,
     CarInventoryInvestmentsCreate,
     CarInventoryInvestmentsUpdate,
+    CarInventoryUpdate,
     PartInventoryCreate,
-    PartInventoryUpdate,
     PartInventoryStatusUpdate,
+    PartInventoryUpdate,
 )
+from utils import update_inventory_financials
 
 # Configure logging for production environment
 logger = logging.getLogger("inventory_crud")
