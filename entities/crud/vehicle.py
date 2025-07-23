@@ -282,9 +282,9 @@ async def get_filtered_vehicles(
         issue_filters = ConditionAssessmentModel.issue_description.in_(filters["condition_assessments"])
         base_query = base_query.filter(issue_filters)
 
-    # Location filter via zip_search
+    # Location filter via zip_search (optimized SQL-based filtering)
     if filters.get("zip_search"):
-        logger.info(f"ZIP SEARCH DATA {filters.get("zip_search")}")
+        logger.info(f"ZIP SEARCH DATA {filters.get('zip_search')}")
 
         zip_code, radius = filters["zip_search"]
         zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == zip_code))
@@ -293,7 +293,15 @@ async def get_filtered_vehicles(
         if zip_data:
             logger.info(f"Find ZIP {zip_data.city}")
             lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
-            zip_rows = await db.execute(select(USZipModel))
+            approx_range_deg = radius / 111  # approx degrees
+
+            # Only get ZIPs roughly within a bounding box
+            zip_rows = await db.execute(
+                select(USZipModel).where(
+                    USZipModel.lat.between(lat1 - approx_range_deg, lat1 + approx_range_deg),
+                    USZipModel.lng.between(lon1 - approx_range_deg, lon1 + approx_range_deg)
+                )
+            )
             zips = zip_rows.scalars().all()
 
             nearby_locations = set()
@@ -309,6 +317,7 @@ async def get_filtered_vehicles(
                         nearby_locations.add(z.copart_name.lower())
                     if z.iaai_name:
                         nearby_locations.add(z.iaai_name.lower())
+
             if nearby_locations:
                 base_query = base_query.filter(apply_str_in_filter(CarModel.location, nearby_locations))
                 logger.info(f"Nearby locations ----> {nearby_locations}")
@@ -430,6 +439,7 @@ async def get_filtered_vehicles(
         vehicles_with_liked.append(car)
 
     return vehicles_with_liked, total_count, total_pages, bids_info
+
 
 
 async def get_bidding_hub_vehicles(
