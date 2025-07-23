@@ -1,13 +1,14 @@
 import logging
 import sys
 from datetime import datetime
-from typing import Literal, Optional
+from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import text
+from sqlalchemy import text, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
+from models import CarModel
 
 # Configure logging with enhanced debugging (коментуємо логування в файл)
 logger = logging.getLogger("admin_router")
@@ -55,128 +56,130 @@ def normalize_date_param(val: Optional[str]) -> Optional[datetime]:
         return None
 
 
-@router.get(
-    "/recommended-cars",
-    description="""
-Returns a list of recommended cars with status 'RECOMMENDED' that match the provided filters.
-...
-""",
-)
-async def get_recommended_cars(
-    db: AsyncSession = Depends(get_db),
-    mileage_start: Optional[int] = Query(None, description="Minimum mileage"),
-    mileage_end: Optional[int] = Query(None, description="Maximum mileage"),
-    owners_start: Optional[int] = Query(None, description="Minimum number of owners"),
-    owners_end: Optional[int] = Query(None, description="Maximum number of owners"),
-    accident_start: Optional[int] = Query(None, description="Minimum accident count"),
-    accident_end: Optional[int] = Query(None, description="Maximum accident count"),
-    year_start: Optional[int] = Query(None, description="Minimum year"),
-    year_end: Optional[int] = Query(None, description="Maximum year"),
-    vehicle_condition: Optional[str] = Query(None, description="Comma-separated vehicle conditions"),
-    vehicle_types: Optional[str] = Query(None, description="Comma-separated vehicle types"),
-    make: Optional[str] = Query(None, description="Car make"),
-    model: Optional[str] = Query(None, description="Car model"),
-    predicted_roi_start: Optional[float] = Query(None, description="Minimum predicted ROI"),
-    predicted_roi_end: Optional[float] = Query(None, description="Maximum predicted ROI"),
-    predicted_profit_margin_start: Optional[float] = Query(None, description="Minimum predicted profit margin"),
-    predicted_profit_margin_end: Optional[float] = Query(None, description="Maximum predicted profit margin"),
-    engine_type: Optional[str] = Query(None, description="Comma-separated engine types"),
-    transmission: Optional[str] = Query(None, description="Comma-separated transmissions"),
-    drive_train: Optional[str] = Query(None, description="Comma-separated drive trains"),
-    cylinder: Optional[str] = Query(None, description="Comma-separated cylinder counts"),
-    auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
-    body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
+@router.get("/recommended-cars")
+async def get_filtered_cars(
+    mileage_start: Optional[int] = Query(None),
+    mileage_end: Optional[int] = Query(None),
+    owners_start: Optional[int] = Query(None),
+    owners_end: Optional[int] = Query(None),
+    accident_start: Optional[int] = Query(None),
+    accident_end: Optional[int] = Query(None),
+    year_start: Optional[int] = Query(None),
+    year_end: Optional[int] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    engine: Optional[str] = Query(None),
+    transmision: Optional[str] = Query(None),
+    drive_type: Optional[str] = Query(None),
+    engine_cylinder: Optional[str] = Query(None),
+    vehicle_type: Optional[str] = Query(None),
+    body_style: Optional[str] = Query(None),
+    auction_name: Optional[str] = Query(None),
+    recommendation_status: Optional[str] = Query(None),
+    predicted_roi_min: Optional[float] = Query(None),
+    predicted_roi_max: Optional[float] = Query(None),
+    predicted_profit_margin_min: Optional[float] = Query(None),
+    predicted_profit_margin_max: Optional[float] = Query(None),
+    session: AsyncSession = Depends(get_db),
 ):
-    # logger.debug("Received request for /recommended-cars with params: mileage_start=%s, mileage_end=%s, ...", mileage_start, mileage_end)
-    params = [
-        mileage_start,
-        mileage_end,
-        owners_start,
-        owners_end,
-        accident_start,
-        accident_end,
-        year_start,
-        year_end,
-        make,
-        model,
-        predicted_roi_start,
-        predicted_roi_end,
-        predicted_profit_margin_start,
-        predicted_profit_margin_end,
-        normalize_csv_param(vehicle_condition),
-        normalize_csv_param(vehicle_types),
-        normalize_csv_param(engine_type),
-        normalize_csv_param(transmission),
-        normalize_csv_param(drive_train),
-        normalize_csv_param(cylinder),
-        normalize_csv_param(auction_names),
-        normalize_csv_param(body_style),
-    ]
-    # logger.debug("Prepared params for query: %s", params)
+    filters = []
 
-    query = text(
-        """
-        WITH us_states AS (
-            SELECT unnest(ARRAY[
-                'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN','IA','KS','KY','LA',
-                'ME','MD','MA','MI','MN','MS','MO','MT','NE','NV','NH','NJ','NM','NY','NC','ND','OH','OK',
-                'OR','PA','RI','SC','SD','TN','TX','UT','VT','VA','WA','WV','WI','WY'
-            ]) AS code
-        ),
-        locations_with_state AS (
-            SELECT
-                cars.*,
-                CASE
-                    WHEN location ~ E'\\([A-Z]{2}\\)' THEN REGEXP_REPLACE(location, E'.*\\(([A-Z]{2})\\).*', E'\\1')
-                    WHEN location ~ E'^[A-Z]{2}\\s*-' THEN LEFT(location, 2)
-                    ELSE NULL
-                END AS state_code
-            FROM cars
-        )
-        SELECT
-            vehicle,
-            vin,
-            COALESCE(owners, 0) AS owners,
-            COALESCE(accident_count, 0) AS accident,
-            CONCAT(mileage, ' MI') AS odometer,
-            CONCAT(engine, ' L') AS engine,
-            CASE WHEN has_keys THEN 'Yes' ELSE 'No' END AS keys,
-            auction AS source,
-            lot,
-            COALESCE(seller, '-') AS seller,
-            location,
-            COALESCE(date::text, '-') AS auction_date,
-            current_bid
-        FROM locations_with_state l
-        JOIN us_states s ON l.state_code = s.code
-        JOIN condition_assessments ca ON l.id = ca.car_id
-        WHERE recommendation_status = 'RECOMMENDED'
-          AND date >= CURRENT_DATE
-          AND seller IS NOT NULL
-          AND (COALESCE($1, -1) IS NULL OR COALESCE($2, 99999999) IS NULL OR mileage BETWEEN COALESCE($1, 0) AND COALESCE($2, 99999999))
-          AND (COALESCE($3, -1) IS NULL OR COALESCE($4, 999) IS NULL OR owners BETWEEN COALESCE($3, 0) AND COALESCE($4, 999))
-          AND (COALESCE($5, -1) IS NULL OR COALESCE($6, 999) IS NULL OR accident_count BETWEEN COALESCE($5, 0) AND COALESCE($6, 999))
-          AND (COALESCE($7, 1900) IS NULL OR COALESCE($8, 2100) IS NULL OR year BETWEEN COALESCE($7, 1900) AND COALESCE($8, 2100))
-          AND (array_length($15::TEXT[], 1) = 0 OR ca.issue_description = ANY($15::TEXT[]))
-          AND (array_length($16::TEXT[], 1) = 0 OR vehicle_type = ANY($16::TEXT[]))
-          AND ($9 IS NULL OR make = $9)
-          AND ($10 IS NULL OR model = $10)
-          AND (COALESCE($11, -100.0) IS NULL OR COALESCE($12, 1000.0) IS NULL OR predicted_roi BETWEEN COALESCE($11, -100.0) AND COALESCE($12, 1000.0))
-          AND (COALESCE($13, -100.0) IS NULL OR COALESCE($14, 1000.0) IS NULL OR predicted_profit_margin BETWEEN COALESCE($13, -100.0) AND COALESCE($14, 1000.0))
-          AND (array_length($17::TEXT[], 1) = 0 OR engine = ANY($17::TEXT[]))
-          AND (array_length($18::TEXT[], 1) = 0 OR transmission = ANY($18::TEXT[]))
-          AND (array_length($19::TEXT[], 1) = 0 OR drive_train = ANY($19::TEXT[]))
-          AND (array_length($20::TEXT[], 1) = 0 OR engine_cylinder = ANY($20::TEXT[]))
-          AND (array_length($21::TEXT[], 1) = 0 OR auction_name = ANY($21::TEXT[]))
-          AND (array_length($22::TEXT[], 1) = 0 OR body_style = ANY($22::TEXT[]))
-        LIMIT 50;
-    """
+    if mileage_start is not None:
+        filters.append(CarModel.mileage >= mileage_start)
+    if mileage_end is not None:
+        filters.append(CarModel.mileage <= mileage_end)
+
+    if owners_start is not None:
+        filters.append(CarModel.owners >= owners_start)
+    if owners_end is not None:
+        filters.append(CarModel.owners <= owners_end)
+
+    if accident_start is not None:
+        filters.append(CarModel.accident_count >= accident_start)
+    if accident_end is not None:
+        filters.append(CarModel.accident_count <= accident_end)
+
+    if year_start is not None:
+        filters.append(CarModel.year >= year_start)
+    if year_end is not None:
+        filters.append(CarModel.year <= year_end)
+
+    if make is not None:
+        filters.append(CarModel.make.ilike(f"%{make}%"))
+    if model is not None:
+        filters.append(CarModel.model.ilike(f"%{model}%"))
+    if engine is not None:
+        filters.append(CarModel.engine.ilike(f"%{engine}%"))
+    if transmision is not None:
+        filters.append(CarModel.transmision.ilike(f"%{transmision}%"))
+    if drive_type is not None:
+        filters.append(CarModel.drive_type.ilike(f"%{drive_type}%"))
+    if engine_cylinder is not None:
+        filters.append(CarModel.engine_cylinder.ilike(f"%{engine_cylinder}%"))
+    if vehicle_type is not None:
+        filters.append(CarModel.vehicle_type.ilike(f"%{vehicle_type}%"))
+    if body_style is not None:
+        filters.append(CarModel.body_style.ilike(f"%{body_style}%"))
+    if auction_name is not None:
+        filters.append(CarModel.auction_name.ilike(f"%{auction_name}%"))
+    if recommendation_status is not None:
+        filters.append(CarModel.recommendation_status == recommendation_status)
+
+    if predicted_roi_min is not None:
+        filters.append(CarModel.predicted_roi >= predicted_roi_min)
+    if predicted_roi_max is not None:
+        filters.append(CarModel.predicted_roi <= predicted_roi_max)
+
+    if predicted_profit_margin_min is not None:
+        filters.append(CarModel.predicted_profit_margin >= predicted_profit_margin_min)
+    if predicted_profit_margin_max is not None:
+        filters.append(CarModel.predicted_profit_margin <= predicted_profit_margin_max)
+
+    stmt = select(
+        CarModel.vehicle,
+        CarModel.vin,
+        CarModel.owners,
+        CarModel.accident_count,
+        CarModel.mileage,
+        CarModel.engine,
+        CarModel.has_keys,
+        CarModel.auction_name,
+        CarModel.lot,
+        CarModel.seller,
+        CarModel.location,
+        CarModel.date,
+        CarModel.current_bid
     )
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    stmt = stmt.limit(20)
 
-    # logger.debug("Executing query for /recommended-cars with params: %s", params)
-    result = await db.execute(query, params)
-    # logger.debug("Query executed successfully")
-    return [dict(row) for row in result.fetchall()]
+    result = await session.execute(stmt)
+    cars = result.fetchall()
+
+    car_list = [
+        {
+            "vehicle": row[0],
+            "vin": row[1],
+            "number_of_owners": row[2],
+            "accident_count": row[3],
+            "mileage": row[4],
+            "engine": row[5],
+            "has_keys": row[6],
+            "auction_name": row[7],
+            "lot": row[8],
+            "seller": row[9],
+            "location": row[10],
+            "date": row[11],
+            "current_bid": row[12]
+        }
+        for row in cars
+    ]
+
+    if filters and not car_list:
+        raise HTTPException(status_code=404, detail="No cars found with specified filters")
+
+    return car_list
 
 
 @router.get(
