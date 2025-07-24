@@ -284,6 +284,7 @@ async def get_filtered_vehicles(
         zip_code, radius = filters["zip_search"]
         zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == zip_code))
         zip_data = zip_row.scalar_one_or_none()
+        logger.info(f"ZIP ----> {zip_data.copart_name} {zip_data.iaai_name}")
 
         if not zip_data:
             raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
@@ -304,8 +305,11 @@ async def get_filtered_vehicles(
             .where(distance_expr <= bindparam("radius"))
         ).params(lat1=lat1, lon1=lon1, radius=radius)
 
+
+
         zip_result = await db.execute(zip_subq)
         zip_names = set()
+
         for copart, iaai in zip_result.all():
             if copart:
                 zip_names.add(copart.lower())
@@ -316,7 +320,7 @@ async def get_filtered_vehicles(
             base_query = base_query.filter(apply_str_in_filter(CarModel.location, zip_names))
         else:
             base_query = base_query.filter(False)
-
+        logger.debug(f"Nearby location -----> {zip_names}")
     # String filters
     for field_name, column in {
         "make": CarModel.make,
