@@ -14,7 +14,7 @@ from core.dependencies import get_current_user
 from crud.vehicle import get_bidding_hub_vehicles, get_vehicle_by_id, update_vehicle_status
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import CarStatus, HistoryModel
+from models.vehicle import CarStatus, HistoryModel, FeeModel
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
@@ -226,6 +226,27 @@ async def update_actual_bid(
         if not vehicle:
             logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+        
+        fees_result = await db.execute(
+            select(FeeModel).where(
+                FeeModel.auction == vehicle.auction,
+                FeeModel.price_from <= data.actual_bid,
+                FeeModel.price_to >= data.actual_bid,
+            )
+        )
+        fees = fees_result.scalars().all()
+
+        # Calculate auction_fee considering percentage-based fees
+        vehicle.auction_fee = 0
+        for fee in fees:
+            if fee.percent:
+                # Calculate percentage-based fee
+                vehicle.auction_fee += (fee.amount / 100) * data.actual_bid
+            else:
+                # Add fixed fee
+                vehicle.auction_fee += fee.amount
+        
+        vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
 
         hub_history = HistoryModel(
             car_id=car_id,
