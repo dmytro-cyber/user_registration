@@ -1,10 +1,10 @@
 import logging
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, and_
+from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
@@ -144,7 +144,9 @@ async def get_filtered_cars(
         CarModel.seller,
         CarModel.location,
         CarModel.date,
-        CarModel.current_bid
+        CarModel.current_bid,
+        CarModel.id,
+        CarModel.auction
     )
     if filters:
         stmt = stmt.where(and_(*filters))
@@ -167,7 +169,9 @@ async def get_filtered_cars(
             "seller": row[9],
             "location": row[10],
             "date": row[11],
-            "current_bid": row[12]
+            "current_bid": row[12],
+            "id": row[13],
+            "auction": row[14]
         }
         for row in cars
     ]
@@ -181,107 +185,122 @@ async def get_filtered_cars(
 @router.get(
     "/top-sellers",
     summary="Top 10 sellers by sold lots",
-    description="""
-Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.
-...
-""",
+    description="Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.",
 )
 async def get_top_sellers(
-    state_codes: Optional[str] = Query(None, description="Comma-separated state codes, e.g., 'CA,TX'"),
-    cities: Optional[str] = Query(None, description="Comma-separated city names"),
-    auctions: Optional[str] = Query(None, description="Comma-separated auction names"),
-    mileage_start: Optional[int] = Query(None, description="Minimum mileage"),
-    mileage_end: Optional[int] = Query(None, description="Maximum mileage"),
-    owners_start: Optional[int] = Query(None, description="Minimum number of owners"),
-    owners_end: Optional[int] = Query(None, description="Maximum number of owners"),
-    accident_start: Optional[int] = Query(None, description="Minimum accident count"),
-    accident_end: Optional[int] = Query(None, description="Maximum accident count"),
-    year_start: Optional[int] = Query(None, description="Minimum year"),
-    year_end: Optional[int] = Query(None, description="Maximum year"),
-    vehicle_condition: Optional[str] = Query(None, description="Comma-separated vehicle conditions"),
-    vehicle_types: Optional[str] = Query(None, description="Comma-separated vehicle types"),
-    make: Optional[str] = Query(None, description="Car make"),
-    model: Optional[str] = Query(None, description="Car model"),
-    predicted_roi_start: Optional[float] = Query(None, description="Minimum predicted ROI"),
-    predicted_roi_end: Optional[float] = Query(None, description="Maximum predicted ROI"),
-    predicted_profit_margin_start: Optional[float] = Query(None, description="Minimum predicted profit margin"),
-    predicted_profit_margin_end: Optional[float] = Query(None, description="Maximum predicted profit margin"),
-    engine_type: Optional[str] = Query(None, description="Comma-separated engine types"),
-    transmission: Optional[str] = Query(None, description="Comma-separated transmissions"),
-    drive_train: Optional[str] = Query(None, description="Comma-separated drive trains"),
-    cylinder: Optional[str] = Query(None, description="Comma-separated cylinder counts"),
-    auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
-    body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
-    sale_start: Optional[str] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
-    sale_end: Optional[str] = Query(None, description="End date for sales (YYYY-MM-DD)"),
+    state_codes: Optional[str] = Query(None),
+    cities: Optional[str] = Query(None),
+    auctions: Optional[str] = Query(None),
+    mileage_start: Optional[int] = Query(None),
+    mileage_end: Optional[int] = Query(None),
+    owners_start: Optional[int] = Query(None),
+    owners_end: Optional[int] = Query(None),
+    accident_start: Optional[int] = Query(None),
+    accident_end: Optional[int] = Query(None),
+    year_start: Optional[int] = Query(None),
+    year_end: Optional[int] = Query(None),
+    vehicle_condition: Optional[str] = Query(None),
+    vehicle_types: Optional[str] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    predicted_roi_start: Optional[float] = Query(None),
+    predicted_roi_end: Optional[float] = Query(None),
+    predicted_profit_margin_start: Optional[float] = Query(None),
+    predicted_profit_margin_end: Optional[float] = Query(None),
+    engine_type: Optional[str] = Query(None),
+    transmission: Optional[str] = Query(None),
+    drive_train: Optional[str] = Query(None),
+    cylinder: Optional[str] = Query(None),
+    auction_names: Optional[str] = Query(None),
+    body_style: Optional[str] = Query(None),
+    sale_start: Optional[str] = Query(None),
+    sale_end: Optional[str] = Query(None),
     session: AsyncSession = Depends(get_db),
 ):
-    state_codes_list = normalize_csv_param(state_codes)
-    cities_list = normalize_csv_param(cities)
-    auctions_list = normalize_csv_param(auctions)
-    vehicle_condition_list = normalize_csv_param(vehicle_condition)
-    vehicle_types_list = normalize_csv_param(vehicle_types)
-    engine_type_list = normalize_csv_param(engine_type)
-    transmission_list = normalize_csv_param(transmission)
-    drive_train_list = normalize_csv_param(drive_train)
-    cylinder_list = normalize_csv_param(cylinder)
-    auction_names_list = normalize_csv_param(auction_names)
-    body_style_list = normalize_csv_param(body_style)
-    sale_start_date = normalize_date_param(sale_start)
-    sale_end_date = normalize_date_param(sale_end)
-
+    # Нормалізація параметрів
     filters = []
 
+    state_codes_list = normalize_csv_param(state_codes)
     if state_codes_list:
-        filters.append(CarModel.location.ilike(f"%({','.join(state_codes_list)})%"))
+        filters.append(CarModel.location.in_(state_codes_list))
+
+    cities_list = normalize_csv_param(cities)
     if cities_list:
-        filters.append(CarModel.location.ilike(f"%{','.join(cities_list)}%"))
+        filters.append(CarModel.city.in_(cities_list))
+
+    auctions_list = normalize_csv_param(auctions)
     if auctions_list:
         filters.append(CarModel.auction.in_(auctions_list))
+
     if mileage_start is not None:
         filters.append(CarModel.mileage >= mileage_start)
     if mileage_end is not None:
         filters.append(CarModel.mileage <= mileage_end)
+
     if owners_start is not None:
         filters.append(CarModel.owners >= owners_start)
     if owners_end is not None:
         filters.append(CarModel.owners <= owners_end)
+
     if accident_start is not None:
         filters.append(CarModel.accident_count >= accident_start)
     if accident_end is not None:
         filters.append(CarModel.accident_count <= accident_end)
+
     if year_start is not None:
         filters.append(CarModel.year >= year_start)
     if year_end is not None:
         filters.append(CarModel.year <= year_end)
+
+    vehicle_condition_list = normalize_csv_param(vehicle_condition)
     if vehicle_condition_list:
         filters.append(ConditionAssessmentModel.issue_description.in_(vehicle_condition_list))
+
+    vehicle_types_list = normalize_csv_param(vehicle_types)
     if vehicle_types_list:
         filters.append(CarModel.vehicle_type.in_(vehicle_types_list))
-    if make is not None:
+
+    if make:
         filters.append(CarModel.make.ilike(f"%{make}%"))
-    if model is not None:
+    if model:
         filters.append(CarModel.model.ilike(f"%{model}%"))
+
     if predicted_roi_start is not None:
         filters.append(CarModel.predicted_roi >= predicted_roi_start)
     if predicted_roi_end is not None:
         filters.append(CarModel.predicted_roi <= predicted_roi_end)
+
     if predicted_profit_margin_start is not None:
         filters.append(CarModel.predicted_profit_margin >= predicted_profit_margin_start)
     if predicted_profit_margin_end is not None:
         filters.append(CarModel.predicted_profit_margin <= predicted_profit_margin_end)
+
+    engine_type_list = normalize_csv_param(engine_type)
     if engine_type_list:
         filters.append(CarModel.engine.in_(engine_type_list))
+
+    transmission_list = normalize_csv_param(transmission)
     if transmission_list:
         filters.append(CarModel.transmision.in_(transmission_list))
+
+    drive_train_list = normalize_csv_param(drive_train)
     if drive_train_list:
         filters.append(CarModel.drive_type.in_(drive_train_list))
+
+    cylinder_list = normalize_csv_param(cylinder)
     if cylinder_list:
         filters.append(CarModel.engine_cylinder.in_(cylinder_list))
+
+    auction_names_list = normalize_csv_param(auction_names)
     if auction_names_list:
         filters.append(CarModel.auction_name.in_(auction_names_list))
+
+    body_style_list = normalize_csv_param(body_style)
     if body_style_list:
         filters.append(CarModel.body_style.in_(body_style_list))
+
+    sale_start_date = normalize_date_param(sale_start)
+    sale_end_date = normalize_date_param(sale_end)
     if sale_start_date and sale_end_date:
         filters.append(CarSaleHistoryModel.date.between(sale_start_date, sale_end_date))
     elif sale_start_date:
@@ -289,25 +308,32 @@ async def get_top_sellers(
     elif sale_end_date:
         filters.append(CarSaleHistoryModel.date <= sale_end_date)
 
+    # Основний запит
     stmt = (
-        select(CarModel.seller.label("Seller Name"), select([CarSaleHistoryModel]).where(CarSaleHistoryModel.car_id == CarModel.id).exists().label("Lots"))
+        select(
+            CarModel.seller.label("Seller Name"),
+            func.count(CarSaleHistoryModel.id).label("Lots")
+        )
         .join(CarSaleHistoryModel, CarModel.id == CarSaleHistoryModel.car_id)
-        .join(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
-        .where(CarSaleHistoryModel.status == "Sold", CarSaleHistoryModel.final_bid.isnot(None))
+        .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
+        .where(
+            CarSaleHistoryModel.status == "Sold",
+            CarSaleHistoryModel.final_bid.isnot(None),
+            *filters
+        )
+        .group_by(CarModel.seller)
+        .order_by(func.count(CarSaleHistoryModel.id).desc())
+        .limit(10)
     )
-    if filters:
-        stmt = stmt.where(and_(*filters))
-    stmt = stmt.group_by(CarModel.seller).order_by(select([CarSaleHistoryModel]).where(CarSaleHistoryModel.car_id == CarModel.id).exists().desc()).limit(10)
 
     result = await session.execute(stmt)
     sellers = result.fetchall()
 
-    seller_list = [{"Seller Name": row[0], "Lots": row[1]} for row in sellers]
-
-    if filters and not seller_list:
+    if filters and not sellers:
         raise HTTPException(status_code=404, detail="No sellers found with specified filters")
 
-    return seller_list
+    return [{"Seller Name": row[0], "Lots": row[1]} for row in sellers]
+
 
 
 @router.get(
@@ -316,65 +342,71 @@ async def get_top_sellers(
     tags=["Analytics"],
     description="""
 Returns the average final bid prices grouped by the specified time interval (day, week, or month) over a given period.
-...
 """,
 )
 async def get_avg_sale_prices(
-    interval_unit: Literal["day", "week", "month"] = Query(
-        "week", description="Time grouping unit (day, week, month)"
-    ),
-    interval_amount: int = Query(12, description="Number of intervals to look back"),
-    reference_date: Optional[datetime] = Query(None, description="End date of interval (default: today)"),
-    state_codes: Optional[str] = Query(None, description="Comma-separated state codes, e.g., 'CA,TX'"),
-    cities: Optional[str] = Query(None, description="Comma-separated city names"),
-    auctions: Optional[str] = Query(None, description="Comma-separated auction names"),
-    mileage_start: Optional[int] = Query(None, description="Minimum mileage"),
-    mileage_end: Optional[int] = Query(None, description="Maximum mileage"),
-    owners_start: Optional[int] = Query(None, description="Minimum number of owners"),
-    owners_end: Optional[int] = Query(None, description="Maximum number of owners"),
-    accident_start: Optional[int] = Query(None, description="Minimum accident count"),
-    accident_end: Optional[int] = Query(None, description="Maximum accident count"),
-    year_start: Optional[int] = Query(None, description="Minimum year"),
-    year_end: Optional[int] = Query(None, description="Maximum year"),
-    vehicle_condition: Optional[str] = Query(None, description="Comma-separated vehicle conditions"),
-    vehicle_types: Optional[str] = Query(None, description="Comma-separated vehicle types"),
-    make: Optional[str] = Query(None, description="Car make"),
-    model: Optional[str] = Query(None, description="Car model"),
-    predicted_roi_start: Optional[float] = Query(None, description="Minimum predicted ROI"),
-    predicted_roi_end: Optional[float] = Query(None, description="Maximum predicted ROI"),
-    predicted_profit_margin_start: Optional[float] = Query(None, description="Minimum predicted profit margin"),
-    predicted_profit_margin_end: Optional[float] = Query(None, description="Maximum predicted profit margin"),
-    engine_type: Optional[str] = Query(None, description="Comma-separated engine types"),
-    transmission: Optional[str] = Query(None, description="Comma-separated transmissions"),
-    drive_train: Optional[str] = Query(None, description="Comma-separated drive trains"),
-    cylinder: Optional[str] = Query(None, description="Comma-separated cylinder counts"),
-    auction_names: Optional[str] = Query(None, description="Comma-separated auction names"),
-    body_style: Optional[str] = Query(None, description="Comma-separated body styles"),
-    sale_start: Optional[datetime] = Query(None, description="Start date for sales (YYYY-MM-DD)"),
-    sale_end: Optional[datetime] = Query(None, description="End date for sales (YYYY-MM-DD)"),
+    interval_unit: Literal["day", "week", "month"] = Query("week"),
+    interval_amount: int = Query(12, ge=1),
+    reference_date: Optional[datetime] = Query(None),
+    state_codes: Optional[str] = Query(None),
+    cities: Optional[str] = Query(None),
+    auctions: Optional[str] = Query(None),
+    mileage_start: Optional[int] = Query(None),
+    mileage_end: Optional[int] = Query(None),
+    owners_start: Optional[int] = Query(None),
+    owners_end: Optional[int] = Query(None),
+    accident_start: Optional[int] = Query(None),
+    accident_end: Optional[int] = Query(None),
+    year_start: Optional[int] = Query(None),
+    year_end: Optional[int] = Query(None),
+    vehicle_condition: Optional[str] = Query(None),
+    vehicle_types: Optional[str] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    predicted_roi_start: Optional[float] = Query(None),
+    predicted_roi_end: Optional[float] = Query(None),
+    predicted_profit_margin_start: Optional[float] = Query(None),
+    predicted_profit_margin_end: Optional[float] = Query(None),
+    engine_type: Optional[str] = Query(None),
+    transmission: Optional[str] = Query(None),
+    drive_train: Optional[str] = Query(None),
+    cylinder: Optional[str] = Query(None),
+    auction_names: Optional[str] = Query(None),
+    body_style: Optional[str] = Query(None),
+    sale_start: Optional[datetime] = Query(None),
+    sale_end: Optional[datetime] = Query(None),
     session: AsyncSession = Depends(get_db),
 ):
-    state_codes_list = normalize_csv_param(state_codes)
-    cities_list = normalize_csv_param(cities)
-    auctions_list = normalize_csv_param(auctions)
-    vehicle_condition_list = normalize_csv_param(vehicle_condition)
-    vehicle_types_list = normalize_csv_param(vehicle_types)
-    engine_type_list = normalize_csv_param(engine_type)
-    transmission_list = normalize_csv_param(transmission)
-    drive_train_list = normalize_csv_param(drive_train)
-    cylinder_list = normalize_csv_param(cylinder)
-    auction_names_list = normalize_csv_param(auction_names)
-    body_style_list = normalize_csv_param(body_style)
+    # Normalize parameters
+    def csv(param: Optional[str]) -> Optional[list[str]]:
+        return [x.strip() for x in param.split(",") if x.strip()] if param else None
+
+    state_codes_list = csv(state_codes)
+    cities_list = csv(cities)
+    auctions_list = csv(auctions)
+    vehicle_condition_list = csv(vehicle_condition)
+    vehicle_types_list = csv(vehicle_types)
+    engine_type_list = csv(engine_type)
+    transmission_list = csv(transmission)
+    drive_train_list = csv(drive_train)
+    cylinder_list = csv(cylinder)
+    auction_names_list = csv(auction_names)
+    body_style_list = csv(body_style)
 
     ref_date = reference_date or datetime.utcnow()
-    start_date = ref_date - interval_amount * {"day": 1, "week": 7, "month": 30}[interval_unit]
+    start_date = ref_date - timedelta(days=interval_amount * {"day": 1, "week": 7, "month": 30}[interval_unit])
 
-    filters = []
+    filters = [
+        CarSaleHistoryModel.status == "Sold",
+        CarSaleHistoryModel.final_bid.isnot(None),
+        CarSaleHistoryModel.date >= start_date,
+        CarSaleHistoryModel.date <= ref_date,
+    ]
 
     if state_codes_list:
-        filters.append(CarModel.location.ilike(f"%({','.join(state_codes_list)})%"))
+        filters.append(CarModel.location.op("~")(f'({"|".join(state_codes_list)})'))
     if cities_list:
-        filters.append(CarModel.location.ilike(f"%{','.join(cities_list)}%"))
+        filters.append(CarModel.location.op("~")(f'({"|".join(cities_list)})'))
     if auctions_list:
         filters.append(CarModel.auction.in_(auctions_list))
     if mileage_start is not None:
@@ -397,9 +429,9 @@ async def get_avg_sale_prices(
         filters.append(ConditionAssessmentModel.issue_description.in_(vehicle_condition_list))
     if vehicle_types_list:
         filters.append(CarModel.vehicle_type.in_(vehicle_types_list))
-    if make is not None:
+    if make:
         filters.append(CarModel.make.ilike(f"%{make}%"))
-    if model is not None:
+    if model:
         filters.append(CarModel.model.ilike(f"%{model}%"))
     if predicted_roi_start is not None:
         filters.append(CarModel.predicted_roi >= predicted_roi_start)
@@ -428,30 +460,33 @@ async def get_avg_sale_prices(
     elif sale_end:
         filters.append(CarSaleHistoryModel.date <= sale_end)
 
+    # Group by interval (day/week/month)
+    interval_expr = func.date_trunc(interval_unit, CarSaleHistoryModel.date).label("period")
+
     stmt = (
         select(
-            getattr(CarSaleHistoryModel.date, f"{interval_unit}s")().label("period"),
-            select([CarSaleHistoryModel.final_bid]).where(CarSaleHistoryModel.car_id == CarModel.id).avg().label("avg_price")
+            interval_expr,
+            func.avg(CarSaleHistoryModel.final_bid).label("avg_price")
         )
         .join(CarModel, CarSaleHistoryModel.car_id == CarModel.id)
-        .join(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
-        .where(
-            CarSaleHistoryModel.status == "Sold",
-            CarSaleHistoryModel.final_bid.isnot(None),
-            CarSaleHistoryModel.date >= start_date,
-            CarSaleHistoryModel.date < ref_date
-        )
+        .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
+        .where(and_(*filters))
+        .group_by(interval_expr)
+        .order_by(interval_expr)
     )
-    if filters:
-        stmt = stmt.where(and_(*filters))
-    stmt = stmt.group_by(getattr(CarSaleHistoryModel.date, f"{interval_unit}s")()).order_by("period")
 
     result = await session.execute(stmt)
-    prices = result.fetchall()
+    rows = result.fetchall()
 
-    price_list = [{"period": row[0].isoformat(), "avg_price": float(row[1]) if row[1] else 0.0} for row in prices]
+    data = [
+        {
+            "period": row.period.date().isoformat(),
+            "avg_price": float(row.avg_price) if row.avg_price else 0.0
+        }
+        for row in rows
+    ]
 
-    if filters and not price_list:
+    if filters and not data:
         raise HTTPException(status_code=404, detail="No sale prices found with specified filters")
 
-    return price_list
+    return data
