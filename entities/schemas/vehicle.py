@@ -297,7 +297,7 @@ class BiddingHubHistoryListResponseSchema(BaseModel):
 class CarFilterOptionsSchema(BaseModel):
     auctions: List[str] | None = []
     auction_names: List[str] | None = []
-    makes: List[str] | None = []
+    makes_and_models: Dict[str, list] | None = []
     models: List[str] | None = []
     condition_assesstments: List[str] | None = None
     years: Dict[str, int] | None = []

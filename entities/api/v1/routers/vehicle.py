@@ -2,6 +2,7 @@ import asyncio
 import logging
 import logging.handlers
 import os
+from collections import defaultdict
 from datetime import date
 from typing import Dict, List, Optional
 
@@ -173,15 +174,20 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
             auction_names_result = await db.execute(auction_name_query)
             auction_names = [row[0] for row in auction_names_result.fetchall()]
 
-            # Fetch unique make values
-            make_query = select(distinct(CarModel.make)).where(CarModel.make.isnot(None))
-            makes_result = await db.execute(make_query)
-            makes = [row[0] for row in makes_result.fetchall()]
+            query = (
+                select(CarModel.make, CarModel.model)
+                .where(CarModel.make.isnot(None), CarModel.model.isnot(None))
+                .distinct()
+            )
 
-            # Fetch unique model values
-            model_query = select(distinct(CarModel.model)).where(CarModel.model.isnot(None))
-            models_result = await db.execute(model_query)
-            models = [row[0] for row in models_result.fetchall()]
+            result = await db.execute(query)
+            rows = result.fetchall()
+
+            make_model_map = defaultdict(list)
+            for make, model in rows:
+                make_model_map[make].append(model)
+
+            make_model_map = dict(make_model_map)
 
             # Fetch unique transmission values
             transmission_query = select(distinct(CarModel.transmision)).where(CarModel.transmision.isnot(None))
@@ -261,8 +267,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
         response = CarFilterOptionsSchema(
             auctions=auctions,
             auction_names=auction_names,
-            makes=makes,
-            models=models,
+            makes_and_models=make_model_map,
             locations=locations,
             years=year_range,
             mileage_range=mileage_range,
