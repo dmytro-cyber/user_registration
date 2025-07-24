@@ -459,23 +459,23 @@ async def get_bidding_hub_vehicles(
             .options(selectinload(CarModel.bidding_hub_history).selectinload(HistoryModel.user))
         )
 
-        if current_user.has_role(UserRoleEnum.ADMIN):
-            query = query.filter(
-                ~CarModel.car_status.in_(
-                    [
-                        CarStatus.NEW,
-                    ]
-                )
+        # if current_user.has_role(UserRoleEnum.ADMIN):
+        #     query = query.filter(
+        #         ~CarModel.car_status.in_(
+        #             [
+        #                 CarStatus.NEW,
+        #             ]
+        #         )
+        #     )
+        # else:
+        query = query.filter(
+            ~CarModel.car_status.in_(
+                [
+                    CarStatus.NEW,
+                    CarStatus.DELETED_FROM_BIDDING_HUB,
+                ]
             )
-        else:
-            query = query.filter(
-                ~CarModel.car_status.in_(
-                    [
-                        CarStatus.NEW,
-                        CarStatus.DELETED_FROM_BIDDING_HUB,
-                    ]
-                )
-            )
+        )
 
         if sort_by == "user":
             query = query.join(UserModel, UserModel.id == subquery.c.user_id)
