@@ -1,14 +1,14 @@
 import logging
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time, timezone
 from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, and_, func
+from sqlalchemy import select, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db.session import get_db
-from models import CarModel, CarSaleHistoryModel, ConditionAssessmentModel
+from models import CarModel, CarSaleHistoryModel, ConditionAssessmentModel, USZipModel
 
 # Configure logging with enhanced debugging
 logger = logging.getLogger("admin_router")
@@ -79,6 +79,10 @@ async def get_filtered_cars(
     recommendation_status_list = normalize_csv_param(recommendation_status)
 
     filters = []
+    today = datetime.now(timezone.utc).date()
+    today_naive = datetime.combine(today, time.min)
+    
+    filters.append(CarModel.date >= today_naive)
 
     if mileage_start is not None:
         filters.append(CarModel.mileage >= mileage_start)
@@ -188,8 +192,7 @@ async def get_filtered_cars(
     description="Returns the top 10 sellers ranked by the number of sold lots, filtered by optional vehicle and sale criteria.",
 )
 async def get_top_sellers(
-    state_codes: Optional[str] = Query(None),
-    cities: Optional[str] = Query(None),
+    locations: Optional[str] = Query(None),
     auctions: Optional[str] = Query(None),
     mileage_start: Optional[int] = Query(None),
     mileage_end: Optional[int] = Query(None),
@@ -219,14 +222,28 @@ async def get_top_sellers(
 ):
     # Нормалізація параметрів
     filters = []
-
-    state_codes_list = normalize_csv_param(state_codes)
-    if state_codes_list:
-        filters.append(CarModel.location.in_(state_codes_list))
-
-    cities_list = normalize_csv_param(cities)
-    if cities_list:
-        filters.append(CarModel.city.in_(cities_list))
+    
+    locations_list = normalize_csv_param(locations)
+    if not locations_list:
+        query = (
+            select(USZipModel.copart_name, USZipModel.iaai_name)
+            .where(
+                or_(
+                    USZipModel.copart_name.isnot(None),
+                    USZipModel.iaai_name.isnot(None)
+                )
+            )
+            .distinct()
+        )
+        result = await session.execute(query)
+        locations_result = result.all()
+        locations_list = {
+            name.strip()
+            for copart, iaai in locations
+            for name in (copart, iaai)
+            if name and name.strip()
+        }
+    filters.append(CarModel.location.in_(locations_list))
 
     auctions_list = normalize_csv_param(auctions)
     if auctions_list:
@@ -287,7 +304,7 @@ async def get_top_sellers(
     if drive_train_list:
         filters.append(CarModel.drive_type.in_(drive_train_list))
 
-    cylinder_list = normalize_csv_param(cylinder)
+    cylinder_list = [int(value) for value in normalize_csv_param(cylinder)]
     if cylinder_list:
         filters.append(CarModel.engine_cylinder.in_(cylinder_list))
 
@@ -348,8 +365,7 @@ async def get_avg_sale_prices(
     interval_unit: Literal["day", "week", "month"] = Query("week"),
     interval_amount: int = Query(12, ge=1),
     reference_date: Optional[datetime] = Query(None),
-    state_codes: Optional[str] = Query(None),
-    cities: Optional[str] = Query(None),
+    locations: Optional[str] = Query(None),
     auctions: Optional[str] = Query(None),
     mileage_start: Optional[int] = Query(None),
     mileage_end: Optional[int] = Query(None),
@@ -381,17 +397,16 @@ async def get_avg_sale_prices(
     def csv(param: Optional[str]) -> Optional[list[str]]:
         return [x.strip() for x in param.split(",") if x.strip()] if param else None
 
-    state_codes_list = csv(state_codes)
-    cities_list = csv(cities)
-    auctions_list = csv(auctions)
-    vehicle_condition_list = csv(vehicle_condition)
-    vehicle_types_list = csv(vehicle_types)
-    engine_type_list = csv(engine_type)
-    transmission_list = csv(transmission)
-    drive_train_list = csv(drive_train)
-    cylinder_list = csv(cylinder)
-    auction_names_list = csv(auction_names)
-    body_style_list = csv(body_style)
+    location_list = normalize_csv_param(locations)
+    auctions_list = normalize_csv_param(auctions)
+    vehicle_condition_list = normalize_csv_param(vehicle_condition)
+    vehicle_types_list = normalize_csv_param(vehicle_types)
+    engine_type_list = normalize_csv_param(engine_type)
+    transmission_list = normalize_csv_param(transmission)
+    drive_train_list = normalize_csv_param(drive_train)
+    cylinder_list = [int(value) for value in normalize_csv_param(cylinder)]
+    auction_names_list = normalize_csv_param(auction_names)
+    body_style_list = normalize_csv_param(body_style)
 
     ref_date = reference_date or datetime.utcnow()
     start_date = ref_date - timedelta(days=interval_amount * {"day": 1, "week": 7, "month": 30}[interval_unit])
@@ -403,10 +418,8 @@ async def get_avg_sale_prices(
         CarSaleHistoryModel.date <= ref_date,
     ]
 
-    if state_codes_list:
-        filters.append(CarModel.location.op("~")(f'({"|".join(state_codes_list)})'))
-    if cities_list:
-        filters.append(CarModel.location.op("~")(f'({"|".join(cities_list)})'))
+    if location_list:
+        filters.append(CarModel.location.in_(location_list))
     if auctions_list:
         filters.append(CarModel.auction.in_(auctions_list))
     if mileage_start is not None:
@@ -490,3 +503,116 @@ async def get_avg_sale_prices(
         raise HTTPException(status_code=404, detail="No sale prices found with specified filters")
 
     return data
+
+
+
+@router.get("/locations-with-coords")
+async def get_locations_with_coords(
+    auctions: Optional[List[str]] = Query(None),
+    year_start: Optional[int] = Query(None),
+    year_end: Optional[int] = Query(None),
+    mileage_start: Optional[int] = Query(None),
+    mileage_end: Optional[int] = Query(None),
+    owners_start: Optional[int] = Query(None),
+    owners_end: Optional[int] = Query(None),
+    accident_start: Optional[int] = Query(None),
+    accident_end: Optional[int] = Query(None),
+    vehicle_condition: Optional[List[str]] = Query(None),
+    vehicle_types: Optional[List[str]] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    predicted_roi_start: Optional[float] = Query(None),
+    predicted_roi_end: Optional[float] = Query(None),
+    predicted_profit_margin_start: Optional[float] = Query(None),
+    predicted_profit_margin_end: Optional[float] = Query(None),
+    engine_type: Optional[List[str]] = Query(None),
+    transmission: Optional[List[str]] = Query(None),
+    drive_train: Optional[List[str]] = Query(None),
+    cylinder: Optional[List[int]] = Query(None),
+    auction_names: Optional[List[str]] = Query(None),
+    body_style: Optional[List[str]] = Query(None),
+    sale_start: Optional[str] = Query(None),
+    sale_end: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    # Базовий запит
+    query = (
+        select(CarModel.location, CarModel.auction, func.count().label("lots"))
+        .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
+        .outerjoin(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
+        .filter(CarModel.seller.isnot(None))
+        .filter(CarSaleHistoryModel.status == 'Sold')
+        .filter(CarSaleHistoryModel.final_bid.isnot(None))
+    )
+
+    if auctions:
+        query = query.filter(CarModel.auction.in_(auctions))
+    if year_start and year_end:
+        query = query.filter(CarModel.year.between(year_start, year_end))
+    if mileage_start and mileage_end:
+        query = query.filter(CarModel.mileage.between(mileage_start, mileage_end))
+    if owners_start and owners_end:
+        query = query.filter(CarModel.owners.between(owners_start, owners_end))
+    if accident_start and accident_end:
+        query = query.filter(CarModel.accident_count.between(accident_start, accident_end))
+    if vehicle_condition:
+        query = query.filter(ConditionAssessmentModel.issue_description.in_(vehicle_condition))
+    if vehicle_types:
+        query = query.filter(CarModel.vehicle_type.in_(vehicle_types))
+    if make:
+        query = query.filter(CarModel.make == make)
+    if model:
+        query = query.filter(CarModel.model == model)
+    if predicted_roi_start and predicted_roi_end:
+        query = query.filter(CarModel.predicted_roi.between(predicted_roi_start, predicted_roi_end))
+    if predicted_profit_margin_start and predicted_profit_margin_end:
+        query = query.filter(CarModel.predicted_profit_margin.between(predicted_profit_margin_start, predicted_profit_margin_end))
+    if engine_type:
+        query = query.filter(CarModel.engine.in_(engine_type))
+    if transmission:
+        query = query.filter(CarModel.transmision.in_(transmission))
+    if drive_train:
+        query = query.filter(CarModel.drive_type.in_(drive_train))
+    if cylinder:
+        query = query.filter(CarModel.engine_cylinder.in_(cylinder))
+    if auction_names:
+        query = query.filter(CarModel.auction_name.in_(auction_names))
+    if body_style:
+        query = query.filter(CarModel.body_style.in_(body_style))
+    if sale_start and sale_end:
+        query = query.filter(CarSaleHistoryModel.date.between(sale_start, sale_end))
+
+    query = query.group_by(CarModel.location, CarModel.auction)
+
+    result = await db.execute(query)
+    raw_data = result.all()
+
+    locations = set([row[0].lower() for row in raw_data if row[0]])
+    if not locations:
+        return []
+
+    coord_query = select(USZipModel).where(
+        or_(func.lower(USZipModel.copart_name).in_(locations), func.lower(USZipModel.iaai_name).in_(locations))
+    )
+    coords_result = await db.execute(coord_query)
+    zip_map = {}
+    for z in coords_result.scalars():
+        if z.copart_name:
+            zip_map[z.copart_name.lower()] = (z.lat, z.lng)
+        if z.iaai_name:
+            zip_map[z.iaai_name.lower()] = (z.lat, z.lng)
+
+    response = []
+    for location, auction, lots in raw_data:
+        key = location.lower()
+        if key in zip_map:
+            lat, lng = zip_map[key]
+            response.append({
+                "location": location,
+                "auction": auction,
+                "lots": lots,
+                "lat": lat,
+                "lng": lng,
+            })
+
+    return response

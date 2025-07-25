@@ -121,10 +121,10 @@ async def _parse_and_update_car_async(
                 raise ValueError(f"Scraping error: {data['error']}")
             car.owners = data.get("owners")
             car.has_correct_vin = True
-            if data.get("mileage") is not None:
+            if data.get("mileage") is not None and car.mileage is None:
                 car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
-            if car.mileage is None or not car.has_correct_mileage:
-                car.mileage = int(data.get("mileage", 0)) if data.get("mileage") else 0
+            else:
+                car.has_correct_mileage = False
             car.accident_count = data.get("accident_count", 0)
             if car.condition_assessments and car.accident_count == 0:
                 car.has_correct_accidents = False
@@ -165,8 +165,8 @@ async def _parse_and_update_car_async(
             fees_result = await db.execute(
                 select(FeeModel).where(
                     FeeModel.auction == car.auction,
-                    FeeModel.price_from <= car.avg_market_price,
-                    FeeModel.price_to >= car.avg_market_price,
+                    FeeModel.price_from <= car.predicted_total_investments,
+                    FeeModel.price_to >= car.predicted_total_investments,
                 )
             )
             fees = fees_result.scalars().all()
