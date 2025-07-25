@@ -506,7 +506,7 @@ async def get_avg_sale_prices(
 
 
 
-@router.get("/locations-with-coords")
+@router.get("/locations-by-lots")
 async def get_locations_with_coords(
     auctions: Optional[List[str]] = Query(None),
     year_start: Optional[int] = Query(None),
@@ -535,14 +535,12 @@ async def get_locations_with_coords(
     sale_end: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
-    # Базовий запит
+    today = datetime.now(timezone.utc).date()
+    today_naive = datetime.combine(today, time.min)
     query = (
         select(CarModel.location, CarModel.auction, func.count().label("lots"))
-        .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
         .outerjoin(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
-        .filter(CarModel.seller.isnot(None))
-        .filter(CarSaleHistoryModel.status == 'Sold')
-        .filter(CarSaleHistoryModel.final_bid.isnot(None))
+        .filter(CarModel.date >= today_naive)
     )
 
     if auctions:
@@ -586,6 +584,7 @@ async def get_locations_with_coords(
 
     result = await db.execute(query)
     raw_data = result.all()
+    logger.info(f"RAWWWWWWWWWWW -->>>> {raw_data}")
 
     locations = set([row[0].lower() for row in raw_data if row[0]])
     if not locations:
