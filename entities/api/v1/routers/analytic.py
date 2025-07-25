@@ -615,3 +615,150 @@ async def get_locations_with_coords(
             })
 
     return response
+
+@router.get("/analytics/avg-final-bid-by-location")
+async def avg_final_bid_by_location(
+    auctions: Optional[List[str]] = Query(default=None),
+    mileage_start: Optional[int] = None,
+    mileage_end: Optional[int] = None,
+    owners_start: Optional[int] = None,
+    owners_end: Optional[int] = None,
+    accident_start: Optional[int] = None,
+    accident_end: Optional[int] = None,
+    year_start: Optional[int] = None,
+    year_end: Optional[int] = None,
+    vehicle_condition: Optional[List[str]] = Query(default=None),
+    vehicle_types: Optional[List[str]] = Query(default=None),
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+    predicted_roi_start: Optional[float] = None,
+    predicted_roi_end: Optional[float] = None,
+    predicted_profit_margin_start: Optional[float] = None,
+    predicted_profit_margin_end: Optional[float] = None,
+    engine_type: Optional[List[str]] = Query(default=None),
+    transmission: Optional[List[str]] = Query(default=None),
+    drive_train: Optional[List[str]] = Query(default=None),
+    cylinder: Optional[List[str]] = Query(default=None),
+    auction_names: Optional[List[str]] = Query(default=None),
+    body_style: Optional[List[str]] = Query(default=None),
+    sale_start: Optional[str] = None,
+    sale_end: Optional[str] = None,
+    session: AsyncSession = Depends(get_async_session),
+):
+    # Перший запит — всі координати
+    us_zips_stmt = select(
+        USZipModel.copart_name,
+        USZipModel.iaai_name,
+        USZipModel.lat,
+        USZipModel.lng
+    ).where(
+        or_(USZipModel.copart_name.isnot(None), USZipModel.iaai_name.isnot(None)),
+        USZipModel.lat.isnot(None),
+        USZipModel.lng.isnot(None)
+    )
+    us_zips_result = await session.execute(us_zips_stmt)
+    zip_coords = us_zips_result.all()
+
+    location_to_coords = {
+        name: {"lat": lat, "lng": lng, "auction": auction}
+        for name, auction in ((z.copart_name, "copart") for z in zip_coords if z.copart_name) | ((z.iaai_name, "iaai") for z in zip_coords if z.iaai_name)
+        for lat, lng in [(next((z.lat, z.lng) for z in zip_coords if z.copart_name == name or z.iaai_name == name),)]
+    }
+
+    # Другий запит — агрегація по location
+    car_stmt = (
+        select(
+            CarModel.location,
+            CarModel.auction,
+            func.avg(CarSaleHistoryModel.final_bid).label("average_final_bid")
+        )
+        .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
+        .join(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
+        .where(
+            CarModel.seller.isnot(None),
+            CarSaleHistoryModel.final_bid.isnot(None),
+            CarSaleHistoryModel.status == 'Sold',
+            *(
+                [CarModel.auction.in_(auctions)] if auctions else []
+            ),
+            *(
+                [CarModel.mileage.between(mileage_start, mileage_end)]
+                if mileage_start is not None and mileage_end is not None else []
+            ),
+            *(
+                [CarModel.owners.between(owners_start, owners_end)]
+                if owners_start is not None and owners_end is not None else []
+            ),
+            *(
+                [CarModel.accident_count.between(accident_start, accident_end)]
+                if accident_start is not None and accident_end is not None else []
+            ),
+            *(
+                [CarModel.year.between(year_start, year_end)]
+                if year_start is not None and year_end is not None else []
+            ),
+            *(
+                [ConditionAssessmentModel.issue_description.in_(vehicle_condition)]
+                if vehicle_condition else []
+            ),
+            *(
+                [CarModel.vehicle_type.in_(vehicle_types)] if vehicle_types else []
+            ),
+            *(
+                [CarModel.make == make] if make else []
+            ),
+            *(
+                [CarModel.model == model] if model else []
+            ),
+            *(
+                [CarModel.predicted_roi.between(predicted_roi_start, predicted_roi_end)]
+                if predicted_roi_start is not None and predicted_roi_end is not None else []
+            ),
+            *(
+                [CarModel.predicted_profit_margin.between(predicted_profit_margin_start, predicted_profit_margin_end)]
+                if predicted_profit_margin_start is not None and predicted_profit_margin_end is not None else []
+            ),
+            *(
+                [CarModel.engine.in_(engine_type)] if engine_type else []
+            ),
+            *(
+                [CarModel.transmision.in_(transmission)] if transmission else []
+            ),
+            *(
+                [CarModel.drive_type.in_(drive_train)] if drive_train else []
+            ),
+            *(
+                [CarModel.engine_cylinder.in_(cylinder)] if cylinder else []
+            ),
+            *(
+                [CarModel.auction_name.in_(auction_names)] if auction_names else []
+            ),
+            *(
+                [CarModel.body_style.in_(body_style)] if body_style else []
+            ),
+            *(
+                [CarSaleHistoryModel.date.between(sale_start, sale_end)]
+                if sale_start is not None and sale_end is not None else []
+            )
+        )
+        .group_by(CarModel.location, CarModel.auction)
+        .order_by(func.avg(CarSaleHistoryModel.final_bid).desc())
+    )
+
+    car_result = await session.execute(car_stmt)
+    raw_data = car_result.all()
+
+    response = []
+    for row in raw_data:
+        location_name = row.location
+        coords = location_to_coords.get(location_name)
+        if coords:
+            response.append({
+                "location": location_name,
+                "lat": coords["lat"],
+                "lng": coords["lng"],
+                "auction": row.auction,
+                "average_final_bid": round(row.average_final_bid or 0)
+            })
+
+    return response
