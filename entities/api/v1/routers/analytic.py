@@ -66,11 +66,12 @@ async def get_filtered_cars(
     predicted_roi_max: Optional[float] = Query(None),
     predicted_profit_margin_min: Optional[float] = Query(None),
     predicted_profit_margin_max: Optional[float] = Query(None),
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
     session: AsyncSession = Depends(get_db),
 ):
-    # Нормалізація параметрів
-    make_list = normalize_csv_param(make)
-    model_list = normalize_csv_param(model)
     engine_list = normalize_csv_param(engine)
     transmision_list = normalize_csv_param(transmision)
     drive_type_list = normalize_csv_param(drive_type)
@@ -85,6 +86,22 @@ async def get_filtered_cars(
     today_naive = datetime.combine(today, time.min)
     
     filters.append(CarModel.date >= today_naive)
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await session.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
+
 
     if mileage_start is not None:
         filters.append(CarModel.mileage >= mileage_start)
@@ -106,24 +123,24 @@ async def get_filtered_cars(
     if year_end is not None:
         filters.append(CarModel.year <= year_end)
 
-    if make_list:
-        filters.append(CarModel.make.ilike(f"%{make_list[0]}%"))  # Беремо перший елемент, якщо список
-    if model_list:
-        filters.append(CarModel.model.ilike(f"%{model_list[0]}%"))
+    if make:
+        filters.append(CarModel.make == make)
+    if model:
+        filters.append(CarModel.model == model)
     if engine_list:
-        filters.append(CarModel.engine.ilike(f"%{engine_list[0]}%"))
+        filters.append(CarModel.engine.in_(engine_list))
     if transmision_list:
-        filters.append(CarModel.transmision.ilike(f"%{transmision_list[0]}%"))
+        filters.append(CarModel.transmision.in_(transmision_list))
     if drive_type_list:
-        filters.append(CarModel.drive_type.ilike(f"%{drive_type_list[0]}%"))
+        filters.append(CarModel.drive_type.in_(drive_type_list))
     if engine_cylinder_list:
-        filters.append(CarModel.engine_cylinder.ilike(f"%{engine_cylinder_list[0]}%"))
+        filters.append(CarModel.engine_cylinder.in_(engine_cylinder_list))
     if vehicle_type_list:
-        filters.append(CarModel.vehicle_type.ilike(f"%{vehicle_type_list[0]}%"))
+        filters.append(CarModel.vehicle_type.in_(vehicle_type_list))
     if body_style_list:
-        filters.append(CarModel.body_style.ilike(f"%{body_style_list[0]}%"))
+        filters.append(CarModel.body_style.in_(body_style_list))
     if auction_name_list:
-        filters.append(CarModel.auction_name.ilike(f"%{auction_name_list[0]}%"))
+        filters.append(CarModel.auction_name.in_(auction_name_list))
     if recommendation_status_list:
         filters.append(CarModel.recommendation_status == recommendation_status_list[0])
 
@@ -220,10 +237,29 @@ async def get_top_sellers(
     body_style: Optional[str] = Query(None),
     sale_start: Optional[str] = Query(None),
     sale_end: Optional[str] = Query(None),
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
     session: AsyncSession = Depends(get_db),
 ):
     # Нормалізація параметрів
     filters = []
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await session.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
     
     locations_list = normalize_csv_param(locations)
     if not locations_list:
@@ -241,7 +277,7 @@ async def get_top_sellers(
         locations_result = result.all()
         locations_list = {
             name.strip()
-            for copart, iaai in locations
+            for copart, iaai in locations_result
             for name in (copart, iaai)
             if name and name.strip()
         }
@@ -393,11 +429,30 @@ async def get_avg_sale_prices(
     body_style: Optional[str] = Query(None),
     sale_start: Optional[datetime] = Query(None),
     sale_end: Optional[datetime] = Query(None),
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
     session: AsyncSession = Depends(get_db),
 ):
     # Normalize parameters
     def csv(param: Optional[str]) -> Optional[list[str]]:
         return [x.strip() for x in param.split(",") if x.strip()] if param else None
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await session.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
 
     location_list = normalize_csv_param(locations)
     auctions_list = normalize_csv_param(auctions)
@@ -537,8 +592,27 @@ async def get_locations_with_coords(
     body_style: Optional[List[str]] = Query(None),
     sale_start: Optional[str] = Query(None),
     sale_end: Optional[str] = Query(None),
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
     db: AsyncSession = Depends(get_db),
 ):
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await db.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
     query = (
@@ -679,8 +753,27 @@ async def avg_final_bid_by_location(
     body_style: Optional[List[str]] = Query(default=None),
     sale_start: Optional[str] = None,
     sale_end: Optional[str] = None,
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
     session: AsyncSession = Depends(get_db),
 ):
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await session.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
     sale_start_dt = datetime.fromisoformat(sale_start) if sale_start else None
     sale_end_dt = datetime.fromisoformat(sale_end) if sale_end else None
 
@@ -812,7 +905,26 @@ async def get_sales_summary(
     body_style: Optional[List[str]] = Query(None),
     sale_start: Optional[str] = None,
     sale_end: Optional[str] = None,
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
 ):
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await db.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
     query = select(CarModel).options(
         joinedload(CarModel.sales_history),
         joinedload(CarModel.condition_assessments)
@@ -913,8 +1025,27 @@ async def get_sales_summary(
     transmission: Optional[List[str]] = Query(None),
     drive_train: Optional[List[str]] = Query(None),
     cylinder: Optional[List[int]] = Query(None),
+    vin: Optional[str] = Query(
+        None,
+        description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
+    ),
 ):
     filters = []
+    if vin is not None:
+        if len(vin) != 17:
+            raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
+
+        query = select(CarModel).where(CarModel.vin == vin)
+        result = await db.execute(query)
+        vehicle = result.scalar_one_or_none()
+
+        if not vehicle:
+            raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
+
+        make = vehicle.make
+        model = vehicle.model
+        year_start = vehicle.year
+        year_end = vehicle.year
 
     if auctions:
         filters.append(CarModel.auction_name.in_(auctions))
