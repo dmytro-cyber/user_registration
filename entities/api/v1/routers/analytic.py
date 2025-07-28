@@ -1,11 +1,13 @@
 import logging
 import sys
 from datetime import datetime, timedelta, time, timezone
+from itertools import chain
 from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, and_, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from db.session import get_db
 from models import CarModel, CarSaleHistoryModel, ConditionAssessmentModel, USZipModel
@@ -354,7 +356,7 @@ async def get_top_sellers(
 
 
 @router.get(
-    "/analytics/sale-prices",
+    "/sale-prices",
     summary="Average Sale Price Over Time",
     tags=["Analytics"],
     description="""
@@ -506,6 +508,8 @@ async def get_avg_sale_prices(
 
 
 
+from collections import defaultdict
+
 @router.get("/locations-by-lots")
 async def get_locations_with_coords(
     auctions: Optional[List[str]] = Query(None),
@@ -543,6 +547,7 @@ async def get_locations_with_coords(
         .filter(CarModel.date >= today_naive)
     )
 
+    # Фільтри
     if auctions:
         query = query.filter(CarModel.auction.in_(auctions))
     if year_start and year_end:
@@ -584,39 +589,70 @@ async def get_locations_with_coords(
 
     result = await db.execute(query)
     raw_data = result.all()
-    logger.info(f"RAWWWWWWWWWWW -->>>> {raw_data}")
 
     locations = set([row[0].lower() for row in raw_data if row[0]])
     if not locations:
         return []
 
+    # Отримати координати та штати
     coord_query = select(USZipModel).where(
-        or_(func.lower(USZipModel.copart_name).in_(locations), func.lower(USZipModel.iaai_name).in_(locations))
+        or_(
+            func.lower(USZipModel.copart_name).in_(locations),
+            func.lower(USZipModel.iaai_name).in_(locations),
+        )
     )
     coords_result = await db.execute(coord_query)
     zip_map = {}
+    state_map = {}
     for z in coords_result.scalars():
         if z.copart_name:
             zip_map[z.copart_name.lower()] = (z.lat, z.lng)
+            state_map[z.copart_name.lower()] = z.state_id
         if z.iaai_name:
             zip_map[z.iaai_name.lower()] = (z.lat, z.lng)
+            state_map[z.iaai_name.lower()] = z.state_id
 
-    response = []
+    response = {
+        "by_location": [],
+        "by_state": [],
+        "by_state_and_auction": []
+    }
+
+    state_agg = defaultdict(int)
+    state_auction_agg = defaultdict(lambda: defaultdict(int))
+
     for location, auction, lots in raw_data:
         key = location.lower()
         if key in zip_map:
             lat, lng = zip_map[key]
-            response.append({
+            state = state_map.get(key)
+            response["by_location"].append({
                 "location": location,
                 "auction": auction,
                 "lots": lots,
                 "lat": lat,
                 "lng": lng,
+                "state": state,
             })
+            if state:
+                state_agg[state] += lots
+                state_auction_agg[state][auction] += lots
+
+    response["by_state"] = [
+        {"state": state, "lots": lots}
+        for state, lots in state_agg.items()
+    ]
+
+    response["by_state_and_auction"] = [
+        {"state": state, "auction": auction, "lots": lots}
+        for state, auctions in state_auction_agg.items()
+        for auction, lots in auctions.items()
+    ]
 
     return response
 
-@router.get("/analytics/avg-final-bid-by-location")
+
+@router.get("/avg-final-bid-by-location")
 async def avg_final_bid_by_location(
     auctions: Optional[List[str]] = Query(default=None),
     mileage_start: Optional[int] = None,
@@ -643,9 +679,11 @@ async def avg_final_bid_by_location(
     body_style: Optional[List[str]] = Query(default=None),
     sale_start: Optional[str] = None,
     sale_end: Optional[str] = None,
-    session: AsyncSession = Depends(get_async_session),
+    session: AsyncSession = Depends(get_db),
 ):
-    # Перший запит — всі координати
+    sale_start_dt = datetime.fromisoformat(sale_start) if sale_start else None
+    sale_end_dt = datetime.fromisoformat(sale_end) if sale_end else None
+
     us_zips_stmt = select(
         USZipModel.copart_name,
         USZipModel.iaai_name,
@@ -660,12 +698,61 @@ async def avg_final_bid_by_location(
     zip_coords = us_zips_result.all()
 
     location_to_coords = {
-        name: {"lat": lat, "lng": lng, "auction": auction}
-        for name, auction in ((z.copart_name, "copart") for z in zip_coords if z.copart_name) | ((z.iaai_name, "iaai") for z in zip_coords if z.iaai_name)
-        for lat, lng in [(next((z.lat, z.lng) for z in zip_coords if z.copart_name == name or z.iaai_name == name),)]
+        name: {"lat": z.lat, "lng": z.lng, "auction": auction}
+        for z in zip_coords
+        for name, auction in chain(
+            [(z.copart_name, "copart")] if z.copart_name else [],
+            [(z.iaai_name, "iaai")] if z.iaai_name else []
+        )
     }
 
-    # Другий запит — агрегація по location
+    filters = [
+        CarModel.seller.isnot(None),
+        CarSaleHistoryModel.final_bid.isnot(None),
+        CarSaleHistoryModel.status == 'Sold'
+    ]
+
+    if auctions:
+        filters.append(CarModel.auction.in_(auctions))
+    if mileage_start is not None and mileage_end is not None:
+        filters.append(CarModel.mileage.between(mileage_start, mileage_end))
+    if owners_start is not None and owners_end is not None:
+        filters.append(CarModel.owners.between(owners_start, owners_end))
+    if accident_start is not None and accident_end is not None:
+        filters.append(CarModel.accident_count.between(accident_start, accident_end))
+    if year_start is not None and year_end is not None:
+        filters.append(CarModel.year.between(year_start, year_end))
+    if vehicle_condition:
+        filters.append(ConditionAssessmentModel.issue_description.in_(vehicle_condition))
+    if vehicle_types:
+        filters.append(CarModel.vehicle_type.in_(vehicle_types))
+    if make:
+        filters.append(CarModel.make == make)
+    if model:
+        filters.append(CarModel.model == model)
+    if predicted_roi_start is not None and predicted_roi_end is not None:
+        filters.append(CarModel.predicted_roi.between(predicted_roi_start, predicted_roi_end))
+    if predicted_profit_margin_start is not None and predicted_profit_margin_end is not None:
+        filters.append(CarModel.predicted_profit_margin.between(predicted_profit_margin_start, predicted_profit_margin_end))
+    if engine_type:
+        filters.append(CarModel.engine.in_(engine_type))
+    if transmission:
+        filters.append(CarModel.transmision.in_(transmission))
+    if drive_train:
+        filters.append(CarModel.drive_type.in_(drive_train))
+    if cylinder:
+        filters.append(CarModel.engine_cylinder.in_(cylinder))
+    if auction_names:
+        filters.append(CarModel.auction_name.in_(auction_names))
+    if body_style:
+        filters.append(CarModel.body_style.in_(body_style))
+    if sale_start_dt and sale_end_dt:
+        filters.append(CarSaleHistoryModel.date.between(sale_start_dt, sale_end_dt))
+    elif sale_start_dt:
+        filters.append(CarSaleHistoryModel.date >= sale_start_dt)
+    elif sale_end_dt:
+        filters.append(CarSaleHistoryModel.date <= sale_end_dt)
+
     car_stmt = (
         select(
             CarModel.location,
@@ -674,73 +761,7 @@ async def avg_final_bid_by_location(
         )
         .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
         .join(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
-        .where(
-            CarModel.seller.isnot(None),
-            CarSaleHistoryModel.final_bid.isnot(None),
-            CarSaleHistoryModel.status == 'Sold',
-            *(
-                [CarModel.auction.in_(auctions)] if auctions else []
-            ),
-            *(
-                [CarModel.mileage.between(mileage_start, mileage_end)]
-                if mileage_start is not None and mileage_end is not None else []
-            ),
-            *(
-                [CarModel.owners.between(owners_start, owners_end)]
-                if owners_start is not None and owners_end is not None else []
-            ),
-            *(
-                [CarModel.accident_count.between(accident_start, accident_end)]
-                if accident_start is not None and accident_end is not None else []
-            ),
-            *(
-                [CarModel.year.between(year_start, year_end)]
-                if year_start is not None and year_end is not None else []
-            ),
-            *(
-                [ConditionAssessmentModel.issue_description.in_(vehicle_condition)]
-                if vehicle_condition else []
-            ),
-            *(
-                [CarModel.vehicle_type.in_(vehicle_types)] if vehicle_types else []
-            ),
-            *(
-                [CarModel.make == make] if make else []
-            ),
-            *(
-                [CarModel.model == model] if model else []
-            ),
-            *(
-                [CarModel.predicted_roi.between(predicted_roi_start, predicted_roi_end)]
-                if predicted_roi_start is not None and predicted_roi_end is not None else []
-            ),
-            *(
-                [CarModel.predicted_profit_margin.between(predicted_profit_margin_start, predicted_profit_margin_end)]
-                if predicted_profit_margin_start is not None and predicted_profit_margin_end is not None else []
-            ),
-            *(
-                [CarModel.engine.in_(engine_type)] if engine_type else []
-            ),
-            *(
-                [CarModel.transmision.in_(transmission)] if transmission else []
-            ),
-            *(
-                [CarModel.drive_type.in_(drive_train)] if drive_train else []
-            ),
-            *(
-                [CarModel.engine_cylinder.in_(cylinder)] if cylinder else []
-            ),
-            *(
-                [CarModel.auction_name.in_(auction_names)] if auction_names else []
-            ),
-            *(
-                [CarModel.body_style.in_(body_style)] if body_style else []
-            ),
-            *(
-                [CarSaleHistoryModel.date.between(sale_start, sale_end)]
-                if sale_start is not None and sale_end is not None else []
-            )
-        )
+        .where(and_(*filters))
         .group_by(CarModel.location, CarModel.auction)
         .order_by(func.avg(CarSaleHistoryModel.final_bid).desc())
     )
@@ -762,3 +783,206 @@ async def avg_final_bid_by_location(
             })
 
     return response
+
+
+@router.get("/volumes")
+async def get_sales_summary(
+    db: AsyncSession = Depends(get_db),
+    mileage_start: Optional[int] = None,
+    mileage_end: Optional[int] = None,
+    owners_start: Optional[int] = None,
+    owners_end: Optional[int] = None,
+    accident_start: Optional[int] = None,
+    accident_end: Optional[int] = None,
+    year_start: Optional[int] = None,
+    year_end: Optional[int] = None,
+    vehicle_condition: Optional[List[str]] = Query(None),
+    vehicle_types: Optional[List[str]] = Query(None),
+    make: Optional[str] = None,
+    model: Optional[str] = None,
+    predicted_roi_start: Optional[float] = None,
+    predicted_roi_end: Optional[float] = None,
+    predicted_profit_margin_start: Optional[float] = None,
+    predicted_profit_margin_end: Optional[float] = None,
+    engine_type: Optional[List[str]] = Query(None),
+    transmission: Optional[List[str]] = Query(None),
+    drive_train: Optional[List[str]] = Query(None),
+    cylinder: Optional[List[int]] = Query(None),
+    auction_names: Optional[List[str]] = Query(None),
+    body_style: Optional[List[str]] = Query(None),
+    sale_start: Optional[str] = None,
+    sale_end: Optional[str] = None,
+):
+    query = select(CarModel).options(
+        joinedload(CarModel.sales_history),
+        joinedload(CarModel.condition_assessments)
+    ).join(CarModel.sales_history).join(CarModel.condition_assessments)
+
+    filters = [
+        CarSaleHistoryModel.status == 'Sold',
+        CarSaleHistoryModel.final_bid.isnot(None),
+        CarSaleHistoryModel.source != 'Unknown',
+        CarModel.seller.isnot(None),
+    ]
+
+    if mileage_start is not None and mileage_end is not None:
+        filters.append(CarModel.mileage.between(mileage_start, mileage_end))
+    if owners_start is not None and owners_end is not None:
+        filters.append(CarModel.owners.between(owners_start, owners_end))
+    if accident_start is not None and accident_end is not None:
+        filters.append(CarModel.accident_count.between(accident_start, accident_end))
+    if year_start is not None and year_end is not None:
+        filters.append(CarModel.year.between(year_start, year_end))
+    if vehicle_condition:
+        filters.append(ConditionAssessmentModel.issue_description.in_(vehicle_condition))
+    if vehicle_types:
+        filters.append(CarModel.vehicle_type.in_(vehicle_types))
+    if make:
+        filters.append(CarModel.make == make)
+    if model:
+        filters.append(CarModel.model == model)
+    if predicted_roi_start is not None and predicted_roi_end is not None:
+        filters.append(CarModel.predicted_roi.between(predicted_roi_start, predicted_roi_end))
+    if predicted_profit_margin_start is not None and predicted_profit_margin_end is not None:
+        filters.append(CarModel.predicted_profit_margin.between(predicted_profit_margin_start, predicted_profit_margin_end))
+    if engine_type:
+        filters.append(CarModel.engine.in_(engine_type))
+    if transmission:
+        filters.append(CarModel.transmision.in_(transmission))
+    if drive_train:
+        filters.append(CarModel.drive_type.in_(drive_train))
+    if cylinder:
+        filters.append(CarModel.engine_cylinder.in_(cylinder))
+    if auction_names:
+        filters.append(CarModel.auction_name.in_(auction_names))
+    if body_style:
+        filters.append(CarModel.body_style.in_(body_style))
+    if sale_start and sale_end:
+        filters.append(CarSaleHistoryModel.date.between(sale_start, sale_end))
+
+    query = query.filter(*filters)
+
+    result = await db.execute(query)
+    cars = result.scalars().unique().all()
+
+    total_sales = 0.0
+    source_sales = {}
+
+    for car in cars:
+        for sale in car.sales_history:
+            if sale.status != 'Sold' or sale.final_bid is None or sale.source == 'Unknown':
+                continue
+            total_sales += sale.final_bid
+            source_sales[sale.source] = source_sales.get(sale.source, 0.0) + sale.final_bid
+
+    response = {
+        "total_sales": round(total_sales),
+        "sales_by_source": [
+            {
+                "source": source,
+                "amount": round(amount),
+                "percent": round(amount * 100 / total_sales, 2) if total_sales else 0.0
+            }
+            for source, amount in sorted(source_sales.items(), key=lambda x: x[1], reverse=True)
+        ]
+    }
+    return response
+
+
+@router.get("/sales-summary")
+async def get_sales_summary(
+    db: AsyncSession = Depends(get_db),
+    auctions: Optional[List[str]] = Query(None),
+    year_start: Optional[int] = Query(None),
+    year_end: Optional[int] = Query(None),
+    mileage_start: Optional[int] = Query(None),
+    mileage_end: Optional[int] = Query(None),
+    owners_start: Optional[int] = Query(None),
+    owners_end: Optional[int] = Query(None),
+    accident_start: Optional[int] = Query(None),
+    accident_end: Optional[int] = Query(None),
+    vehicle_condition: Optional[List[str]] = Query(None),
+    vehicle_types: Optional[List[str]] = Query(None),
+    make: Optional[str] = Query(None),
+    model: Optional[str] = Query(None),
+    predicted_roi_start: Optional[float] = Query(None),
+    predicted_roi_end: Optional[float] = Query(None),
+    predicted_profit_margin_start: Optional[float] = Query(None),
+    predicted_profit_margin_end: Optional[float] = Query(None),
+    engine_type: Optional[List[str]] = Query(None),
+    transmission: Optional[List[str]] = Query(None),
+    drive_train: Optional[List[str]] = Query(None),
+    cylinder: Optional[List[int]] = Query(None),
+):
+    filters = []
+
+    if auctions:
+        filters.append(CarModel.auction_name.in_(auctions))
+    if year_start is not None:
+        filters.append(CarModel.year >= year_start)
+    if year_end is not None:
+        filters.append(CarModel.year <= year_end)
+    if mileage_start is not None:
+        filters.append(CarModel.mileage >= mileage_start)
+    if mileage_end is not None:
+        filters.append(CarModel.mileage <= mileage_end)
+    if owners_start is not None:
+        filters.append(CarModel.owners >= owners_start)
+    if owners_end is not None:
+        filters.append(CarModel.owners <= owners_end)
+    if accident_start is not None:
+        filters.append(CarModel.accident_count >= accident_start)
+    if accident_end is not None:
+        filters.append(CarModel.accident_count <= accident_end)
+    if vehicle_condition:
+        filters.append(CarModel.recommendation_status.in_(vehicle_condition))
+    if vehicle_types:
+        filters.append(CarModel.vehicle_type.in_(vehicle_types))
+    if make:
+        filters.append(CarModel.make == make)
+    if model:
+        filters.append(CarModel.model == model)
+    if predicted_roi_start is not None:
+        filters.append(CarModel.predicted_roi >= predicted_roi_start)
+    if predicted_roi_end is not None:
+        filters.append(CarModel.predicted_roi <= predicted_roi_end)
+    if predicted_profit_margin_start is not None:
+        filters.append(CarModel.predicted_profit_margin >= predicted_profit_margin_start)
+    if predicted_profit_margin_end is not None:
+        filters.append(CarModel.predicted_profit_margin <= predicted_profit_margin_end)
+    if engine_type:
+        filters.append(CarModel.engine.in_(engine_type))
+    if transmission:
+        filters.append(CarModel.transmision.in_(transmission))
+    if drive_train:
+        filters.append(CarModel.drive_type.in_(drive_train))
+    if cylinder:
+        filters.append(CarModel.engine_cylinder.in_(cylinder))
+
+    query = (
+        select(
+            CarSaleHistoryModel.status,
+            func.count(CarSaleHistoryModel.id).label("count")
+        )
+        .join(CarModel, CarModel.id == CarSaleHistoryModel.car_id)
+        .where(*filters)
+        .group_by(CarSaleHistoryModel.status)
+    )
+
+    results = (await db.execute(query)).all()
+    total_query = select(func.count(CarSaleHistoryModel.id)).join(CarModel).where(*filters)
+    total = (await db.execute(total_query)).scalar_one()
+
+    breakdown = [
+        {
+            "status": status,
+            "count": count,
+            "percentage": round((count / total) * 100, 2) if total else 0.0
+        }
+        for status, count in results
+    ]
+
+    return {
+        "total": total,
+        "breakdown": breakdown
+    }
