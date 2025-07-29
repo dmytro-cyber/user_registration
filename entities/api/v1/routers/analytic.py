@@ -66,6 +66,9 @@ async def get_filtered_cars(
     predicted_roi_max: Optional[float] = Query(None),
     predicted_profit_margin_min: Optional[float] = Query(None),
     predicted_profit_margin_max: Optional[float] = Query(None),
+    sale_start: Optional[str] = Query(None),
+    sale_end: Optional[str] = Query(None),
+    auctions: Optional[str] = Query(None),
     vin: Optional[str] = Query(
         None,
         description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
@@ -75,11 +78,12 @@ async def get_filtered_cars(
     engine_list = normalize_csv_param(engine)
     transmision_list = normalize_csv_param(transmision)
     drive_type_list = normalize_csv_param(drive_type)
-    engine_cylinder_list = normalize_csv_param(engine_cylinder)
+    engine_cylinder_list = [int(c) for c in normalize_csv_param(engine_cylinder)]
     vehicle_type_list = normalize_csv_param(vehicle_type)
     body_style_list = normalize_csv_param(body_style)
     auction_name_list = normalize_csv_param(auction_name)
     recommendation_status_list = normalize_csv_param(recommendation_status)
+    auctions = normalize_csv_param(auctions)
 
     filters = []
     today = datetime.now(timezone.utc).date()
@@ -102,7 +106,15 @@ async def get_filtered_cars(
         year_start = vehicle.year
         year_end = vehicle.year
 
-
+    sale_start_date = normalize_date_param(sale_start)
+    sale_end_date = normalize_date_param(sale_end)
+    auctions = normalize_csv_param(auctions)
+    if auctions is not None:
+        filters.append(CarModel.auction.in_(auctions))
+    if sale_start_date is not None:
+        filters.append(CarModel.date >= sale_start_date)
+    if sale_end_date is not None:
+        filters.append(CarModel.date <= sale_end_date)
     if mileage_start is not None:
         filters.append(CarModel.mileage >= mileage_start)
     if mileage_end is not None:
@@ -359,9 +371,9 @@ async def get_top_sellers(
     if sale_start_date and sale_end_date:
         filters.append(CarSaleHistoryModel.date.between(sale_start_date, sale_end_date))
     elif sale_start_date:
-        filters.append(CarSaleHistoryModel.date >= sale_start_date)
+        filters.append(CarSaleHistoryModel.date >= datetime.combine(sale_start_date, time.min))
     elif sale_end_date:
-        filters.append(CarSaleHistoryModel.date <= sale_end_date)
+        filters.append(CarSaleHistoryModel.date <= datetime.combine(sale_end_date, time.max))
 
     # Основний запит
     stmt = (
