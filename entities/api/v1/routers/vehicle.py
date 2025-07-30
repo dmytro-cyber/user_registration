@@ -29,6 +29,7 @@ from models.user import UserModel
 from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, HistoryModel
 from schemas.vehicle import (
     CarBaseSchema,
+    CarBulkCreateSchema,
     CarCostsUpdateRequestSchema,
     CarCreateSchema,
     CarDetailResponseSchema,
@@ -772,7 +773,7 @@ async def delete_part_endpoint(
 
 @router.post("/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk.")
 async def bulk_create_cars(
-    vehicles: List[CarCreateSchema],
+    data: CarBulkCreateSchema,
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
     settings: Settings = Depends(get_settings),
@@ -793,10 +794,10 @@ async def bulk_create_cars(
     """
     request_id = "N/A"  # No request object available here
     extra = {"request_id": request_id, "user_id": "N/A"}
-    logger.info(f"Starting bulk creation of {len(vehicles)} vehicles", extra=extra)
+    logger.info(f"Starting bulk creation of {len(data.vehicles)} vehicles", extra=extra)
 
     try:
-        skipped_vins = await bulk_save_vehicles(db, vehicles)
+        skipped_vins = await bulk_save_vehicles(db, data)
         response = {"message": "Cars created successfully"}
         if skipped_vins:
             response["skipped_vins"] = skipped_vins
@@ -806,7 +807,7 @@ async def bulk_create_cars(
         else:
             logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
 
-        for vehicle_data in vehicles:
+        for vehicle_data in data.vehicles:
             if vehicle_data.vin not in skipped_vins:
                 logger.info(f"Scheduling parse_and_update_car for VIN: {vehicle_data.vin}", extra=extra)
                 parse_and_update_car.delay(

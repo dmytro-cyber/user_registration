@@ -39,7 +39,7 @@ app.conf.beat_schedule = {
 app.conf.timezone = "UTC"
 
 
-def generate_car_api_url(data: dict, page: int = 1) -> str:
+def generate_car_api_url(page: int = 1, size: int = 1000, base_url: str = "https://api.apicar.store/api/cars/db/update") -> str:
     """
     Generates a URL for the API request based on the provided response data, including pagination.
 
@@ -50,132 +50,60 @@ def generate_car_api_url(data: dict, page: int = 1) -> str:
     Returns:
         str: The generated URL.
     """
-    base_url = "https://api.apicar.store/api/cars"
+    base_url = base_url
     fixed_params = {
-        "size": 30,
-        "transmission": "Automatic",
-        # "status": "Run & Drive",
-        # "sort": "created_at",
-        # "direction": "DESC",
+        "size": size,
         "page": page,
     }
 
-    dynamic_params = {}
-    if data.get("odometer_min", 0) != 0:
-        dynamic_params["odometer_min"] = data["odometer_min"]
-    if data.get("odometer_max", 0) != 0:
-        dynamic_params["odometer_max"] = data["odometer_max"]
-    if data.get("make") and data["make"].strip():
-        dynamic_params["make"] = data["make"]
-    if data.get("model") and data["model"].strip():
-        dynamic_params["model"] = data["model"]
-    if data.get("year_from", 0) != 0:
-        dynamic_params["year_from"] = data["year_from"]
-    if data.get("year_to", 0) != 0:
-        dynamic_params["year_to"] = data["year_to"]
-
-    all_params = {**fixed_params, **dynamic_params}
+    all_params = {**fixed_params}
     query_string = urlencode(all_params, safe="&")
     return f"{base_url}?{query_string}"
 
 
 @app.task
-def fetch_api_data():
+def fetch_api_data(size: int = None, base_url: str = None):
     """
     Fetches car data from the API for each filter, paginates through results, and saves data incrementally.
     Updates the filter's updated_at field with the first created_at value from the API response.
     Stops fetching when a car's created_at is earlier than the filter's updated_at.
     """
-    # Fetch filters from the API
-    logger.info("Fetching filters from the API...")
-    filters_url = "http://entities:8000/api/v1/admin/filters"
+
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
-    try:
-        response = httpx.get(filters_url, timeout=10, headers=headers)
-        logger.info(f"Response status code: {response.status_code}")
-        response.raise_for_status()
-        filters = response.json()
-    except httpx.HTTPError as e:
-        logger.error(f"Failed to fetch filters: {e}")
-        return None
 
-    if not filters:
-        logger.warning("No filters found.")
-        return None
+    while True:
+        url = generate_car_api_url(page=page, size=size, base_url=base_url)
+        logger.info(f"Fetching data from API (page {page}): {url}")
+        try:
+            response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
+            response.raise_for_status()
+            api_response = response.json()
+            data = api_response.get("data", [])
+        except httpx.HTTPError as e:
+            logger.error(f"Failed to fetch API data on page {page}: {e}")
+            break
+        finally:
+            time.sleep(1)
+        if not data:
+            logger.info(f"No more data on page {page}.")
+            break
+        # Process vehicles on the current page
+        processed_vehicles = []
+        for vehicle in data:
+            # created_at_str = vehicle.get("created_at")
+            # if not created_at_str:
+            #     continue
+            # # Parse created_at to datetime
+            # try:
+            #     created_at_str = created_at_str.replace("Z", "+00:00")
+            #     created_at = datetime.fromisoformat(created_at_str)
+            # except ValueError as e:
+            #     logger.error(f"Invalid created_at format for vehicle: {e}")
+            #     continue
+            # if first_created_at is None and page == 1:
+            #     first_created_at = created_at
 
-    # Process each filter
-    for filter_data in filters:
-        filter_id = filter_data.get("id")
-        # filter_updated_at_str = filter_data.get("updated_at")
-
-        # # Parse filter's updated_at to datetime (if it exists)
-        # filter_updated_at = None
-        # if filter_updated_at_str:
-        #     try:
-        #         # Assume the database updated_at is in UTC if no timezone is specified
-        #         if "Z" in filter_updated_at_str:
-        #             filter_updated_at_str = filter_updated_at_str.replace("Z", "+00:00")
-        #         else:
-        #             filter_updated_at_str = f"{filter_updated_at_str}+00:00"
-        #         filter_updated_at = datetime.fromisoformat(filter_updated_at_str)
-        #     except ValueError as e:
-        #         logger.error(f"Invalid updated_at format for filter {filter_id}: {e}")
-        #         continue
-
-        page = 1
-        first_created_at = None
-        stop_fetching = False
-
-        # Paginate through the API results
-        while True:
-            # Generate URL with the current page
-            url = generate_car_api_url(filter_data, page=page)
-            logger.info(f"Fetching data from API (page {page}) for filter {filter_id}: {url}")
-
-            try:
-                response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
-                response.raise_for_status()
-                api_response = response.json()
-                data = api_response.get("data", [])
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to fetch API data for filter {filter_id} on page {page}: {e}")
-                break
-            finally:
-                time.sleep(1)
-
-            if not data:
-                logger.info(f"No more data for filter {filter_id} on page {page}.")
-                break
-
-            # Process vehicles on the current page
-            processed_vehicles = []
-            for vehicle in data:
-                created_at_str = vehicle.get("created_at")
-                if not created_at_str:
-                    continue
-
-                # Parse created_at to datetime
-                try:
-                    created_at_str = created_at_str.replace("Z", "+00:00")
-                    created_at = datetime.fromisoformat(created_at_str)
-                except ValueError as e:
-                    logger.error(f"Invalid created_at format for vehicle: {e}")
-                    continue
-
-                # Store the first created_at value (from the first page)
-                if first_created_at is None and page == 1:
-                    first_created_at = created_at
-
-                # Check if we should stop fetching (created_at < updated_at)
-                # if filter_updated_at and created_at < filter_updated_at:
-                #     logger.info(
-                #         f"Stopping fetch for filter {filter_id}: found vehicle with created_at {created_at} earlier than updated_at {filter_updated_at}"
-                #     )
-                #     stop_fetching = True
-                #     break
-
-                # Format and adapt vehicle data
-                formatted_vehicle = format_car_data(vehicle)
+            formatted_vehicle = format_car_data(vehicle)
             adapted_vehicle = {
                 "vin": formatted_vehicle["vin"],
                 "vehicle": formatted_vehicle["vehicle"],
@@ -209,39 +137,27 @@ def fetch_api_data():
                 "condition_assessments": formatted_vehicle.get("condition_assessments", []),
             }
             processed_vehicles.append(adapted_vehicle)
+        
+        payload = {
+            "ivent": "created" if base_url is not None else "updated",
+            "vehicles": processed_vehicles
+        }
 
-            if stop_fetching:
+        if processed_vehicles:
+            save_url = "http://entities:8000/api/v1/vehicles/bulk"
+            try:
+                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=20)
+                save_response.raise_for_status()
+                logger.info(
+                    f"Successfully saved {len(processed_vehicles)} vehicles on page {page}"
+                )
+            except httpx.HTTPError as e:
+                logger.error(f"Failed to save vehicles on page {page}: {e}")
                 break
+        page += 1
 
-            # Save processed vehicles incrementally via POST request
-            if processed_vehicles:
-                save_url = "http://entities:8000/api/v1/vehicles/bulk"
-                try:
-                    save_response = httpx.post(save_url, json=processed_vehicles, headers=headers, timeout=10)
-                    save_response.raise_for_status()
-                    logger.info(
-                        f"Successfully saved {len(processed_vehicles)} vehicles for filter {filter_id} on page {page}"
-                    )
-                except httpx.HTTPError as e:
-                    logger.error(f"Failed to save vehicles for filter {filter_id} on page {page}: {e}")
-                    break
-
-            page += 1
-
-        # Update the filter's updated_at with the first created_at value (if we fetched any data)
-        # if first_created_at:
-        #     update_url = f"http://entities:8000/api/v1/admin/filters/{filter_id}/timestamp"
-        #     # Convert first_created_at to ISO 8601 string with Z
-        #     update_payload = {"updated_at": first_created_at.isoformat().replace("+00:00", "Z")}
-        #     try:
-        #         update_response = httpx.patch(update_url, json=update_payload, headers=headers, timeout=10)
-        #         update_response.raise_for_status()
-        #         logger.info(f"Updated filter {filter_id} with new updated_at: {first_created_at}")
-        #     except httpx.HTTPError as e:
-        #         logger.error(f"Failed to update filter {filter_id} with new updated_at: {e}")
-
-    logger.info("Finished processing all filters.")
-    return "Finished processing all filters."
+    logger.info("Finished processing all pages.")
+    return "Finished processing all pages."
 
 
 # @app.task

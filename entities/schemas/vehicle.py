@@ -224,6 +224,11 @@ class CarCreateSchema(BaseModel):
     sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)
 
 
+class CarBulkCreateSchema(BaseModel):
+    ivent: str
+    vehicles: List[CarCreateSchema]
+
+
 class CarBiddinHubResponseSchema(BaseModel):
     id: int | None = None
     vehicle: str | None = None

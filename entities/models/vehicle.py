@@ -21,12 +21,17 @@ class CarStatus(enum.Enum):
     FAILED = "Failed"
     DELETED_FROM_BIDDING_HUB = "Deleted from Bidding Hub"
 
+class RelevanceStatus(enum.Enum):
+    ACTIVE = "Active"
+    ARCHIVAL = "Archival"
+    IRRELEVANT = "Irrelevant"
+
 
 class CarModel(Base):
     __tablename__ = "cars"
 
     id = Column(Integer, primary_key=True, index=True)
-    vin = Column(String, unique=True, nullable=False)
+    vin = Column(String, unique=True, nullable=False, index=True)
     vehicle = Column(String, nullable=False)
     year = Column(Integer, nullable=True)
     make = Column(String, nullable=True)
@@ -76,6 +81,7 @@ class CarModel(Base):
     )
     recommendation_status_reasons = Column(String, nullable=True)
     car_status = Column(Enum(CarStatus), nullable=False, default=CarStatus.NEW)
+    relevance = Column(Enum(RelevanceStatus), nullable=True, index=True)
 
     # List page info
     engine = Column(Float, nullable=True)
@@ -84,6 +90,8 @@ class CarModel(Base):
     predicted_profit_margin = Column(Float, nullable=True)
     predicted_profit_margin_percent = Column(Float, nullable=True)
     predicted_total_investments = Column(Float, nullable=True)
+    roi = Column(Float, nullable=True)
+    profit_margin = Column(Float, nullanble=True)
 
     # Detail page info
     engine_cylinder = Column(Integer, nullable=True)

@@ -12,6 +12,7 @@ from sqlalchemy.sql import over
 
 from core.setup import match_and_update_location
 from models.user import UserModel, UserRoleEnum, user_likes
+from models.admin import FilterModel
 from models.vehicle import (
     CarInventoryModel,
     CarInventoryStatus,
@@ -24,10 +25,11 @@ from models.vehicle import (
     PartModel,
     PhotoModel,
     RecommendationStatus,
+    RelevanceStatus,
     USZipModel,
 )
 from ordering_constr import ORDERING_MAP
-from schemas.vehicle import CarCreateSchema
+from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -55,11 +57,44 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         await db.commit()
 
 
-async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSession) -> bool:
+async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
         existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
         if existing_vehicle:
+            if existing_vehicle.relevance == RelevanceStatus.ACTIVE:
+                to_parse = False
+            elif existing_vehicle.relevance == RelevanceStatus.ARCHIVAL and ivent == "update":
+                query = select(FilterModel).where(
+                    FilterModel.make == vehicle_data.make,
+                    FilterModel.model == vehicle_data.model,
+                    FilterModel.year_from <= vehicle_data.year,
+                    FilterModel.year_to >= vehicle_data.year,
+                    FilterModel.odometer_max >= vehicle_data.mileage
+                )
+                filter_ex = db.execute(query)
+                filter_res = filter_ex.scalars().one_or_none()
+                if filter_res:
+                    existing_vehicle.relevance = RelevanceStatus.ACTIVE
+                    to_parse = True
+                else:
+                    existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
+                    to_parse = False
+            elif existing_vehicle.relevance == None and ivent == "create":
+                query = select(FilterModel).where(
+                    FilterModel.make == vehicle_data.make,
+                    FilterModel.model == vehicle_data.model,
+                    FilterModel.year_from <= vehicle_data.year,
+                    FilterModel.year_to >= vehicle_data.year,
+                    FilterModel.odometer_max >= vehicle_data.mileage
+                )
+                filter_ex = db.execute(query)
+                filter_res = filter_ex.scalars().one_or_none()
+                if filter_res:
+                    existing_vehicle.relevance = RelevanceStatus.ACTIVE
+                    to_parse = False
+
+            
             logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
 
             for field, value in vehicle_data.dict(
@@ -138,73 +173,87 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, db: AsyncSessi
 
             await db.commit()
 
-            return False
+            return to_parse
 
-        vehicle = CarModel(
-            **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
-        )
-        db.add(vehicle)
-        await db.flush()
-        if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-            vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-            if not vehicle.recommendation_status_reasons:
-                vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
+        else:
+            vehicle = CarModel(
+                **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
+            )
+            db.add(vehicle)
+            await db.flush()
+            if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                if not vehicle.recommendation_status_reasons:
+                    vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
+                else:
+                    vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
+            if vehicle.transmision != "Automatic":
+                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                if not vehicle.recommendation_status_reasons:
+                    vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
+                else:
+                    vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
+
+            query = select(USZipModel).where(
+                or_(USZipModel.copart_name == vehicle.location, USZipModel.iaai_name == vehicle.location)
+            )
+            result = await db.execute(query)
+            locations = result.scalars().all()
+            if not locations:
+                await match_and_update_location(vehicle.location, vehicle.auction)
+            query = select(FilterModel).where(
+                FilterModel.make == vehicle_data.make,
+                FilterModel.model == vehicle_data.model,
+                FilterModel.year_from <= vehicle_data.year,
+                FilterModel.year_to >= vehicle_data.year,
+                FilterModel.odometer_max >= vehicle_data.mileage
+            )
+            filter_ex = db.execute(query)
+            filter_res = filter_ex.scalars().one_or_none()
+            if filter_res:
+                vehicle.relevance = RelevanceStatus.ACTIVE
             else:
-                vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
-        if vehicle.transmision != "Automatic":
-            vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-            if not vehicle.recommendation_status_reasons:
-                vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
-            else:
-                vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
+                vehicle.relevance = RelevanceStatus.IRRELEVANT
 
-        query = select(USZipModel).where(
-            or_(USZipModel.copart_name == vehicle.location, USZipModel.iaai_name == vehicle.location)
-        )
-        result = await db.execute(query)
-        locations = result.scalars().all()
-        if not locations:
-            await match_and_update_location(vehicle.location, vehicle.auction)
-
-        if vehicle_data.condition_assessments:
-            for assessment in vehicle_data.condition_assessments:
-                if assessment.issue_description != "Unknown":
-                    db.add(
-                        ConditionAssessmentModel(
-                            type_of_damage=assessment.type_of_damage,
-                            issue_description=assessment.issue_description,
-                            car_id=vehicle.id,
+            if vehicle_data.condition_assessments:
+                for assessment in vehicle_data.condition_assessments:
+                    if assessment.issue_description != "Unknown":
+                        db.add(
+                            ConditionAssessmentModel(
+                                type_of_damage=assessment.type_of_damage,
+                                issue_description=assessment.issue_description,
+                                car_id=vehicle.id,
+                            )
                         )
-                    )
-                    if assessment.issue_description in [
-                        "Rejected Repair",
-                        "Burn Engine",
-                        "Mechanical",
-                        "Replaced Vin",
-                        "Burn",
-                        "Undercarriage",
-                        "Water/Flood",
-                        "Burn Interior",
-                        "Rollover",
-                    ]:
-                        vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                        if not vehicle.recommendation_status_reasons:
-                            vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
-                        else:
-                            vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+                        if assessment.issue_description in [
+                            "Rejected Repair",
+                            "Burn Engine",
+                            "Mechanical",
+                            "Replaced Vin",
+                            "Burn",
+                            "Undercarriage",
+                            "Water/Flood",
+                            "Burn Interior",
+                            "Rollover",
+                        ]:
+                            vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                            if not vehicle.recommendation_status_reasons:
+                                vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
+                            else:
+                                vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
 
-        if vehicle_data.photos:
-            db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
+            if vehicle_data.photos:
+                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
 
-        if vehicle_data.photos_hd:
-            db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
+            if vehicle_data.photos_hd:
+                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
 
-        if vehicle_data.sales_history:
-            await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
+            if vehicle_data.sales_history:
+                await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
 
-        logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}")
-        await db.commit()
-        return True
+            logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}")
+            await db.commit()
+            return True
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
@@ -708,11 +757,11 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool
     return True, car
 
 
-async def bulk_save_vehicles(db: AsyncSession, vehicles: List[CarCreateSchema]) -> List[str]:
+async def bulk_save_vehicles(db: AsyncSession, vehicles: CarBulkCreateSchema) -> List[str]:
     """Bulk save vehicles and return skipped VINs."""
     skipped_vins = []
-    for vehicle_data in vehicles:
-        success = await save_vehicle_with_photos(vehicle_data, db)
+    for vehicle_data in vehicles.vehicles:
+        success = await save_vehicle_with_photos(vehicle_data, vehicles.ivent, db)
         await db.commit()
         if not success:
             skipped_vins.append(vehicle_data.vin)
