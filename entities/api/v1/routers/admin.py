@@ -8,14 +8,16 @@ from typing import List
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete
+from sqlalchemy import delete, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from core.dependencies import get_current_user, get_token
 from db.session import get_db
 from models.admin import FilterModel, ROIModel
-from models.vehicle import FeeModel
+from models.vehicle import FeeModel, CarModel, RelevanceStatus
+from core.dependencies import get_settings
+from services.vehicle import scrape_and_save_sales_history,build_car_filter_query
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -25,6 +27,7 @@ from schemas.admin import (
     ROIListResponseSchema,
     ROIResponseSchema,
 )
+from tasks.task import parse_and_update_car
 
 # Configure logging for production environment
 logger = logging.getLogger("admin_router")
@@ -73,7 +76,10 @@ router = APIRouter(prefix="/admin")
 # Create a new filter
 @router.post("/filters", response_model=FilterResponse, status_code=status.HTTP_201_CREATED)
 async def create_filter(
-    filter: FilterCreate, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)
+    filter: FilterCreate,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    settings = Depends(get_settings)
 ):
     """
     Create a new filter.
@@ -97,6 +103,39 @@ async def create_filter(
         db_filter = FilterModel(**filter.dict(exclude_unset=True))
         db_filter.updated_at = datetime.utcnow()
         db.add(db_filter)
+        query = select(
+            CarModel.vin,
+            CarModel.vehicle,
+            CarModel.engine_title,
+            CarModel.mileage,
+            CarModel.make,
+            CarModel.model,
+            CarModel.year,
+            CarModel.transmision
+        ).where(
+            and_(
+                CarModel.make == db_filter.make,
+                CarModel.model == db_filter.model,
+                CarModel.year >= (db_filter.year_from or 0),
+                CarModel.year <= (db_filter.year_to or 3000),
+                CarModel.mileage >= (db_filter.odometer_min or 0),
+                CarModel.mileage <= (db_filter.odometer_max or 10_000_000)
+            )
+        )
+        query_res = await db.execute(query)
+        vehicles = query_res.mappings().all()
+        for vehicle_data in vehicles:
+            parse_and_update_car.delay(
+                vin=vehicle_data.get("vin"),
+                car_name=vehicle_data.get("vehicle"),
+                car_engine=vehicle_data.get("engine_title"),
+                mileage=vehicle_data.get("mileage"),
+                car_make=vehicle_data.get("make"),
+                car_model=vehicle_data.get("model"),
+                car_year=vehicle_data.get("year"),
+                car_transmison=vehicle_data.get("transmision"),
+            )
+            await scrape_and_save_sales_history(vehicle_data.get("vin"), db, settings)
         await db.commit()
         await db.refresh(db_filter)
         logger.info(f"Filter created successfully with id={db_filter.id}", extra=extra)
@@ -184,59 +223,65 @@ async def get_filter(filter_id: int, db: AsyncSession = Depends(get_db)):
 
 
 # Update a filter (partial update)
-@router.patch("/filters/{filter_id}", response_model=FilterResponse)
-async def update_filter(
+@router.patch("/filters/{filter_id}", summary="Update filter and car relevance")
+async def update_filter_and_relevance(
     filter_id: int,
-    filter_update: FilterUpdate,
-    current_user=Depends(get_current_user),
+    payload: FilterUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    """
-    Update a filter (partial update).
+    # 1. Get current filter
+    filter_stmt = select(FilterModel).where(FilterModel.id == filter_id)
+    result = await db.execute(filter_stmt)
+    db_filter = result.scalar_one_or_none()
 
-    Args:
-        filter_id (int): The ID of the filter to update.
-        filter_update (FilterUpdate): The data to update the filter with.
-        current_user: The currently authenticated user.
-        db (AsyncSession): The database session dependency.
+    if db_filter is None:
+        raise HTTPException(status_code=404, detail="Filter not found")
 
-    Returns:
-        FilterResponse: The updated filter.
+    # 2. Select car IDs that match the current filter
+    old_filter_query = build_car_filter_query(db_filter)
+    old_ids_stmt = select(CarModel.id).where(*old_filter_query)
+    old_ids_result = await db.execute(old_ids_stmt)
+    old_car_ids = {row[0] for row in old_ids_result.fetchall()}
 
-    Raises:
-        HTTPException: 404 if the filter is not found.
-        HTTPException: 500 if an error occurs during update.
-    """
-    request_id = "N/A"  # No request object available here
-    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
-    logger.info(f"Updating filter with id={filter_id} by user_id={current_user.id}", extra=extra)
+    # 3. Update filter fields
+    for key, value in payload.dict(exclude_unset=True).items():
+        setattr(db_filter, key, value)
+    await db.commit()
 
-    try:
-        result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
-        db_filter = result.scalars().first()
-        if not db_filter:
-            logger.warning(f"Filter with id={filter_id} not found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filter not found")
+    # 4. Select car IDs that match the updated filter
+    new_filter_query = build_car_filter_query(db_filter)
+    new_ids_stmt = select(CarModel.id).where(*new_filter_query)
+    new_ids_result = await db.execute(new_ids_stmt)
+    new_car_ids = {row[0] for row in new_ids_result.fetchall()}
 
-        update_data = filter_update.dict(exclude_unset=True)
-        for key, value in update_data.items():
-            if value:
-                setattr(db_filter, key, value)
+    # 5. Determine changes
+    to_activate = new_car_ids - old_car_ids
+    to_irrelevant = old_car_ids - new_car_ids
 
-        db_filter.updated_at = datetime.utcnow()
-        await db.commit()
-        await db.refresh(db_filter)
-        logger.info(f"Filter with id={filter_id} updated successfully", extra=extra)
-        return db_filter
-    except HTTPException as e:
-        logger.error(f"Failed to update filter with id={filter_id}: {str(e)}", extra=extra)
-        raise
-    except Exception as e:
-        logger.error(f"Unexpected error while updating filter with id={filter_id}: {str(e)}", extra=extra)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating filter",
+    # 6. Update relevance
+    if to_activate:
+        await db.execute(
+            update(CarModel)
+            .where(CarModel.id.in_(to_activate), CarModel.relevance == RelevanceStatus.IRRELEVANT)
+            .values(relevance=RelevanceStatus.ACTIVE)
         )
+
+    if to_irrelevant:
+        # Set to IRRELEVANT if ACTIVE
+        await db.execute(
+            update(CarModel)
+            .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ACTIVE)
+            .values(relevance=RelevanceStatus.IRRELEVANT)
+        )
+
+        # Delete if ARCHIVAL
+        await db.execute(
+            delete(CarModel)
+            .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ARCHIVAL)
+        )
+
+    await db.commit()
+    return {"detail": "Filter updated and car relevance adjusted"}
 
 
 @router.patch("/filters/{filter_id}/timestamp")
@@ -290,33 +335,68 @@ async def update_filter_timestamp(
 
 # Delete a filter
 @router.delete("/filters/{filter_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_filter(filter_id: int, current_user=Depends(get_current_user), db: AsyncSession = Depends(get_db)):
+async def delete_filter(
+    filter_id: int,
+    current_user=Depends(get_current_user),
+    db: AsyncSession = Depends(get_db)
+):
     """
-    Delete a filter.
+    Delete a filter and update/archive matched cars.
 
-    Args:
-        filter_id (int): The ID of the filter to delete.
-        current_user: The currently authenticated user.
-        db (AsyncSession): The database session dependency.
-
-    Raises:
-        HTTPException: 404 if the filter is not found.
-        HTTPException: 500 if an error occurs during deletion.
+    1. Find IDs of cars matching the filter.
+    2. For archived cars — delete them.
+    3. For active cars — mark them as 'irrelevant'.
     """
-    request_id = "N/A"  # No request object available here
+    request_id = "N/A"
     extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
     logger.info(f"Deleting filter with id={filter_id} by user_id={current_user.id}", extra=extra)
 
     try:
         result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
         db_filter = result.scalars().first()
+
         if not db_filter:
             logger.warning(f"Filter with id={filter_id} not found", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filter not found")
 
+        base_filter = and_(
+            CarModel.make == db_filter.make,
+            CarModel.model == db_filter.model,
+            CarModel.year >= (db_filter.year_from or 0),
+            CarModel.year <= (db_filter.year_to or 3000),
+            CarModel.mileage >= (db_filter.odometer_min or 0),
+            CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
+            CarModel.user_id == current_user.id,
+        )
+
+        archived_query = select(CarModel.id).where(
+            and_(base_filter, CarModel.relevance == RelevanceStatus.ARCHIVAL)
+        )
+        archived_ids = (await db.execute(archived_query)).scalars().all()
+
+        if archived_ids:
+            await db.execute(delete(CarModel).where(CarModel.id.in_(archived_ids)))
+
+        active_query = select(CarModel.id).where(
+            and_(base_filter, CarModel.relevance == RelevanceStatus.ACTIVE)
+        )
+        active_ids = (await db.execute(active_query)).scalars().all()
+
+        if active_ids:
+            await db.execute(
+                update(CarModel)
+                .where(CarModel.id.in_(active_ids))
+                .values(relevance=RelevanceStatus.IRRELEVANT)
+            )
+
         await db.delete(db_filter)
         await db.commit()
-        logger.info(f"Filter with id={filter_id} deleted successfully", extra=extra)
+
+        logger.info(
+            f"Filter {filter_id} deleted. Cars affected: {len(archived_ids)} archived removed, {len(active_ids)} marked irrelevant",
+            extra=extra,
+        )
+
     except HTTPException as e:
         logger.error(f"Failed to delete filter with id={filter_id}: {str(e)}", extra=extra)
         raise

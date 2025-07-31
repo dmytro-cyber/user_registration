@@ -30,10 +30,14 @@ app = Celery(
 
 # Celery beat configuration
 app.conf.beat_schedule = {
-    "fetch-api-data-every-minute": {
+    "fetch-api-data-every-hour": {
         "task": "tasks.tasks.fetch_api_data",
         "schedule": crontab(minute="*/60"),
     },
+    "delete-vehicles-evry-hour-at-0:15": {
+        "task": "tasks.tasks.delete_vehicle",
+        "schedule": crontab(minute=15)
+    }
 }
 
 app.conf.timezone = "UTC"
@@ -90,18 +94,6 @@ def fetch_api_data(size: int = None, base_url: str = None):
         # Process vehicles on the current page
         processed_vehicles = []
         for vehicle in data:
-            # created_at_str = vehicle.get("created_at")
-            # if not created_at_str:
-            #     continue
-            # # Parse created_at to datetime
-            # try:
-            #     created_at_str = created_at_str.replace("Z", "+00:00")
-            #     created_at = datetime.fromisoformat(created_at_str)
-            # except ValueError as e:
-            #     logger.error(f"Invalid created_at format for vehicle: {e}")
-            #     continue
-            # if first_created_at is None and page == 1:
-            #     first_created_at = created_at
 
             formatted_vehicle = format_car_data(vehicle)
             adapted_vehicle = {
@@ -160,81 +152,10 @@ def fetch_api_data(size: int = None, base_url: str = None):
     return "Finished processing all pages."
 
 
-# @app.task
-# def fetch_api_data():
-#     """
-#     Load saved API response from iaai_response_ex.json and process it.
-
-#     Returns:
-#         List containing the processed data, or None if an error occurs.
-#     """
-#     file_path = os.path.join("iaai_response_ex.json")
-
-#     try:
-#         with open(file_path, "r") as file:
-#             data = json.load(file)
-
-#         data = data.get("data")
-#         if not data:
-#             return None
-
-#         asd = []
-#         processed_vehicles = []
-#         for vehicle in data:
-#             formatted_vehicle = format_car_data(vehicle)
-#             asd.append(
-#                 {
-#                     "vin": formatted_vehicle["vin"],
-#                     "vehicle": formatted_vehicle["vehicle"],
-#                     "engine": formatted_vehicle["engine"],
-#                 }
-#             )
-# adapted_vehicle = {
-#     "vin": formatted_vehicle["vin"],
-#     "vehicle": formatted_vehicle["vehicle"],
-#     "make": formatted_vehicle["make"],
-#     "model": formatted_vehicle["model"],
-#     "year": formatted_vehicle.get("year"),
-#     "mileage": formatted_vehicle.get("mileage"),
-#     "auction": formatted_vehicle.get("auction"),
-#     "auction_name": formatted_vehicle.get("auction_name"),
-#     "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
-#     "lot": formatted_vehicle.get("lot"),
-#     "seller": formatted_vehicle.get("seller"),
-#     "location": formatted_vehicle.get("location"),
-#     "bid": formatted_vehicle.get("bid"),
-#     "engine": formatted_vehicle.get("engine"),
-#     "has_keys": formatted_vehicle.get("has_keys"),
-#     "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
-#     "drive_type": formatted_vehicle.get("drive_type"),
-#     "exterior_color": formatted_vehicle.get("exterior_color"),
-#     "body_style": formatted_vehicle.get("body_style"),
-#     "transmision": formatted_vehicle.get("transmision"),
-#     "vehicle_type": formatted_vehicle.get("vehicle_type"),
-#     "link": formatted_vehicle.get("link"),
-#     "is_salvage": formatted_vehicle.get("is_salvage", False),
-#     "photos": formatted_vehicle.get("photos", []),
-#     "photos_hd": formatted_vehicle.get("photos_hd", []),
-#     "condition_assessments": formatted_vehicle.get("condition_assessments", []),
-# }
-# processed_vehicles.append(adapted_vehicle)
-
-#         print(f"Processed vehicles: {asd}")
-#         httpx_client = httpx.Client(timeout=5.0)
-#         httpx_client.headers.update({"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")})
-#         response = httpx_client.post(f"http://entities:8000/api/v1/vehicles/bulk/", json=processed_vehicles)
-#         print(f"Received response: {response.status_code} - {response.text}")
-#         return processed_vehicles
-
-#     except FileNotFoundError:
-#         print(f"File {file_path} not found.")
-#         return None
-#     except json.JSONDecodeError as e:
-#         print(f"Failed to parse JSON from file: {e}")
-#         return None
-#     except httpx.RequestError as e:
-#         print(f"HTTP request failed: {e}")
-#         return None
-#     except Exception as e:
-#         print(f"An unexpected error occurred: {e}")
-#         return None
+@app.task
+def delete_vehicle():
+    headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
+    url = "https://api.apicar.store/api/cars/deleted"
+    response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
+    delete_url = "http://entities:8000/api/v1/vehicles/bulk/delete"
+    httpx.post(delete_url, json=response, headers=headers)

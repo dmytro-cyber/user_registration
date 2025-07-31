@@ -56,6 +56,52 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         db.add(sales_history)
         await db.commit()
 
+SITE_MAP = {
+    1: "COPART",
+    2: "IAAI",
+}
+
+async def update_cars_relevance(payload: dict, db: AsyncSession):
+    lots_by_site = {}
+    
+    for item in payload["data"]:
+        site_str = SITE_MAP.get(item["site"])
+        if site_str:
+            lots_by_site.setdefault(site_str, set()).add(item["lot_id"])
+
+    if not lots_by_site:
+        return
+
+    stmt = select(CarModel).where(
+        or_(*[
+            and_(CarModel.auction == site, CarModel.lot.in_(lot_ids))
+            for site, lot_ids in lots_by_site.items()
+        ])
+    )
+    result = await db.execute(stmt)
+    cars = result.scalars().all()
+
+    to_delete_ids = []
+    to_archive_ids = []
+
+    for car in cars:
+        if car.relevance == RelevanceStatus.IRRELEVANT:
+            to_delete_ids.append(car.id)
+        elif car.relevance == RelevanceStatus.ACTIVE:
+            to_archive_ids.append(car.id)
+
+    if to_delete_ids:
+        await db.execute(
+            delete(CarModel).where(CarModel.id.in_(to_delete_ids))
+        )
+
+    if to_archive_ids:
+        await db.execute(
+            update(CarModel)
+            .where(CarModel.id.in_(to_archive_ids))
+            .values(relevance=RelevanceStatus.ARCHIVAL)
+        )
+    await db.commit()
 
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
@@ -299,8 +345,6 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 async def get_filtered_vehicles(
     db: AsyncSession, filters: Dict[str, Any], ordering, page: int, page_size: int
 ) -> tuple[List[CarModel], int, int, Dict[str, Any]]:
-    today = datetime.now(timezone.utc).date()
-    today_naive = datetime.combine(today, time.min)
     user_id = filters["user_id"]
     liked_expr = case((user_likes.c.user_id == user_id, True), else_=False).label("liked")
 
@@ -321,6 +365,7 @@ async def get_filtered_vehicles(
             CarModel.suggested_bid > 0,
         )
     )
+    base_query = base_query.filter(CarModel.relevance == RelevanceStatus.ACTIVE)
 
     # Condition Assessments
     if filters.get("condition_assessments"):
@@ -420,8 +465,6 @@ async def get_filtered_vehicles(
         if isinstance(date_from, str):
             date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
         base_query = base_query.filter(CarModel.date >= datetime.combine(date_from, time.min))
-    else:
-        base_query = base_query.filter(CarModel.date >= today_naive)
 
     if filters.get("date_to"):
         date_to = filters["date_to"]
