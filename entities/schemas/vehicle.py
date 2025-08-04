@@ -28,6 +28,8 @@ class CarBaseSchema(BaseModel):
     has_keys: bool | None
     predicted_roi: float | None
     predicted_profit_margin: float | None
+    roi: float | None
+    profit_margin: float | None
     current_bid: float | None
     suggested_bid: float | None
     location: str | None
@@ -321,6 +323,8 @@ class CarFilterOptionsSchema(BaseModel):
 
 class UpdateActualBidSchema(BaseModel):
     actual_bid: float
+    roi: float
+    profit_margin: float
     comment: str | None = None
 
 

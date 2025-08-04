@@ -256,6 +256,8 @@ async def update_actual_bid(
         )
         db.add(hub_history)
         vehicle.actual_bid = data.actual_bid
+        vehicle.roi = data.roi
+        vehicle.profit_margin = data.profit_margin
         db.add(vehicle)
         await db.commit()
         await db.refresh(vehicle)

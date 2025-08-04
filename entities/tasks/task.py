@@ -17,7 +17,7 @@ from core.celery_config import app
 from core.config import settings
 from db.session import POSTGRESQL_DATABASE_URL
 from models.admin import ROIModel
-from models.vehicle import AutoCheckModel, CarModel, FeeModel, RecommendationStatus
+from models.vehicle import AutoCheckModel, CarModel, FeeModel, RecommendationStatus, RelevanceStatus
 from storages import S3StorageClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -231,8 +231,7 @@ async def _update_car_bids_async():
     AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with AsyncSessionFactory() as db:
         try:
-            current_time = datetime.utcnow()
-            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.date > current_time)
+            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.relevance == RelevanceStatus.ACTIVE)
             result = await db.execute(query)
             cars = [{"id": r.id, "url": r.link, "lot": r.lot} for r in result.all()]
 

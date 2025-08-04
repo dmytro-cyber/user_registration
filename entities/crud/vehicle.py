@@ -4,7 +4,7 @@ from math import asin, cos, radians, sin, sqrt
 from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select, bindparam
+from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select, bindparam, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, selectinload
@@ -14,6 +14,7 @@ from core.setup import match_and_update_location
 from models.user import UserModel, UserRoleEnum, user_likes
 from models.admin import FilterModel
 from models.vehicle import (
+    AutoCheckModel,
     CarInventoryModel,
     CarInventoryStatus,
     CarModel,
@@ -30,6 +31,7 @@ from models.vehicle import (
 )
 from ordering_constr import ORDERING_MAP
 from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema
+from storages.s3 import s3_client
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -61,7 +63,7 @@ SITE_MAP = {
     2: "IAAI",
 }
 
-async def update_cars_relevance(payload: dict, db: AsyncSession):
+async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
     lots_by_site = {}
     
     for item in payload["data"]:
@@ -83,24 +85,39 @@ async def update_cars_relevance(payload: dict, db: AsyncSession):
 
     to_delete_ids = []
     to_archive_ids = []
+    to_archive_car_ids = set()
 
     for car in cars:
         if car.relevance == RelevanceStatus.IRRELEVANT:
             to_delete_ids.append(car.id)
         elif car.relevance == RelevanceStatus.ACTIVE:
             to_archive_ids.append(car.id)
+            to_archive_car_ids.add(car.id)
 
     if to_delete_ids:
-        await db.execute(
-            delete(CarModel).where(CarModel.id.in_(to_delete_ids))
-        )
+        await db.execute(delete(CarModel).where(CarModel.id.in_(to_delete_ids)))
 
     if to_archive_ids:
+        stmt_checks = select(AutoCheckModel).where(AutoCheckModel.car_id.in_(to_archive_car_ids))
+        result_checks = await db.execute(stmt_checks)
+        auto_checks = result_checks.scalars().all()
+
+        for check in auto_checks:
+            if check.screenshot_url:
+                file_name = check.screenshot_url.split("/")[-1]
+                try:
+                    s3_client.delete_file(file_name)
+                except Exception as e:
+                    # Лог або повідомлення про помилку
+                    print(f"Failed to delete file {file_name} from S3: {e}")
+
+        # Оновлюємо статус relevance
         await db.execute(
             update(CarModel)
             .where(CarModel.id.in_(to_archive_ids))
             .values(relevance=RelevanceStatus.ARCHIVAL)
         )
+
     await db.commit()
 
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
@@ -439,8 +456,8 @@ async def get_filtered_vehicles(
     # Numeric range filters
     for key, col in {
         "mileage_min": CarModel.mileage,
-        "predicted_profit_margin_min": CarModel.predicted_profit_margin,
-        "predicted_roi_min": CarModel.predicted_roi,
+        "predicted_profit_margin_min": CarModel.profit_margin,
+        "predicted_roi_min": CarModel.roi,
         "min_owners_count": CarModel.owners,
         "min_accident_count": CarModel.accident_count,
         "min_year": CarModel.year,
@@ -450,8 +467,8 @@ async def get_filtered_vehicles(
 
     for key, col in {
         "mileage_max": CarModel.mileage,
-        "predicted_profit_margin_max": CarModel.predicted_profit_margin,
-        "predicted_roi_max": CarModel.predicted_roi,
+        "predicted_profit_margin_max": CarModel.profit_margin,
+        "predicted_roi_max": CarModel.roi,
         "max_owners_count": CarModel.owners,
         "max_accident_count": CarModel.accident_count,
         "max_year": CarModel.year,

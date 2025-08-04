@@ -668,8 +668,12 @@ async def get_locations_with_coords(
         query = query.filter(CarModel.auction_name.in_(auction_names))
     if body_style:
         query = query.filter(CarModel.body_style.in_(body_style))
-    if sale_start and sale_end:
-        query = query.filter(CarSaleHistoryModel.date.between(sale_start, sale_end))
+    if sale_start:
+        sale_start = normalize_date_param(sale_start)
+        query = query.filter(CarSaleHistoryModel.date >= sale_start)
+    if sale_end:
+        sale_end = normalize_date_param(sale_end)
+        query = query.filter(CarSaleHistoryModel.date <= sale_end)
 
     query = query.group_by(CarModel.location, CarModel.auction)
 
@@ -981,8 +985,12 @@ async def get_sales_summary(
         filters.append(CarModel.auction_name.in_(auction_names))
     if body_style:
         filters.append(CarModel.body_style.in_(body_style))
-    if sale_start and sale_end:
-        filters.append(CarSaleHistoryModel.date.between(sale_start, sale_end))
+    if sale_start:
+        sale_start = normalize_date_param(sale_start)
+        filters.append(CarSaleHistoryModel.date >= sale_start)
+    if sale_end:
+        sale_end = normalize_date_param(sale_end)
+        filters.append(CarSaleHistoryModel.date <= sale_end)
 
     query = query.filter(*filters)
 
