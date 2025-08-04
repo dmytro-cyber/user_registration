@@ -75,6 +75,7 @@ async def get_filtered_cars(
     ),
     session: AsyncSession = Depends(get_db),
 ):
+    logger.debug("Entering get_filtered_cars endpoint")
     engine_list = normalize_csv_param(engine)
     transmision_list = normalize_csv_param(transmision)
     drive_type_list = normalize_csv_param(drive_type)
@@ -83,15 +84,16 @@ async def get_filtered_cars(
     body_style_list = normalize_csv_param(body_style)
     auction_name_list = normalize_csv_param(auction_name)
     recommendation_status_list = normalize_csv_param(recommendation_status)
-    auctions = normalize_csv_param(auctions)
+    auctions_list = normalize_csv_param(auctions)
 
     filters = []
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
-    
     filters.append(CarModel.date >= today_naive)
+
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -99,6 +101,7 @@ async def get_filtered_cars(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
@@ -108,9 +111,9 @@ async def get_filtered_cars(
 
     sale_start_date = normalize_date_param(sale_start)
     sale_end_date = normalize_date_param(sale_end)
-    auctions = normalize_csv_param(auctions)
-    if auctions is not None:
-        filters.append(CarModel.auction.in_(auctions))
+
+    if auctions_list:
+        filters.append(CarModel.auction.in_(auctions_list))
     if sale_start_date is not None:
         filters.append(CarModel.date >= sale_start_date)
     if sale_end_date is not None:
@@ -119,22 +122,18 @@ async def get_filtered_cars(
         filters.append(CarModel.mileage >= mileage_start)
     if mileage_end is not None:
         filters.append(CarModel.mileage <= mileage_end)
-
     if owners_start is not None:
         filters.append(CarModel.owners >= owners_start)
     if owners_end is not None:
         filters.append(CarModel.owners <= owners_end)
-
     if accident_start is not None:
         filters.append(CarModel.accident_count >= accident_start)
     if accident_end is not None:
         filters.append(CarModel.accident_count <= accident_end)
-
     if year_start is not None:
         filters.append(CarModel.year >= year_start)
     if year_end is not None:
         filters.append(CarModel.year <= year_end)
-
     if make:
         filters.append(CarModel.make == make)
     if model:
@@ -155,18 +154,16 @@ async def get_filtered_cars(
         filters.append(CarModel.auction_name.in_(auction_name_list))
     if recommendation_status_list:
         filters.append(CarModel.recommendation_status == recommendation_status_list[0])
-
     if predicted_roi_min is not None:
         filters.append(CarModel.predicted_roi >= predicted_roi_min)
     if predicted_roi_max is not None:
         filters.append(CarModel.predicted_roi <= predicted_roi_max)
-
     if predicted_profit_margin_min is not None:
         filters.append(CarModel.predicted_profit_margin >= predicted_profit_margin_min)
     if predicted_profit_margin_max is not None:
         filters.append(CarModel.predicted_profit_margin <= predicted_profit_margin_max)
 
-    stmt = select(
+    query = select(
         CarModel.vehicle,
         CarModel.vin,
         CarModel.owners,
@@ -184,10 +181,10 @@ async def get_filtered_cars(
         CarModel.auction
     )
     if filters:
-        stmt = stmt.where(and_(*filters))
-    stmt = stmt.limit(20)
+        query = query.filter(and_(*filters))
+    query = query.limit(20)
 
-    result = await session.execute(stmt)
+    result = await session.execute(query)
     cars = result.fetchall()
 
     car_list = [
@@ -212,8 +209,10 @@ async def get_filtered_cars(
     ]
 
     if filters and not car_list:
+        logger.warning("No cars found with specified filters")
         raise HTTPException(status_code=404, detail="No cars found with specified filters")
 
+    logger.debug(f"Returning {len(car_list)} cars")
     return car_list
 
 
@@ -255,10 +254,11 @@ async def get_top_sellers(
     ),
     session: AsyncSession = Depends(get_db),
 ):
-    # Нормалізація параметрів
+    logger.debug("Entering get_top_sellers endpoint")
     filters = []
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -266,13 +266,14 @@ async def get_top_sellers(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
         model = vehicle.model
         year_start = vehicle.year
         year_end = vehicle.year
-    
+
     locations_list = normalize_csv_param(locations)
     if not locations_list:
         query = (
@@ -303,17 +304,14 @@ async def get_top_sellers(
         filters.append(CarModel.mileage >= mileage_start)
     if mileage_end is not None:
         filters.append(CarModel.mileage <= mileage_end)
-
     if owners_start is not None:
         filters.append(CarModel.owners >= owners_start)
     if owners_end is not None:
         filters.append(CarModel.owners <= owners_end)
-
     if accident_start is not None:
         filters.append(CarModel.accident_count >= accident_start)
     if accident_end is not None:
         filters.append(CarModel.accident_count <= accident_end)
-
     if year_start is not None:
         filters.append(CarModel.year >= year_start)
     if year_end is not None:
@@ -375,32 +373,32 @@ async def get_top_sellers(
     elif sale_end_date:
         filters.append(CarSaleHistoryModel.date <= datetime.combine(sale_end_date, time.max))
 
-    # Основний запит
-    stmt = (
+    query = (
         select(
             CarModel.seller.label("Seller Name"),
             func.count(CarSaleHistoryModel.id).label("Lots")
         )
         .join(CarSaleHistoryModel, CarModel.id == CarSaleHistoryModel.car_id)
         .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
-        .where(
+    )
+    if filters:
+        query = query.filter(
             CarSaleHistoryModel.status == "Sold",
             CarSaleHistoryModel.final_bid.isnot(None),
-            *filters
+            and_(*filters)
         )
-        .group_by(CarModel.seller)
-        .order_by(func.count(CarSaleHistoryModel.id).desc())
-        .limit(10)
-    )
+    query = query.group_by(CarModel.seller).order_by(func.count(CarSaleHistoryModel.id).desc()).limit(10)
 
-    result = await session.execute(stmt)
+    result = await session.execute(query)
     sellers = result.fetchall()
 
     if filters and not sellers:
+        logger.warning("No sellers found with specified filters")
         raise HTTPException(status_code=404, detail="No sellers found with specified filters")
 
-    return [{"Seller Name": row[0], "Lots": row[1]} for row in sellers]
-
+    response = [{"Seller Name": row[0], "Lots": row[1]} for row in sellers]
+    logger.debug(f"Returning {len(response)} top sellers")
+    return response
 
 
 @router.get(
@@ -447,11 +445,13 @@ async def get_avg_sale_prices(
     ),
     session: AsyncSession = Depends(get_db),
 ):
-    # Normalize parameters
+    logger.debug("Entering get_avg_sale_prices endpoint")
     def csv(param: Optional[str]) -> Optional[list[str]]:
         return [x.strip() for x in param.split(",") if x.strip()] if param else None
+
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -459,6 +459,7 @@ async def get_avg_sale_prices(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
@@ -480,13 +481,20 @@ async def get_avg_sale_prices(
     ref_date = reference_date or datetime.utcnow()
     start_date = ref_date - timedelta(days=interval_amount * {"day": 1, "week": 7, "month": 30}[interval_unit])
 
+    query = (
+        select(
+            func.date_trunc(interval_unit, CarSaleHistoryModel.date).label("period"),
+            func.avg(CarSaleHistoryModel.final_bid).label("avg_price")
+        )
+        .join(CarModel, CarSaleHistoryModel.car_id == CarModel.id)
+        .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
+    )
     filters = [
         CarSaleHistoryModel.status == "Sold",
         CarSaleHistoryModel.final_bid.isnot(None),
         CarSaleHistoryModel.date >= start_date,
         CarSaleHistoryModel.date <= ref_date,
     ]
-
     if location_list:
         filters.append(CarModel.location.in_(location_list))
     if auctions_list:
@@ -542,22 +550,11 @@ async def get_avg_sale_prices(
     elif sale_end:
         filters.append(CarSaleHistoryModel.date <= sale_end)
 
-    # Group by interval (day/week/month)
-    interval_expr = func.date_trunc(interval_unit, CarSaleHistoryModel.date).label("period")
+    if filters:
+        query = query.filter(and_(*filters))
+    query = query.group_by(func.date_trunc(interval_unit, CarSaleHistoryModel.date)).order_by("period")
 
-    stmt = (
-        select(
-            interval_expr,
-            func.avg(CarSaleHistoryModel.final_bid).label("avg_price")
-        )
-        .join(CarModel, CarSaleHistoryModel.car_id == CarModel.id)
-        .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
-        .where(and_(*filters))
-        .group_by(interval_expr)
-        .order_by(interval_expr)
-    )
-
-    result = await session.execute(stmt)
+    result = await session.execute(query)
     rows = result.fetchall()
 
     data = [
@@ -569,13 +566,12 @@ async def get_avg_sale_prices(
     ]
 
     if filters and not data:
+        logger.warning("No sale prices found with specified filters")
         raise HTTPException(status_code=404, detail="No sale prices found with specified filters")
 
+    logger.debug(f"Returning {len(data)} sale price records")
     return data
 
-
-
-from collections import defaultdict
 
 @router.get("/locations-by-lots")
 async def get_locations_with_coords(
@@ -610,8 +606,10 @@ async def get_locations_with_coords(
     ),
     db: AsyncSession = Depends(get_db),
 ):
+    logger.debug("Entering get_locations_with_coords endpoint")
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -619,21 +617,22 @@ async def get_locations_with_coords(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
         model = vehicle.model
         year_start = vehicle.year
         year_end = vehicle.year
+
     today = datetime.now(timezone.utc).date()
     today_naive = datetime.combine(today, time.min)
     query = (
         select(CarModel.location, CarModel.auction, func.count().label("lots"))
         .outerjoin(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
-        .filter(CarModel.date >= today_naive)
     )
+    query = query.filter(CarModel.date >= today_naive)
 
-    # Фільтри
     if auctions:
         query = query.filter(CarModel.auction.in_(auctions))
     if year_start and year_end:
@@ -682,9 +681,9 @@ async def get_locations_with_coords(
 
     locations = set([row[0].lower() for row in raw_data if row[0]])
     if not locations:
+        logger.debug("No locations found")
         return []
 
-    # Отримати координати та штати
     coord_query = select(USZipModel).where(
         or_(
             func.lower(USZipModel.copart_name).in_(locations),
@@ -739,6 +738,7 @@ async def get_locations_with_coords(
         for auction, lots in auctions.items()
     ]
 
+    logger.debug(f"Returning {len(response['by_location'])} locations")
     return response
 
 
@@ -775,8 +775,10 @@ async def avg_final_bid_by_location(
     ),
     session: AsyncSession = Depends(get_db),
 ):
+    logger.debug("Entering avg_final_bid_by_location endpoint")
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -784,12 +786,14 @@ async def avg_final_bid_by_location(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
         model = vehicle.model
         year_start = vehicle.year
         year_end = vehicle.year
+
     sale_start_dt = datetime.fromisoformat(sale_start) if sale_start else None
     sale_end_dt = datetime.fromisoformat(sale_end) if sale_end else None
 
@@ -815,12 +819,20 @@ async def avg_final_bid_by_location(
         )
     }
 
+    query = (
+        select(
+            CarModel.location,
+            CarModel.auction,
+            func.avg(CarSaleHistoryModel.final_bid).label("average_final_bid")
+        )
+        .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
+        .join(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
+    )
     filters = [
         CarModel.seller.isnot(None),
         CarSaleHistoryModel.final_bid.isnot(None),
         CarSaleHistoryModel.status == 'Sold'
     ]
-
     if auctions:
         filters.append(CarModel.auction.in_(auctions))
     if mileage_start is not None and mileage_end is not None:
@@ -862,20 +874,11 @@ async def avg_final_bid_by_location(
     elif sale_end_dt:
         filters.append(CarSaleHistoryModel.date <= sale_end_dt)
 
-    car_stmt = (
-        select(
-            CarModel.location,
-            CarModel.auction,
-            func.avg(CarSaleHistoryModel.final_bid).label("average_final_bid")
-        )
-        .join(CarSaleHistoryModel, CarSaleHistoryModel.car_id == CarModel.id)
-        .join(ConditionAssessmentModel, ConditionAssessmentModel.car_id == CarModel.id)
-        .where(and_(*filters))
-        .group_by(CarModel.location, CarModel.auction)
-        .order_by(func.avg(CarSaleHistoryModel.final_bid).desc())
-    )
+    if filters:
+        query = query.filter(and_(*filters))
+    query = query.group_by(CarModel.location, CarModel.auction).order_by(func.avg(CarSaleHistoryModel.final_bid).desc())
 
-    car_result = await session.execute(car_stmt)
+    car_result = await session.execute(query)
     raw_data = car_result.all()
 
     response = []
@@ -891,6 +894,7 @@ async def avg_final_bid_by_location(
                 "average_final_bid": round(row.average_final_bid or 0)
             })
 
+    logger.debug(f"Returning {len(response)} locations with average final bids")
     return response
 
 
@@ -926,8 +930,10 @@ async def get_sales_summary(
         description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
     ),
 ):
+    logger.debug("Entering get_sales_summary endpoint")
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -935,12 +941,14 @@ async def get_sales_summary(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
         model = vehicle.model
         year_start = vehicle.year
         year_end = vehicle.year
+
     query = select(CarModel).options(
         joinedload(CarModel.sales_history),
         joinedload(CarModel.condition_assessments)
@@ -952,7 +960,6 @@ async def get_sales_summary(
         CarSaleHistoryModel.source != 'Unknown',
         CarModel.seller.isnot(None),
     ]
-
     if mileage_start is not None and mileage_end is not None:
         filters.append(CarModel.mileage.between(mileage_start, mileage_end))
     if owners_start is not None and owners_end is not None:
@@ -992,7 +999,7 @@ async def get_sales_summary(
         sale_end = normalize_date_param(sale_end)
         filters.append(CarSaleHistoryModel.date <= sale_end)
 
-    query = query.filter(*filters)
+    query = query.filter(and_(*filters))
 
     result = await db.execute(query)
     cars = result.scalars().unique().all()
@@ -1018,6 +1025,7 @@ async def get_sales_summary(
             for source, amount in sorted(source_sales.items(), key=lambda x: x[1], reverse=True)
         ]
     }
+    logger.debug(f"Returning sales summary with total: {total_sales}")
     return response
 
 
@@ -1050,9 +1058,11 @@ async def get_sales_summary(
         description="If provided, the filters 'make', 'model', 'year_start', and 'year_end' will be ignored. Only the vehicle with this VIN will be used as a reference."
     ),
 ):
+    logger.debug("Entering get_sales_summary endpoint")
     filters = []
     if vin is not None:
         if len(vin) != 17:
+            logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
         query = select(CarModel).where(CarModel.vin == vin)
@@ -1060,6 +1070,7 @@ async def get_sales_summary(
         vehicle = result.scalar_one_or_none()
 
         if not vehicle:
+            logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
 
         make = vehicle.make
@@ -1116,12 +1127,13 @@ async def get_sales_summary(
             func.count(CarSaleHistoryModel.id).label("count")
         )
         .join(CarModel, CarModel.id == CarSaleHistoryModel.car_id)
-        .where(*filters)
-        .group_by(CarSaleHistoryModel.status)
     )
+    if filters:
+        query = query.filter(and_(*filters))
+    query = query.group_by(CarSaleHistoryModel.status)
 
     results = (await db.execute(query)).all()
-    total_query = select(func.count(CarSaleHistoryModel.id)).join(CarModel).where(*filters)
+    total_query = select(func.count(CarSaleHistoryModel.id)).join(CarModel).filter(and_(*filters))
     total = (await db.execute(total_query)).scalar_one()
 
     breakdown = [
@@ -1133,7 +1145,9 @@ async def get_sales_summary(
         for status, count in results
     ]
 
-    return {
+    response = {
         "total": total,
         "breakdown": breakdown
     }
+    logger.debug(f"Returning sales summary with total: {total}")
+    return response
