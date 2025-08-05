@@ -74,7 +74,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
     """
 
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
-
+    page = 1
     while True:
         url = generate_car_api_url(page=page, size=size, base_url=base_url)
         logger.info(f"Fetching data from API (page {page}): {url}")
@@ -94,41 +94,43 @@ def fetch_api_data(size: int = None, base_url: str = None):
         # Process vehicles on the current page
         processed_vehicles = []
         for vehicle in data:
-
             formatted_vehicle = format_car_data(vehicle)
-            adapted_vehicle = {
-                "vin": formatted_vehicle["vin"],
-                "vehicle": formatted_vehicle["vehicle"],
-                "make": formatted_vehicle["make"],
-                "model": formatted_vehicle["model"],
-                "year": formatted_vehicle.get("year"),
-                "mileage": formatted_vehicle.get("mileage"),
-                "auction": formatted_vehicle.get("auction"),
-                "auction_name": formatted_vehicle.get("auction_name"),
-                "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
-                "lot": formatted_vehicle.get("lot"),
-                "seller": formatted_vehicle.get("seller"),
-                "seller_type": formatted_vehicle.get("seller_type"),
-                "location": formatted_vehicle.get("location"),
-                "current_bid": formatted_vehicle.get("current_bid"),
-                "engine": formatted_vehicle.get("engine"),
-                "has_keys": formatted_vehicle.get("has_keys"),
-                "engine_title": formatted_vehicle.get("engine_title"),
-                "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
-                "drive_type": formatted_vehicle.get("drive_type"),
-                "exterior_color": formatted_vehicle.get("exterior_color"),
-                "condition": formatted_vehicle.get("condition"),
-                "body_style": formatted_vehicle.get("body_style"),
-                "fuel_type": formatted_vehicle.get("fuel_type"),
-                "transmision": formatted_vehicle.get("transmision"),
-                "vehicle_type": formatted_vehicle.get("vehicle_type"),
-                "link": formatted_vehicle.get("link"),
-                "is_salvage": formatted_vehicle.get("is_salvage", False),
-                "photos": formatted_vehicle.get("photos", []),
-                "photos_hd": formatted_vehicle.get("photos_hd", []),
-                "condition_assessments": formatted_vehicle.get("condition_assessments", []),
-            }
-            processed_vehicles.append(adapted_vehicle)
+            try:
+                adapted_vehicle = {
+                    "vin": formatted_vehicle["vin"],
+                    "vehicle": formatted_vehicle["vehicle"],
+                    "make": formatted_vehicle["make"],
+                    "model": formatted_vehicle["model"],
+                    "year": formatted_vehicle.get("year"),
+                    "mileage": formatted_vehicle.get("mileage"),
+                    "auction": formatted_vehicle.get("auction"),
+                    "auction_name": formatted_vehicle.get("auction_name"),
+                    "date": formatted_vehicle.get("date").isoformat() if formatted_vehicle.get("date") else None,
+                    "lot": formatted_vehicle.get("lot"),
+                    "seller": formatted_vehicle.get("seller"),
+                    "seller_type": formatted_vehicle.get("seller_type"),
+                    "location": formatted_vehicle.get("location"),
+                    "current_bid": formatted_vehicle.get("current_bid"),
+                    "engine": formatted_vehicle.get("engine"),
+                    "has_keys": formatted_vehicle.get("has_keys"),
+                    "engine_title": formatted_vehicle.get("engine_title"),
+                    "engine_cylinder": formatted_vehicle.get("engine_cylinder"),
+                    "drive_type": formatted_vehicle.get("drive_type"),
+                    "exterior_color": formatted_vehicle.get("exterior_color"),
+                    "condition": formatted_vehicle.get("condition"),
+                    "body_style": formatted_vehicle.get("body_style"),
+                    "fuel_type": formatted_vehicle.get("fuel_type"),
+                    "transmision": formatted_vehicle.get("transmision"),
+                    "vehicle_type": formatted_vehicle.get("vehicle_type"),
+                    "link": formatted_vehicle.get("link"),
+                    "is_salvage": formatted_vehicle.get("is_salvage", False),
+                    "photos": formatted_vehicle.get("photos", []),
+                    "photos_hd": formatted_vehicle.get("photos_hd", []),
+                    "condition_assessments": formatted_vehicle.get("condition_assessments", []),
+                }
+                processed_vehicles.append(adapted_vehicle)
+            except Exception as e:
+                print(e, formatted_vehicle)
         
         payload = {
             "ivent": "created" if base_url is not None else "updated",

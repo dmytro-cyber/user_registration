@@ -20,4 +20,5 @@ from .vehicle import HistoryModel as HistoryModel
 from .vehicle import PartInventoryModel as PartInventoryModel
 from .vehicle import PartModel as PartModel
 from .vehicle import PhotoModel as PhotoModel
+from .vehicle import RelevanceStatus as RelevanceStatus
 from .vehicle import USZipModel as USZipModel

@@ -31,7 +31,7 @@ from models.vehicle import (
 )
 from ordering_constr import ORDERING_MAP
 from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema
-from storages.s3 import s3_client
+from core.dependencies import get_s3_storage_client
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -64,6 +64,7 @@ SITE_MAP = {
 }
 
 async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
+    s3_client = get_s3_storage_client()
     lots_by_site = {}
     
     for item in payload["data"]:
@@ -135,7 +136,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     FilterModel.year_to >= vehicle_data.year,
                     FilterModel.odometer_max >= vehicle_data.mileage
                 )
-                filter_ex = db.execute(query)
+                filter_ex = await db.execute(query)
                 filter_res = filter_ex.scalars().one_or_none()
                 if filter_res:
                     existing_vehicle.relevance = RelevanceStatus.ACTIVE
@@ -151,7 +152,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     FilterModel.year_to >= vehicle_data.year,
                     FilterModel.odometer_max >= vehicle_data.mileage
                 )
-                filter_ex = db.execute(query)
+                filter_ex = await db.execute(query)
                 filter_res = filter_ex.scalars().one_or_none()
                 if filter_res:
                     existing_vehicle.relevance = RelevanceStatus.ACTIVE
@@ -266,12 +267,15 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                 await match_and_update_location(vehicle.location, vehicle.auction)
             query = select(FilterModel).where(
                 FilterModel.make == vehicle_data.make,
-                FilterModel.model == vehicle_data.model,
+                or_(
+                    FilterModel.model == vehicle_data.model,
+                    FilterModel.model.is_(None)
+                ),
                 FilterModel.year_from <= vehicle_data.year,
                 FilterModel.year_to >= vehicle_data.year,
                 FilterModel.odometer_max >= vehicle_data.mileage
             )
-            filter_ex = db.execute(query)
+            filter_ex = await db.execute(query)
             filter_res = filter_ex.scalars().one_or_none()
             if filter_res:
                 vehicle.relevance = RelevanceStatus.ACTIVE
@@ -321,9 +325,8 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
             return False
-        raise HTTPException(status_code=400, detail=f"Database error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+        pass
 
 
 async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -> Optional[CarModel]:

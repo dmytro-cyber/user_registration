@@ -28,7 +28,7 @@ from crud.vehicle import (
 )
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, HistoryModel
+from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, HistoryModel, RelevanceStatus
 from schemas.vehicle import (
     CarBaseSchema,
     CarBulkCreateSchema,
@@ -39,7 +39,6 @@ from schemas.vehicle import (
     CarListResponseSchema,
     PartRequestScheme,
     PartResponseScheme,
-    RelevanceStatus,
     UpdateCarStatusSchema,
 )
 from services.vehicle import (
@@ -795,10 +794,9 @@ async def bulk_delete_cars(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
     settings: Settings = Depends(get_settings),
-) -> Dict:
+):
     try:
         await update_cars_relevance(payload=payload, db=db)
-        return {}
     except SQLAlchemyError as e:
         await db.rollback()
         logger.exception("Database error during bulk deletion")

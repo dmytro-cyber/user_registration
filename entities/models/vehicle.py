@@ -91,7 +91,7 @@ class CarModel(Base):
     predicted_profit_margin_percent = Column(Float, nullable=True)
     predicted_total_investments = Column(Float, nullable=True)
     roi = Column(Float, nullable=True)
-    profit_margin = Column(Float, nullanble=True)
+    profit_margin = Column(Float, nullable=True)
 
     # Detail page info
     engine_cylinder = Column(Integer, nullable=True)

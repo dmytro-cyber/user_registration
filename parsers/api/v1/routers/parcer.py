@@ -195,6 +195,7 @@ async def parse_fees(high_volume: UploadFile = File(...), internet_bid: UploadFi
                 os.remove(path)
                 logger.info(f"Removed temporary file: {path}")
 
+        print(result)
         return result
 
     except Exception as e:

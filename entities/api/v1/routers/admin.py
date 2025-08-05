@@ -103,6 +103,19 @@ async def create_filter(
         db_filter = FilterModel(**filter.dict(exclude_unset=True))
         db_filter.updated_at = datetime.utcnow()
         db.add(db_filter)
+
+
+        conditions = [
+            CarModel.make == db_filter.make,
+            CarModel.year >= (db_filter.year_from or 0),
+            CarModel.year <= (db_filter.year_to or 3000),
+            CarModel.mileage >= (db_filter.odometer_min or 0),
+            CarModel.mileage <= (db_filter.odometer_max or 10_000_000)
+        ]
+
+        if db_filter.model is not None:
+            conditions.append(CarModel.model == db_filter.model)
+
         query = select(
             CarModel.vin,
             CarModel.vehicle,
@@ -112,16 +125,8 @@ async def create_filter(
             CarModel.model,
             CarModel.year,
             CarModel.transmision
-        ).where(
-            and_(
-                CarModel.make == db_filter.make,
-                CarModel.model == db_filter.model,
-                CarModel.year >= (db_filter.year_from or 0),
-                CarModel.year <= (db_filter.year_to or 3000),
-                CarModel.mileage >= (db_filter.odometer_min or 0),
-                CarModel.mileage <= (db_filter.odometer_max or 10_000_000)
-            )
-        )
+        ).where(and_(*conditions))
+
         query_res = await db.execute(query)
         vehicles = query_res.mappings().all()
         for vehicle_data in vehicles:
@@ -679,3 +684,9 @@ async def proxy_upload(
     except Exception as e:
         logger.error(f"Unexpected error in proxy_upload: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/load-db")
+async def load_db():
+    async with httpx.AsyncClient(timeout=30) as client:
+        await client.post("http://parsers:8001/startup")
