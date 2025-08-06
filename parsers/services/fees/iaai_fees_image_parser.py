@@ -21,6 +21,7 @@ pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
 
 def parse_svg_table(svg_file_path):
     """Convert SVG file to PNG and parse table using OCR."""
+    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
     if not os.path.exists(svg_file_path):
         logger.error(f"SVG file {svg_file_path} not found.")
         return {}
