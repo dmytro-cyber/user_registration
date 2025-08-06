@@ -85,9 +85,8 @@ def fetch_api_data(size: int = None, base_url: str = None):
             data = api_response.get("data", [])
         except httpx.HTTPError as e:
             logger.error(f"Failed to fetch API data on page {page}: {e}")
-            break
-        finally:
-            time.sleep(1)
+            continue
+            
         if not data:
             logger.info(f"No more data on page {page}.")
             break
@@ -149,6 +148,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
                 logger.error(f"Failed to save vehicles on page {page}: {e}")
                 break
         page += 1
+        time.sleep(120)
 
     logger.info("Finished processing all pages.")
     return "Finished processing all pages."
