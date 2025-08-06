@@ -17,17 +17,17 @@ app = FastAPI(
 )
 
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await create_roles()
+@app.on_event("startup")
+async def on_startup():
+    await create_roles()
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await _update_car_fees_async()
+@app.on_event("startup")
+async def on_startup():
+    await _update_car_fees_async()
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await import_us_zips_from_csv()
+@app.on_event("startup")
+async def on_startup():
+    await import_us_zips_from_csv()
 #     await match_and_update_locations()
 
 
