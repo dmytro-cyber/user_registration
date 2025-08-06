@@ -142,18 +142,19 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
                     to_parse = False
             elif existing_vehicle.relevance == None and ivent == "create":
-                query = select(FilterModel).where(
-                    FilterModel.make == vehicle_data.make,
-                    FilterModel.model == vehicle_data.model,
-                    FilterModel.year_from <= vehicle_data.year,
-                    FilterModel.year_to >= vehicle_data.year,
-                    FilterModel.odometer_max >= vehicle_data.mileage
-                )
-                filter_ex = await db.execute(query)
-                filter_res = filter_ex.scalars().one_or_none()
-                if filter_res:
-                    existing_vehicle.relevance = RelevanceStatus.ACTIVE
-                    to_parse = False
+                existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
+                # query = select(FilterModel).where(
+                #     FilterModel.make == vehicle_data.make,
+                #     FilterModel.model == vehicle_data.model,
+                #     FilterModel.year_from <= vehicle_data.year,
+                #     FilterModel.year_to >= vehicle_data.year,
+                #     FilterModel.odometer_max >= vehicle_data.mileage
+                # )
+                # filter_ex = await db.execute(query)
+                # filter_res = filter_ex.scalars().one_or_none()
+                # if filter_res:
+                #     existing_vehicle.relevance = RelevanceStatus.ACTIVE
+                #     to_parse = False
 
             
             logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
@@ -255,32 +256,32 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                 else:
                     vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
 
-            query = select(USZipModel).where(
-                or_(USZipModel.copart_name == vehicle.location, USZipModel.iaai_name == vehicle.location)
-            )
-            result = await db.execute(query)
-            locations = result.scalars().all()
-            if not locations:
-                await match_and_update_location(vehicle.location, vehicle.auction)
-            query = select(FilterModel).where(
-                FilterModel.make == vehicle_data.make,
-                or_(
-                    FilterModel.model == vehicle_data.model,
-                    FilterModel.model.is_(None)
-                ),
-                FilterModel.year_from <= vehicle_data.year,
-                FilterModel.year_to >= vehicle_data.year,
-                FilterModel.odometer_max >= vehicle_data.mileage
-            )
-            filter_ex = await db.execute(query)
-            filter_res = filter_ex.scalars().one_or_none()
-            if filter_res:
-                vehicle.relevance = RelevanceStatus.ACTIVE
-                to_parse = True
-            else:
-                vehicle.relevance = RelevanceStatus.IRRELEVANT
-                to_parse = False
-
+            # query = select(USZipModel).where(
+            #     or_(USZipModel.copart_name == vehicle.location, USZipModel.iaai_name == vehicle.location)
+            # )
+            # result = await db.execute(query)
+            # locations = result.scalars().all()
+            # if not locations:
+            #     await match_and_update_location(vehicle.location, vehicle.auction)
+            # query = select(FilterModel).where(
+            #     FilterModel.make == vehicle_data.make,
+            #     or_(
+            #         FilterModel.model == vehicle_data.model,
+            #         FilterModel.model.is_(None)
+            #     ),
+            #     FilterModel.year_from <= vehicle_data.year,
+            #     FilterModel.year_to >= vehicle_data.year,
+            #     FilterModel.odometer_max >= vehicle_data.mileage
+            # )
+            # filter_ex = await db.execute(query)
+            # filter_res = filter_ex.scalars().one_or_none()
+            # if filter_res:
+            #     vehicle.relevance = RelevanceStatus.ACTIVE
+            #     to_parse = True
+            # else:
+            #     vehicle.relevance = RelevanceStatus.IRRELEVANT
+            #     to_parse = False
+            vehicle.relevance = RelevanceStatus.IRRELEVANT
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.issue_description != "Unknown":
@@ -325,7 +326,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
             return False
     except Exception as e:
-        pass
+        return False
 
 
 async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -> Optional[CarModel]:
