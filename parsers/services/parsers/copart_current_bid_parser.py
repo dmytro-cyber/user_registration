@@ -156,6 +156,32 @@ async def process_url_copart(vehicle_id: int, lot: str):
         return vehicle_id, result.json().get("pre_bid", None)
 
 
+async def fetch_current_bids(lots: list[dict]) -> list[dict]:
+    """
+    Відправляє POST-запит до API з переданими lot_id та site,
+    та повертає список відповідей по кожному лоту.
+    """
+    async with httpx.AsyncClient(timeout=30) as client:
+        try:
+            response = await client.post(
+                "https://api.apicar.store/api/cars/current-bid/many",
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "insomnia/11.3.0",
+                    "api-key": os.getenv("APICAR_KEY"),
+                },
+                json={"lots": lots},
+            )
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            print(f"HTTP error occurred: {e.response.status_code} - {e.response.text}")
+        except httpx.RequestError as e:
+            print(f"Request error: {e}")
+        return []
+
+
+
 async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
     """
     Main function to process multiple URLs concurrently.
@@ -163,10 +189,19 @@ async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
 
     # Create tasks for all URLs
     logger.info(f"where tuple? type: {type(urls)}")
-    tasks_copart = [process_url_copart(url.id, url.lot) for url in urls if "copart" in url.url]
-    tasks_iaai = [process_url_iaai(url.id, url.lot) for url in urls if "iaai" in url.url]
-    # Run all tasks concurrently and wait for completion
-    results = await asyncio.gather(*tasks_copart)
-    results += await asyncio.gather(*tasks_iaai)
+    payload = []
+    for obj in urls:
+        payload.append(
+            {"lot_id": obj.lot,
+             "site": 1 if "copart" in obj.url else 2}
+        )
+    
+    batch_size = 100
+    results = []
+    for i in range(0, len(payload), batch_size):
+        end_i = (i + batch_size) if (i + batch_size) < (len(payload) - 1) else (len(payload) - 1)
+        batch = payload[i: end_i]
+        result = await fetch_current_bids(batch)
+        results.append(result)
 
-    return [{"id": item_id, "value": value} for item_id, value in results if item_id and value]
+    return results

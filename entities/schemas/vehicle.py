@@ -243,6 +243,8 @@ class CarBiddinHubResponseSchema(BaseModel):
     predicted_total_investments: float | None = None
     predicted_profit_margin: float | None = None
     predicted_roi: float | None = None
+    profit_margin: float | None = None
+    roi: float | None = None    
     current_bid: float | None = None
     actual_bid: float | None = None
     suggested_bid: float | None = None
@@ -273,6 +275,8 @@ class CarBiddinHubResponseSchema(BaseModel):
             predicted_profit_margin=obj.predicted_profit_margin,
             sum_of_investments=obj.sum_of_investments,
             predicted_roi=obj.predicted_roi,
+            profit_margin=obj.profit_margin,
+            roi=obj.roi,
             current_bid=obj.current_bid,
             actual_bid=obj.actual_bid,
             suggested_bid=obj.suggested_bid,

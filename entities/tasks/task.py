@@ -247,10 +247,10 @@ async def _update_car_bids_async():
             data = response.json()
             logger.info(f"Received {data} items to update bids")
 
-            for item in data.get("bids"):
-                car_id, current_bid = item.get("id"), item.get("value")
-                if car_id and current_bid is not None:
-                    result = await db.execute(select(CarModel).where(CarModel.id == car_id).with_for_update())
+            for item in data:
+                lot, auction, current_bid = item.get("lot_id").split("-")[0], item.get("site"), item.get("pre_bid")
+                if lot and current_bid is not None:
+                    result = await db.execute(select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction == auction)).with_for_update())
                     car = result.scalars().first()
                     if car:
                         car.current_bid = int(float(current_bid))

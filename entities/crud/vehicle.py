@@ -59,14 +59,14 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         await db.commit()
 
 SITE_MAP = {
-    1: "COPART",
+    1: "Copart",
     2: "IAAI",
 }
 
 async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
     s3_client = get_s3_storage_client()
     lots_by_site = {}
-    
+
     for item in payload["data"]:
         site_str = SITE_MAP.get(item["site"])
         if site_str:
@@ -75,44 +75,40 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
     if not lots_by_site:
         return
 
-    stmt = select(CarModel).where(
-        or_(*[
-            and_(CarModel.auction == site, CarModel.lot.in_(lot_ids))
-            for site, lot_ids in lots_by_site.items()
-        ])
+    filter_condition = or_(*[
+        and_(CarModel.auction == site, CarModel.lot.in_(lot_ids))
+        for site, lot_ids in lots_by_site.items()
+    ])
+
+    # 1. Delete IRRELEVANT cars directly
+    await db.execute(
+        delete(CarModel).where(
+            and_(CarModel.relevance == RelevanceStatus.IRRELEVANT, filter_condition)
+        )
     )
-    result = await db.execute(stmt)
-    cars = result.scalars().all()
 
-    to_delete_ids = []
-    to_archive_ids = []
-    to_archive_car_ids = set()
+    # 2. Get ACTIVE car ids to archive
+    stmt_active_ids = select(CarModel.id).where(
+        and_(CarModel.relevance == RelevanceStatus.ACTIVE, filter_condition)
+    )
+    result = await db.execute(stmt_active_ids)
+    to_archive_ids = [row for row in result.scalars()]
 
-    for car in cars:
-        if car.relevance == RelevanceStatus.IRRELEVANT:
-            to_delete_ids.append(car.id)
-        elif car.relevance == RelevanceStatus.ACTIVE:
-            to_archive_ids.append(car.id)
-            to_archive_car_ids.add(car.id)
-
-    if to_delete_ids:
-        await db.execute(delete(CarModel).where(CarModel.id.in_(to_delete_ids)))
-
+    # 3. Delete screenshots from S3
     if to_archive_ids:
-        stmt_checks = select(AutoCheckModel).where(AutoCheckModel.car_id.in_(to_archive_car_ids))
+        stmt_checks = select(AutoCheckModel.screenshot_url).where(
+            AutoCheckModel.car_id.in_(to_archive_ids)
+        )
         result_checks = await db.execute(stmt_checks)
-        auto_checks = result_checks.scalars().all()
-
-        for check in auto_checks:
-            if check.screenshot_url:
-                file_name = check.screenshot_url.split("/")[-1]
+        for (screenshot_url,) in result_checks.all():
+            if screenshot_url:
+                file_name = screenshot_url.split("/")[-1]
                 try:
                     s3_client.delete_file(file_name)
                 except Exception as e:
-                    # Лог або повідомлення про помилку
                     print(f"Failed to delete file {file_name} from S3: {e}")
 
-        # Оновлюємо статус relevance
+        # 4. Update relevance to ARCHIVAL
         await db.execute(
             update(CarModel)
             .where(CarModel.id.in_(to_archive_ids))
@@ -120,6 +116,7 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
         )
 
     await db.commit()
+
 
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
@@ -279,8 +276,10 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             filter_res = filter_ex.scalars().one_or_none()
             if filter_res:
                 vehicle.relevance = RelevanceStatus.ACTIVE
+                to_parse = True
             else:
                 vehicle.relevance = RelevanceStatus.IRRELEVANT
+                to_parse = False
 
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
@@ -320,7 +319,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
 
             logger.info(f"Vehicle {vehicle.vin} saved successfully with ID {vehicle.id}")
             await db.commit()
-            return True
+            return to_parse
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
