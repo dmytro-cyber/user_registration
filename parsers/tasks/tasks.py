@@ -139,7 +139,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
         if processed_vehicles:
             save_url = "http://entities:8000/api/v1/vehicles/bulk"
             try:
-                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=3600)
+                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=360000)
                 save_response.raise_for_status()
                 logger.info(
                     f"Successfully saved {len(processed_vehicles)} vehicles on page {page}"
@@ -158,6 +158,6 @@ def fetch_api_data(size: int = None, base_url: str = None):
 def delete_vehicle():
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
     url = "https://api.apicar.store/api/cars/deleted"
-    response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
+    response = httpx.get(url, timeout=1000, headers={"api-key": os.getenv("APICAR_KEY")})
     delete_url = "http://entities:8000/api/v1/vehicles/bulk/delete"
     httpx.post(delete_url, json=response, headers=headers)
