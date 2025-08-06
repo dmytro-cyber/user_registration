@@ -139,13 +139,14 @@ def fetch_api_data(size: int = None, base_url: str = None):
         if processed_vehicles:
             save_url = "http://entities:8000/api/v1/vehicles/bulk"
             try:
-                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=20)
+                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=3600)
                 save_response.raise_for_status()
                 logger.info(
                     f"Successfully saved {len(processed_vehicles)} vehicles on page {page}"
                 )
             except httpx.HTTPError as e:
                 logger.error(f"Failed to save vehicles on page {page}: {e}")
+                page += 1
         page += 1
         time.sleep(1)
 
