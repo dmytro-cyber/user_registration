@@ -17,13 +17,13 @@ app = FastAPI(
 )
 
 
-@app.on_event("startup")
-async def on_startup():
-    await create_roles()
+# @app.on_event("startup")
+# async def on_startup():
+#     await create_roles()
 
-@app.on_event("startup")
-async def on_startup():
-    await _update_car_fees_async()
+# @app.on_event("startup")
+# async def on_startup():
+#     await _update_car_fees_async()
 
 # @app.on_event("startup")
 # async def on_startup():
