@@ -148,7 +148,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
                 logger.error(f"Failed to save vehicles on page {page}: {e}")
                 break
         page += 1
-        time.sleep(120)
+        time.sleep(1)
 
     logger.info("Finished processing all pages.")
     return "Finished processing all pages."
