@@ -129,7 +129,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
                 }
                 processed_vehicles.append(adapted_vehicle)
             except Exception as e:
-                print(e, formatted_vehicle)
+                pass
         
         payload = {
             "ivent": "created" if base_url is not None else "updated",
@@ -146,7 +146,6 @@ def fetch_api_data(size: int = None, base_url: str = None):
                 )
             except httpx.HTTPError as e:
                 logger.error(f"Failed to save vehicles on page {page}: {e}")
-                break
         page += 1
         time.sleep(1)
 
