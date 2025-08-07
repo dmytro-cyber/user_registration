@@ -45,7 +45,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         Dict matching CarModel fields and types.
     """
-    logger.info("Starting to format car data from API response")
 
     field_mapping = {
         "vin": "vin",
@@ -168,5 +167,4 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
     car_data["condition_assessments"] = condition_assessments
     logger.debug(f"Processed {len(condition_assessments)} condition assessments")
 
-    logger.info("Successfully formatted car data")
     return car_data
