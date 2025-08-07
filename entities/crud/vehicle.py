@@ -260,7 +260,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             else:
                 vehicle.relevance = RelevanceStatus.IRRELEVANT
                 to_parse = False
-            vehicle.relevance = RelevanceStatus.IRRELEVANT
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.issue_description != "Unknown":
@@ -358,13 +357,14 @@ async def get_filtered_vehicles(
         .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == user_id))
         .options(selectinload(CarModel.photos))
         .filter(
+            CarModel.relevance == RelevanceStatus.ACTIVE,
             CarModel.predicted_total_investments.isnot(None),
             CarModel.predicted_total_investments > 0,
             CarModel.suggested_bid.isnot(None),
             CarModel.suggested_bid > 0,
         )
     )
-    base_query = base_query.filter(CarModel.relevance == RelevanceStatus.ACTIVE)
+
 
     # Condition Assessments
     if filters.get("condition_assessments"):

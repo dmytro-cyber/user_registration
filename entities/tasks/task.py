@@ -18,6 +18,7 @@ from core.config import settings
 from db.session import POSTGRESQL_DATABASE_URL
 from models.admin import ROIModel
 from models.vehicle import AutoCheckModel, CarModel, FeeModel, RecommendationStatus, RelevanceStatus
+from services.vehicle import scrape_and_save_sales_history
 from storages import S3StorageClient
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -78,7 +79,9 @@ async def _parse_and_update_car_async(
     )
     engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
     AsyncSessionFactory = sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+
     async with AsyncSessionFactory() as db:
+        await scrape_and_save_sales_history(vin, db, settings)
         try:
             # Перевірка наявності автомобіля в базі
             current_date = datetime.utcnow().date()
@@ -247,7 +250,7 @@ async def _update_car_bids_async():
             data = response.json()
             logger.info(f"Received {data} items to update bids")
 
-            for item in data:
+            for item in data.get("bids"):
                 lot, auction, current_bid = item.get("lot_id").split("-")[0], item.get("site"), item.get("pre_bid")
                 if lot and current_bid is not None:
                     result = await db.execute(select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction == auction)).with_for_update())

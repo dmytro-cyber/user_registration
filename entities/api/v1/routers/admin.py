@@ -130,6 +130,13 @@ async def create_filter(
         query_res = await db.execute(query)
         vehicles = query_res.mappings().all()
         for vehicle_data in vehicles:
+
+            await db.execute(
+                update(CarModel)
+                .where(CarModel.vin == vehicle_data.get("vin"))
+                .values(relevance=RelevanceStatus.ACTIVE)
+            )
+
             parse_and_update_car.delay(
                 vin=vehicle_data.get("vin"),
                 car_name=vehicle_data.get("vehicle"),
@@ -140,7 +147,6 @@ async def create_filter(
                 car_year=vehicle_data.get("year"),
                 car_transmison=vehicle_data.get("transmision"),
             )
-            await scrape_and_save_sales_history(vehicle_data.get("vin"), db, settings)
         await db.commit()
         await db.refresh(db_filter)
         logger.info(f"Filter created successfully with id={db_filter.id}", extra=extra)
@@ -270,6 +276,32 @@ async def update_filter_and_relevance(
             .where(CarModel.id.in_(to_activate), CarModel.relevance == RelevanceStatus.IRRELEVANT)
             .values(relevance=RelevanceStatus.ACTIVE)
         )
+        query = select(
+            CarModel.vin,
+            CarModel.vehicle,
+            CarModel.engine_title,
+            CarModel.mileage,
+            CarModel.make,
+            CarModel.model,
+            CarModel.year,
+            CarModel.transmision
+        ).where(CarModel.id.in_(to_activate))
+
+        query_res = await db.execute(query)
+        vehicles = query_res.mappings().all()
+        for vehicle_data in vehicles:
+
+            parse_and_update_car.delay(
+                vin=vehicle_data.get("vin"),
+                car_name=vehicle_data.get("vehicle"),
+                car_engine=vehicle_data.get("engine_title"),
+                mileage=vehicle_data.get("mileage"),
+                car_make=vehicle_data.get("make"),
+                car_model=vehicle_data.get("model"),
+                car_year=vehicle_data.get("year"),
+                car_transmison=vehicle_data.get("transmision"),
+            )
+        
 
     if to_irrelevant:
         # Set to IRRELEVANT if ACTIVE
@@ -289,53 +321,53 @@ async def update_filter_and_relevance(
     return {"detail": "Filter updated and car relevance adjusted"}
 
 
-@router.patch("/filters/{filter_id}/timestamp")
-async def update_filter_timestamp(
-    filter_id: int, update_data: FilterUpdateTimestamp, db: AsyncSession = Depends(get_db)
-):
-    """
-    Update the timestamp of a filter.
+# @router.patch("/filters/{filter_id}/timestamp")
+# async def update_filter_timestamp(
+#     filter_id: int, update_data: FilterUpdateTimestamp, db: AsyncSession = Depends(get_db)
+# ):
+#     """
+#     Update the timestamp of a filter.
 
-    Args:
-        filter_id (int): The ID of the filter to update.
-        update_data (FilterUpdateTimestamp): The new timestamp data.
-        db (AsyncSession): The database session dependency.
+#     Args:
+#         filter_id (int): The ID of the filter to update.
+#         update_data (FilterUpdateTimestamp): The new timestamp data.
+#         db (AsyncSession): The database session dependency.
 
-    Returns:
-        FilterModel: The updated filter.
+#     Returns:
+#         FilterModel: The updated filter.
 
-    Raises:
-        HTTPException: 404 if the filter is not found.
-        HTTPException: 500 if an error occurs during update.
-    """
-    request_id = "N/A"  # No request object available here
-    extra = {"request_id": request_id, "user_id": "N/A"}
-    logger.info(f"Updating timestamp for filter with id={filter_id}", extra=extra)
+#     Raises:
+#         HTTPException: 404 if the filter is not found.
+#         HTTPException: 500 if an error occurs during update.
+#     """
+#     request_id = "N/A"  # No request object available here
+#     extra = {"request_id": request_id, "user_id": "N/A"}
+#     logger.info(f"Updating timestamp for filter with id={filter_id}", extra=extra)
 
-    try:
-        result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
-        db_filter = result.scalars().first()
-        if not db_filter:
-            logger.warning(f"Filter with id={filter_id} not found", extra=extra)
-            raise HTTPException(status_code=404, detail="Filter not found")
+#     try:
+#         result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
+#         db_filter = result.scalars().first()
+#         if not db_filter:
+#             logger.warning(f"Filter with id={filter_id} not found", extra=extra)
+#             raise HTTPException(status_code=404, detail="Filter not found")
 
-        updated_at_naive = update_data.updated_at.replace(tzinfo=None)
-        db_filter.updated_at = updated_at_naive
-        await db.commit()
-        await db.refresh(db_filter)
-        logger.info(f"Timestamp updated successfully for filter with id={filter_id}", extra=extra)
-        return db_filter
-    except HTTPException as e:
-        logger.error(f"Failed to update timestamp for filter with id={filter_id}: {str(e)}", extra=extra)
-        raise
-    except Exception as e:
-        logger.error(
-            f"Unexpected error while updating timestamp for filter with id={filter_id}: {str(e)}", extra=extra
-        )
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating filter timestamp",
-        )
+#         updated_at_naive = update_data.updated_at.replace(tzinfo=None)
+#         db_filter.updated_at = updated_at_naive
+#         await db.commit()
+#         await db.refresh(db_filter)
+#         logger.info(f"Timestamp updated successfully for filter with id={filter_id}", extra=extra)
+#         return db_filter
+#     except HTTPException as e:
+#         logger.error(f"Failed to update timestamp for filter with id={filter_id}: {str(e)}", extra=extra)
+#         raise
+#     except Exception as e:
+#         logger.error(
+#             f"Unexpected error while updating timestamp for filter with id={filter_id}: {str(e)}", extra=extra
+#         )
+#         raise HTTPException(
+#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+#             detail="Error updating filter timestamp",
+#         )
 
 
 # Delete a filter
