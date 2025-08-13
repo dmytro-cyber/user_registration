@@ -3,6 +3,7 @@ import logging
 import os
 import time
 from datetime import datetime
+from itertools import islice
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -65,19 +66,30 @@ def generate_car_api_url(page: int = 1, size: int = 1000, base_url: str = "https
     return f"{base_url}?{query_string}"
 
 
+def chunked(iterable, size):
+    """Yield successive chunks of a given size from iterable."""
+    it = iter(iterable)
+    for first in it:
+        yield [first, *islice(it, size - 1)]
+
 @app.task
 def fetch_api_data(size: int = None, base_url: str = None):
     """
-    Fetches car data from the API for each filter, paginates through results, and saves data incrementally.
-    Updates the filter's updated_at field with the first created_at value from the API response.
-    Stops fetching when a car's created_at is earlier than the filter's updated_at.
+    Fetches car data from the API for each filter, paginates through results, 
+    and sends them in batches of 100 to the bulk endpoint.
     """
+    if not base_url:
+        base_url = "https://api.apicar.store/api/cars/db/update"
+    if not size:
+        size = 1000
 
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
     page = 1
+
     while True:
         url = generate_car_api_url(page=page, size=size, base_url=base_url)
         logger.info(f"Fetching data from API (page {page}): {url}")
+
         try:
             response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
             response.raise_for_status()
@@ -86,15 +98,15 @@ def fetch_api_data(size: int = None, base_url: str = None):
         except httpx.HTTPError as e:
             logger.error(f"Failed to fetch API data on page {page}: {e}")
             continue
-            
+
         if not data:
             logger.info(f"No more data on page {page}.")
             break
-        # Process vehicles on the current page
+
         processed_vehicles = []
         for vehicle in data:
-            formatted_vehicle = format_car_data(vehicle)
             try:
+                formatted_vehicle = format_car_data(vehicle)
                 adapted_vehicle = {
                     "vin": formatted_vehicle["vin"],
                     "vehicle": formatted_vehicle["vehicle"],
@@ -128,27 +140,24 @@ def fetch_api_data(size: int = None, base_url: str = None):
                     "condition_assessments": formatted_vehicle.get("condition_assessments", []),
                 }
                 processed_vehicles.append(adapted_vehicle)
-            except Exception as e:
+            except Exception:
                 pass
-        
-        payload = {
-            "ivent": "created" if base_url is not None else "updated",
-            "vehicles": processed_vehicles
-        }
 
         if processed_vehicles:
             save_url = "http://entities:8000/api/v1/vehicles/bulk"
-            try:
-                save_response = httpx.post(save_url, json=payload, headers=headers, timeout=360000)
-                save_response.raise_for_status()
-                logger.info(
-                    f"Successfully saved {len(processed_vehicles)} vehicles on page {page}"
-                )
-            except httpx.HTTPError as e:
-                logger.error(f"Failed to save vehicles on page {page}: {e}")
-                page += 1
+            for batch in chunked(processed_vehicles, 50):
+                payload = {
+                    "ivent": "created" if base_url else "updated",
+                    "vehicles": batch
+                }
+                try:
+                    save_response = httpx.post(save_url, json=payload, headers=headers, timeout=3600)
+                    save_response.raise_for_status()
+                    logger.info(f"Successfully saved {len(batch)} vehicles (page {page} batch).")
+                except httpx.HTTPError as e:
+                    logger.error(f"Failed to save vehicles (page {page} batch): {e}")
+
         page += 1
-        time.sleep(1)
 
     logger.info("Finished processing all pages.")
     return "Finished processing all pages."
@@ -159,5 +168,6 @@ def delete_vehicle():
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
     url = "https://api.apicar.store/api/cars/deleted"
     response = httpx.get(url, timeout=1000, headers={"api-key": os.getenv("APICAR_KEY")})
+    to_delete = response.json()
     delete_url = "http://entities:8000/api/v1/vehicles/bulk/delete"
-    httpx.post(delete_url, json=response, headers=headers)
+    httpx.post(delete_url, json=to_delete, headers=headers)

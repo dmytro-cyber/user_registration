@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -53,6 +55,19 @@ app.include_router(admin_router, prefix="/api/v1", tags=["Admin"])
 app.include_router(bidding_hub_router, prefix="/api/v1", tags=["Bidding Hub"])
 app.include_router(inventory_router, prefix="/api/v1", tags=["Inventory"])
 app.include_router(analytics_router, prefix="/api/v1", tags=["Analytics"])
+
+def configure_logging():
+    logging.getLogger("uvicorn").setLevel(logging.INFO)
+    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+
+
+    for name in ("sqlalchemy", "sqlalchemy.engine", "sqlalchemy.engine.Engine", "sqlalchemy.pool", "sqlalchemy.dialects"):
+        lg = logging.getLogger(name)
+        lg.setLevel(logging.CRITICAL)
+        lg.propagate = False
+        lg.handlers.clear()
+
+configure_logging()
 
 if __name__ == "__main__":
     import uvicorn

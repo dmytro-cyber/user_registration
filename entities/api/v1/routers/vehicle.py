@@ -758,7 +758,7 @@ async def bulk_create_cars(
         if skipped_vins:
             response["skipped_vins"] = skipped_vins
             logger.info(
-                f"Bulk creation completed, skipped {len(skipped_vins)} vehicles with VINs: {skipped_vins}", extra=extra
+                f"Bulk creation completed, skipped {len(skipped_vins)} vehicles", extra=extra
             )
         else:
             logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
