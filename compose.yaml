@@ -12,7 +12,7 @@ services:
     networks:
       - cars_and_beyond_network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U admin -d cars_and_beyond -h 127.0.0.1 || exit 1"]
+      test: ["CMD-SHELL", "pg_isready -U admin -d a -h 127.0.0.1 || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -176,11 +176,12 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=prefork"]
+    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=gevent", "--concurrency=50"]
     env_file:
       - ./entities/.env
     environment:
       - PYTHONPATH=/usr/entities/fastapi
+      - CELERY_GEVENT=1
     depends_on:
       redis_1:
         condition: service_healthy

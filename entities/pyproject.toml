@@ -30,6 +30,9 @@ dependencies = [
     "asgiref (>=3.8.1,<4.0.0)",
     "nest-asyncio (>=1.6.0,<2.0.0)",
     "ruff (>=0.12.4,<0.13.0)",
+    "gevent (>=25.5.1,<26.0.0)",
+    "greenlet (>=3.2.4,<4.0.0)",
+    "psycopg2-binary (>=2.9.10,<3.0.0)",
 ]
 
 [tool.ruff]

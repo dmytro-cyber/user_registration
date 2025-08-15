@@ -1,3 +1,6 @@
+# from gevent import monkey
+# monkey.patch_all(ssl=True, socket=True, dns=True, time=True, select=True, subprocess=True, os=True)
+
 from celery import Celery
 from celery.schedules import crontab
 

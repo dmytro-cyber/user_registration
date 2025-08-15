@@ -61,8 +61,9 @@ class Config:
             "--ignore-certificate-errors",
         ],
     }
+
+    # Глобальний кеш кредів (щоб не ганяти файлову систему). НЕ містить локів.
     CREDENTIALS = {}
-    UPDATING_CREDENTIALS = False
 
     TIMEOUT = 10
     MAX_WAIT_VERIFICATION = 30
@@ -162,28 +163,39 @@ class DealerCenterScraper:
         self.access_token = None
         self._load_credentials()
 
+        # Інстанс-рівень: single-flight синхронізатори
+        self._login_lock = asyncio.Lock()
+        self._login_ready = asyncio.Event()
+        if self.cookies and self.access_token:
+            self._login_ready.set()
+        else:
+            self._login_ready.clear()
+
     def _load_credentials(self):
-        """Load saved cookies and access token from file."""
-        if Config.CREDENTIALS != {}:
-            self.cookies = Config.CREDENTIALS.get("cookies", [])
+        """Load saved cookies and access token from in-memory Config cache."""
+        if Config.CREDENTIALS:
+            self.cookies = Config.CREDENTIALS.get("cookies", []) or []
             self.access_token = Config.CREDENTIALS.get("access_token")
-            logging.info("Loaded saved credentials")
+            logging.info("Loaded saved credentials from Config cache")
 
     def _save_credentials(self):
-        """Save cookies and access token to file."""
+        """Save cookies and access token to in-memory Config cache."""
         Config.CREDENTIALS = {"cookies": self.cookies, "access_token": self.access_token}
         logging.info("Saved credentials to Config.CREDENTIALS")
 
     def _get_headers(self):
         """Generate headers with dynamic Authorization and Cookie."""
         headers = Config.BASE_HEADERS.copy()
-        headers["Authorization"] = f"Bearer {self.access_token}"
-        headers["Cookie"] = "; ".join([f"{cookie['name']}={cookie['value']}" for cookie in self.cookies])
+        if self.access_token:
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        cookie_header = "; ".join([f"{cookie['name']}={cookie['value']}" for cookie in self.cookies]) if self.cookies else ""
+        if cookie_header:
+            headers["Cookie"] = cookie_header
         return headers
 
     def _get_cookies_dict(self):
         """Generate cookies dictionary from stored cookies."""
-        return {cookie["name"]: cookie["value"] for cookie in self.cookies}
+        return {cookie["name"]: cookie["value"] for cookie in (self.cookies or [])}
 
     async def _perform_login(self):
         """Perform the full login process using Playwright."""
@@ -240,14 +252,15 @@ class DealerCenterScraper:
 
                 await asyncio.sleep(5)
 
+                # зберігаємо куки
                 self.cookies = await context.cookies()
                 self._save_credentials()
 
+                # дістаємо токен
                 await page.goto(Config.TOKEN_VALIDATION_URL)
                 await page.wait_for_load_state("networkidle")
 
                 content = await page.content()
-                logging.info(content)
                 match = re.search(r"<pre>({.*})</pre>", content)
                 if not match:
                     logging.error("Failed to extract token from response")
@@ -265,10 +278,37 @@ class DealerCenterScraper:
         end_time = time.time()
         logging.info(f"Login completed in {end_time - start_time} seconds")
 
+    async def _ensure_logged_in_singleflight(self):
+        """
+        Інстанс-лок: тільки один конкурентний виклик виконує _perform_login(),
+        решта чекають доки креди стануть готовими.
+        """
+        # якщо креди вже готові — нічого не робимо
+        if self._login_ready.is_set():
+            return
+
+        # якщо хтось уже логіниться — просто чекаємо доки завершить
+        if self._login_lock.locked():
+            await self._login_ready.wait()
+            return
+
+        # ми потенційний лідер — беремо лок
+        async with self._login_lock:
+            # double-check: поки брали лок, креди могли стати готовими
+            if self._login_ready.is_set():
+                return
+            # збиваємо прапорець "готово" і логінимось
+            self._login_ready.clear()
+            try:
+                await self._perform_login()
+            finally:
+                # у будь-якому разі розблокувати очікуючих
+                self._login_ready.set()
+
     async def authenticate_and_prepare_async(self) -> Tuple[Optional[httpx.Proxy], dict, dict, dict]:
-        """Authenticate and prepare credentials, falling back to login if needed."""
+        """Аутентифікація з single-flight логіном на рівні інстансу."""
         start_time = time.time()
-        proxy = None
+        proxy: Optional[httpx.Proxy] = None
         if self.proxy_host and self.proxy_port:
             proxy = httpx.Proxy(f"socks5://{self.proxy_host}:{self.proxy_port}")
 
@@ -283,57 +323,37 @@ class DealerCenterScraper:
             "userAgent": None,
             "vin": self.vin,
         }
+
+        async def _try_autocheck(headers: dict, cookies_dict: dict):
+            async with httpx.AsyncClient(proxy=proxy, timeout=Config.TIMEOUT) as client:
+                r = await client.post(
+                    Config.AUTOCHECK_URL,
+                    headers=headers,
+                    cookies=cookies_dict,
+                    json=payload,
+                )
+                r.raise_for_status()
+                return r
+
         headers = self._get_headers()
         cookies_dict = self._get_cookies_dict()
 
-        if self.cookies and self.access_token:
-            async with httpx.AsyncClient(proxy=proxy) as client:
-                try:
-                    response = await client.post(
-                        Config.AUTOCHECK_URL,
-                        headers=headers,
-                        cookies=cookies_dict,
-                        json=payload,
-                        timeout=Config.TIMEOUT,
-                    )
-                    response.raise_for_status()
-                    logging.info("API call succeeded with saved credentials")
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code in (401, 403):
-                        logging.info("Saved credentials invalid, performing full login")
-                        if not Config.UPDATING_CREDENTIALS:
-                            Config.UPDATING_CREDENTIALS = True
-                            await self._perform_login()
-                            Config.UPDATING_CREDENTIALS = False
-                        else:
-                            while True:
-                                await asyncio.sleep(5)
-                                if Config.UPDATING_CREDENTIALS:
-                                    break
-                    else:
-                        raise
-                except Exception as e:
-                    logging.error(f"API call failed: {str(e)}")
-                    if not Config.UPDATING_CREDENTIALS:
-                        Config.UPDATING_CREDENTIALS = True
-                        await self._perform_login()
-                        Config.UPDATING_CREDENTIALS = False
-                    else:
-                        while True:
-                            await asyncio.sleep(5)
-                            if Config.UPDATING_CREDENTIALS:
-                                break
+        if self._login_ready.is_set() and self.cookies and self.access_token:
+            try:
+                await _try_autocheck(headers, cookies_dict)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403):
+                    await self._ensure_logged_in_singleflight()
+                    headers = self._get_headers()
+                    cookies_dict = self._get_cookies_dict()
+                    await _try_autocheck(headers, cookies_dict)
+                else:
+                    raise
         else:
-            logging.info("No saved credentials, performing full login")
-            if not Config.UPDATING_CREDENTIALS:
-                Config.UPDATING_CREDENTIALS = True
-                await self._perform_login()
-                Config.UPDATING_CREDENTIALS = False
-            else:
-                while True:
-                    await asyncio.sleep(5)
-                    if Config.UPDATING_CREDENTIALS:
-                        break
+            await self._ensure_logged_in_singleflight()
+            headers = self._get_headers()
+            cookies_dict = self._get_cookies_dict()
+            await _try_autocheck(headers, cookies_dict)
 
         end_time = time.time()
         logging.info(f"Authentication prepared in {end_time - start_time} seconds")
@@ -344,15 +364,15 @@ class DealerCenterScraper:
     ) -> dict:
         """Retrieve market data including AutoCheck report, JD valuation, and market price statistics."""
         start_time = time.time()
-        response = await httpx.AsyncClient(proxy=proxy).post(
-            Config.AUTOCHECK_URL,
-            headers=headers,
-            cookies=cookies_dict,
-            json=initial_payload,
-            timeout=Config.TIMEOUT,
-        )
-        response.raise_for_status()
-        response_json = response.json()
+        async with httpx.AsyncClient(proxy=proxy, timeout=Config.TIMEOUT) as client:
+            response = await client.post(
+                Config.AUTOCHECK_URL,
+                headers=headers,
+                cookies=cookies_dict,
+                json=initial_payload,
+            )
+            response.raise_for_status()
+            response_json = response.json()
 
         html_data = response_json.get("htmlResponseData")
         if not html_data:
@@ -416,13 +436,12 @@ class DealerCenterScraper:
             ],
         }
 
-        async with httpx.AsyncClient(proxy=proxy) as client:
+        async with httpx.AsyncClient(proxy=proxy, timeout=Config.TIMEOUT) as client:
             response = await client.post(
                 Config.VALUATION_URL,
                 headers=headers,
                 cookies=cookies_dict,
                 json=payload_jd,
-                timeout=Config.TIMEOUT,
             )
             response.raise_for_status()
             response_json = response.json()
@@ -479,13 +498,13 @@ class DealerCenterScraper:
             },
             "maxDigitalPriceLockType": None,
         }
-        async with httpx.AsyncClient(proxy=proxy) as client:
+
+        async with httpx.AsyncClient(proxy=proxy, timeout=Config.TIMEOUT) as client:
             response = await client.post(
                 market_data_url,
                 headers=headers,
                 cookies=cookies_dict,
                 json=payload_market_data,
-                timeout=Config.TIMEOUT,
             )
             response.raise_for_status()
             response_json = response.json()
@@ -512,24 +531,21 @@ class DealerCenterScraper:
         """Collect only vehicle history data."""
         start_time = time.time()
         proxy, headers, cookies_dict, payload = await self.authenticate_and_prepare_async()
-        response = await httpx.AsyncClient(proxy=proxy).post(
-            Config.AUTOCHECK_URL,
-            headers=headers,
-            cookies=cookies_dict,
-            json=payload,
-            timeout=Config.TIMEOUT,
-        )
-        response.raise_for_status()
-        response_json = response.json()
+
+        async with httpx.AsyncClient(proxy=proxy, timeout=Config.TIMEOUT) as client:
+            response = await client.post(
+                Config.AUTOCHECK_URL,
+                headers=headers,
+                cookies=cookies_dict,
+                json=payload,
+            )
+            response.raise_for_status()
+            response_json = response.json()
 
         html_data = response_json.get("htmlResponseData")
         if not html_data:
             logging.error("htmlResponseData key not found in response")
             raise Exception("htmlResponseData key not found in response")
-
-        # with open("response.html", "w", encoding="utf-8") as f:
-        #     f.write(html_data)
-        # logging.info("HTML saved to response.html")
 
         soup = BeautifulSoup(html_data, "html.parser")
 

@@ -1,133 +1,260 @@
-import asyncio
-import base64
+# tasks.py — синхронні Celery-таски для gevent-пулу
+# --------------------------------------------------
+import os
+if os.environ.get("CELERY_GEVENT", "0") == "1":
+    from gevent import monkey
+    monkey.patch_all()
+
 import logging
 import os
+import time
+import asyncio
+import anyio
 from datetime import datetime
 from io import BytesIO
+from typing import Any, Dict, Optional, List, Callable
 
-import anyio
 import httpx
-from sqlalchemy import and_, delete, func
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.future import select
-from sqlalchemy.orm import selectinload, sessionmaker
+from sqlalchemy import and_, delete, func, select, create_engine
+from sqlalchemy.orm import sessionmaker, Session, selectinload
 
 from core.celery_config import app
 from core.config import settings
 from db.session import POSTGRESQL_DATABASE_URL
-from models.admin import ROIModel
-from models.vehicle import AutoCheckModel, CarModel, FeeModel, RecommendationStatus, RelevanceStatus
-from services.vehicle import scrape_and_save_sales_history
+from models.admin import ROIModel, FilterModel
+from models.vehicle import (
+    AutoCheckModel,
+    CarModel,
+    FeeModel,
+    RecommendationStatus,
+    RelevanceStatus,
+)
+from services.vehicle import scrape_and_save_sales_history  # може бути sync або async
 from storages import S3StorageClient
 
+
+# =========================
+# Logging
+# =========================
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-# AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
-
-# def get_db():
-#     return AsyncSessionFactory()
-
-
-logger.info("S3 storage client initialized successfully")
-
-
-async def http_get_with_retries(url: str, headers: dict = None, timeout: float = 30.0, max_retries: int = 3):
-    for attempt in range(1, max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-                return response
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            logger.warning(f"HTTP GET attempt {attempt} failed: {e}")
-            if attempt == max_retries:
-                raise
-            await asyncio.sleep(2**attempt)
-
-
-async def http_post_with_retries(
-    url: str, json: dict, headers: dict = None, timeout: float = 30.0, max_retries: int = 3
+# Глушимо надмірні логи SQLAlchemy (INSERT ... VALUES ..., pool і т.д.)
+for name in (
+    "sqlalchemy",
+    "sqlalchemy.engine",
+    "sqlalchemy.engine.Engine",
+    "sqlalchemy.pool",
+    "sqlalchemy.dialects",
 ):
-    for attempt in range(1, max_retries + 1):
-        try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                response = await client.post(url, json=json, headers=headers)
-                response.raise_for_status()
-                return response
-        except (httpx.RequestError, httpx.HTTPStatusError) as e:
-            logger.warning(f"HTTP POST attempt {attempt} failed: {e}")
-            if attempt == max_retries:
-                raise
-            await asyncio.sleep(2**attempt)
+    lg = logging.getLogger(name)
+    lg.setLevel(logging.CRITICAL)
+    lg.propagate = False
+    lg.handlers.clear()
 
 
-async def _parse_and_update_car_async(
+# =========================
+# DB (sync) — psycopg2
+# =========================
+if "+asyncpg" in POSTGRESQL_DATABASE_URL:
+    SYNC_DB_URL = POSTGRESQL_DATABASE_URL.replace("+asyncpg", "+psycopg2")
+else:
+    SYNC_DB_URL = POSTGRESQL_DATABASE_URL
+
+ENGINE = create_engine(
+    SYNC_DB_URL,
+    pool_size=50,
+    max_overflow=10,
+    pool_timeout=30,
+    echo=False,
+    future=True,
+    pool_pre_ping=True,
+)
+SessionLocal = sessionmaker(bind=ENGINE, class_=Session, autoflush=False, autocommit=False, future=True)
+
+
+# =========================
+# HTTP helpers (sync)
+# =========================
+def http_get_with_retries(
+    url: str,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = 30.0,
+    max_retries: int = 3,
+) -> httpx.Response:
+    delay = 0.5
+    last_exc: Optional[Exception] = None
+    with httpx.Client(timeout=timeout) as client:
+        for attempt in range(1, max_retries + 1):
+            try:
+                r = client.get(url, headers=headers)
+                r.raise_for_status()
+                return r
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                last_exc = e
+                logger.warning(f"HTTP GET attempt {attempt} failed: {e}")
+                if attempt == max_retries:
+                    break
+                time.sleep(delay)
+                delay = min(delay * 2, 10.0)
+    assert last_exc is not None
+    raise last_exc
+
+
+def http_post_with_retries(
+    url: str,
+    json: Dict[str, Any],
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = 30.0,
+    max_retries: int = 3,
+) -> httpx.Response:
+    delay = 0.5
+    last_exc: Optional[Exception] = None
+    with httpx.Client(timeout=timeout) as client:
+        for attempt in range(1, max_retries + 1):
+            try:
+                r = client.post(url, json=json, headers=headers)
+                r.raise_for_status()
+                return r
+            except (httpx.RequestError, httpx.HTTPStatusError) as e:
+                last_exc = e
+                logger.warning(f"HTTP POST attempt {attempt} failed: {e}")
+                if attempt == max_retries:
+                    break
+                time.sleep(delay)
+                delay = min(delay * 2, 10.0)
+    assert last_exc is not None
+    raise last_exc
+
+
+# =========================
+# Small util: виконає async-функцію через asyncio.run, якщо вона coroutine; інакше — як є
+# =========================
+def maybe_run_async(func: Callable, *args, **kwargs):
+    if asyncio.iscoroutinefunction(func):
+        return anyio.run(func(*args, **kwargs))
+    return func(*args, **kwargs)
+
+
+# =========================
+# Core helpers (pure sync)
+# =========================
+def _load_default_roi(db: Session) -> Optional[ROIModel]:
+    return db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()).limit(1)).scalars().first()
+
+
+def _load_fees(db: Session, auction: Optional[str], investment: float) -> List[FeeModel]:
+    return db.execute(
+        select(FeeModel).where(
+            FeeModel.auction == auction,
+            FeeModel.price_from <= investment,
+            FeeModel.price_to >= investment,
+        )
+    ).scalars().all()
+
+
+def _apply_fees(investment: float, fees: List[FeeModel]) -> float:
+    fee_total = 0.0
+    for fee in fees:
+        if fee.percent:
+            fee_total += (fee.amount / 100.0) * investment
+        else:
+            fee_total += float(fee.amount)
+    return fee_total
+
+
+# =========================
+# Celery Tasks (sync)
+# =========================
+@app.task(name="tasks.task.parse_and_update_car")
+def parse_and_update_car(
     vin: str,
-    car_name: str = None,
-    car_engine: str = None,
-    mileage: int = None,
-    car_make: str = None,
-    car_model: str = None,
-    car_year: int = None,
-    car_transmison: str = None,
-):
-    logger.info(
-        f"Starting _parse_and_update_car_async for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}, mileage: {mileage}"
-    )
-    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-    AsyncSessionFactory = sessionmaker(bind=engine, expire_on_commit=False, class_=AsyncSession)
+    car_name: Optional[str] = None,
+    car_engine: Optional[str] = None,
+    mileage: Optional[int] = None,
+    car_make: Optional[str] = None,
+    car_model: Optional[str] = None,
+    car_year: Optional[int] = None,
+    car_transmison: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Повністю синхронна таска:
+    - (опціонально) тягне sales history (твій сервіс, якщо async — виконаємо один раз через asyncio.run)
+    - дергає парсер
+    - оновлює машину
+    - зберігає html у S3 (якщо є)
+    """
+    logger.info(f"parse_and_update_car: VIN={vin}")
 
-    async with AsyncSessionFactory() as db:
-        await scrape_and_save_sales_history(vin, db, settings)
+    with SessionLocal() as db:
+        # 1) Sales history — не валимо таску, якщо сервіс впав
         try:
-            # Перевірка наявності автомобіля в базі
+            maybe_run_async(scrape_and_save_sales_history, vin, db, settings)  # підтримка і sync, і async
+        except Exception as e:
+            logger.warning(f"scrape_and_save_sales_history failed for {vin}: {e}")
+
+        try:
+            # 2) шукаємо «поточну» машину за сьогодні/мілежу
             current_date = datetime.utcnow().date()
-            query = select(CarModel).where(
-                and_(
-                    func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
-                    CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
-                    func.date(CarModel.created_at) == current_date,
-                    CarModel.predicted_total_investments.isnot(None),
+            q_current = (
+                select(CarModel)
+                .where(
+                    and_(
+                        func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
+                        CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
+                        func.date(CarModel.created_at) == current_date,
+                        CarModel.predicted_total_investments.isnot(None),
+                    )
                 )
+                .limit(1)
             )
-            result = await db.execute(query)
-            existing_car = result.scalars().first()
+            existing_car = db.execute(q_current).scalars().first()
 
-            # Формування URL для запиту до API
+            # 3) виклик парсера
             only_history = "true" if existing_car else "false"
-            url = f"http://parsers:8001/api/v1/parsers/scrape/dc?car_vin={vin}&car_mileage={mileage}&car_name={car_name}&car_engine={car_engine}&car_make={car_make}&car_model={car_model}&car_year={car_year}&car_transmison={car_transmison}&only_history={only_history}"
-            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-
-            response = await http_get_with_retries(url, headers=headers, timeout=300.0)
-            data = response.json()
-            logger.info(
-                f"Received data for VIN {vin}: {data.get('vehicle', 'No vehicle data')} - {data.get('vin', 'No VIN')} - {data.get('mileage', 'No mileage')} - {data.get('accident_count', 'No accident count')} - {data.get('owners', 'No owners')}"
+            url = (
+                "http://parsers:8001/api/v1/parsers/scrape/dc"
+                f"?car_vin={vin}"
+                f"&car_mileage={mileage}"
+                f"&car_name={car_name}"
+                f"&car_engine={car_engine}"
+                f"&car_make={car_make}"
+                f"&car_model={car_model}"
+                f"&car_year={car_year}"
+                f"&car_transmison={car_transmison}"
+                f"&only_history={only_history}"
             )
+            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
+            resp = http_get_with_retries(url, headers=headers, timeout=300.0)
+            data = resp.json()
 
-            html_data = data.get("html_data", None)
-
-            query = (
+            # 4) беремо car під lock та оновлюємо
+            car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
                 .options(selectinload(CarModel.condition_assessments))
                 .with_for_update()
             )
-            result = await db.execute(query)
-            car = result.scalars().first()
+            car = db.execute(car_q).scalars().first()
             if not car:
                 raise ValueError(f"Car with VIN {vin} not found")
+
             if data.get("error"):
                 car.has_correct_vin = False
                 raise ValueError(f"Scraping error: {data['error']}")
+
+            # поля з парсера
             car.owners = data.get("owners")
             car.has_correct_vin = True
+
             if data.get("mileage") is not None and car.mileage is None:
-                car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
+                try:
+                    car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
+                except Exception:
+                    car.has_correct_mileage = False
             else:
                 car.has_correct_mileage = False
+
             car.accident_count = data.get("accident_count", 0)
             if car.condition_assessments and car.accident_count == 0:
                 car.has_correct_accidents = False
@@ -136,59 +263,43 @@ async def _parse_and_update_car_async(
             else:
                 car.has_correct_accidents = True
 
-            # car.recommendation_status = (
-            #     RecommendationStatus.RECOMMENDED
-            #     if car.accident_count <= 2 and car.has_correct_mileage and car.has_correct_accidents
-            #     else RecommendationStatus.NOT_RECOMMENDED
-            # )
-            prices = [int(data.get(key)) for key in ["jd", "d_max", "manheim"] if data.get(key)]
-
+            # середні ціни
+            prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
             if existing_car and existing_car.avg_market_price:
                 car.avg_market_price = existing_car.avg_market_price
             else:
-                car.avg_market_price = int(sum(prices) / len(prices) if prices else [0])
+                car.avg_market_price = int(sum(prices) / len(prices) if prices else 0)
 
-            roi_result = await db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()))
-            default_roi = roi_result.scalars().first()
-
+            # ROI / інвестиції / маржа
+            default_roi = _load_default_roi(db)
             if existing_car:
                 car.predicted_total_investments = existing_car.predicted_total_investments
                 car.predicted_profit_margin = existing_car.predicted_profit_margin
                 car.predicted_profit_margin_percent = existing_car.predicted_profit_margin_percent
             elif default_roi:
                 car.predicted_total_investments = (
-                    car.avg_market_price / (1 + default_roi.roi / 100) if car.avg_market_price else 0
+                    car.avg_market_price / (1 + default_roi.roi / 100.0) if car.avg_market_price else 0.0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
-                car.predicted_profit_margin = car.avg_market_price * (default_roi.profit_margin / 100)
+                car.predicted_profit_margin = car.avg_market_price * (default_roi.profit_margin / 100.0)
             else:
-                car.predicted_total_investments = 0
-                car.predicted_profit_margin_percent = 0
+                car.predicted_total_investments = 0.0
+                car.predicted_profit_margin_percent = 0.0
+                car.predicted_profit_margin = 0.0
 
-            fees_result = await db.execute(
-                select(FeeModel).where(
-                    FeeModel.auction == car.auction,
-                    FeeModel.price_from <= car.predicted_total_investments,
-                    FeeModel.price_to >= car.predicted_total_investments,
-                )
-            )
-            fees = fees_result.scalars().all()
+            # комісії аукціону
+            fees = _load_fees(db, car.auction, float(car.predicted_total_investments or 0.0))
+            car.auction_fee = _apply_fees(float(car.predicted_total_investments or 0.0), fees)
 
-            # Calculate auction_fee considering percentage-based fees
-            car.auction_fee = 0
-            for fee in fees:
-                if fee.percent:
-                    # Calculate percentage-based fee
-                    car.auction_fee += (fee.amount / 100) * car.predicted_total_investments
-                else:
-                    # Add fixed fee
-                    car.auction_fee += fee.amount
+            # suggested bid / ROI
+            car.suggested_bid = int((car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0))
+            car.predicted_roi = default_roi.roi if (default_roi and (car.predicted_total_investments or 0.0) > 0) else 0.0
 
-            car.suggested_bid = int(car.predicted_total_investments - car.sum_of_investments)
-            car.predicted_roi = default_roi.roi if car.predicted_total_investments > 0 else 0
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
+            # 5) HTML в S3
+            html_data = data.get("html_data")
             if html_data:
                 s3_storage = S3StorageClient(
                     endpoint_url=settings.S3_STORAGE_ENDPOINT,
@@ -197,114 +308,107 @@ async def _parse_and_update_car_async(
                     bucket_name=settings.S3_BUCKET_NAME,
                 )
                 file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                await s3_storage.upload_fileobj(file_key, BytesIO(html_data.encode("utf-8")))
+                s3_storage.upload_fileobj(file_key, BytesIO(html_data.encode("utf-8")))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
-                await db.flush()
 
             db.add(car)
-            await db.commit()
+            db.commit()
+            logger.info(f"parse_and_update_car: updated VIN={vin}")
             return {"status": "success", "vin": vin}
 
         except Exception as e:
-            logger.error(f"Error updating car {vin}: {e}", exc_info=True)
-            raise
-
-
-@app.task(name="tasks.task.parse_and_update_car")
-def parse_and_update_car(
-    vin: str,
-    car_name: str = None,
-    car_engine: str = None,
-    mileage: int = None,
-    car_make: str = None,
-    car_model: str = None,
-    car_year: int = None,
-    car_transmison: str = None,
-):
-    logger.info(f"Scheduling parse_and_update_car for VIN: {vin}, car_name: {car_name}, car_engine: {car_engine}")
-    return anyio.run(
-        _parse_and_update_car_async, vin, car_name, car_engine, mileage, car_make, car_model, car_year, car_transmison
-    )
-
-
-async def _update_car_bids_async():
-    logger.info("Starting _update_car_bids_async")
-    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
-    async with AsyncSessionFactory() as db:
-        try:
-            query = select(CarModel.id, CarModel.link, CarModel.lot).where(CarModel.relevance == RelevanceStatus.ACTIVE)
-            result = await db.execute(query)
-            cars = [{"id": r.id, "url": r.link, "lot": r.lot} for r in result.all()]
-
-            if not cars:
-                return {"status": "success", "count": 0}
-
-            response = await http_post_with_retries(
-                url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
-                json={"items": cars},
-                headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
-                timeout=300.0,
-            )
-            data = response.json()
-            logger.info(f"Received {data} items to update bids")
-
-            for item in data.get("bids"):
-                lot, auction, current_bid = item.get("lot_id").split("-")[0], item.get("site"), item.get("pre_bid")
-                if lot and current_bid is not None:
-                    result = await db.execute(select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction == auction)).with_for_update())
-                    car = result.scalars().first()
-                    if car:
-                        car.current_bid = int(float(current_bid))
-                        if car.suggested_bid and car.current_bid > car.suggested_bid:
-                            car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                            car.predicted_total_investments = car.sum_of_investments + car.current_bid
-                            car.predicted_roi = (
-                                (car.avg_market_price - car.predicted_total_investments)
-                                / car.predicted_total_investments
-                                * 100
-                            )
-                            car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
-                            if not car.recommendation_status_reasons:
-                                car.recommendation_status_reasons = "suggested bid < current bid;"
-                            elif "suggested bid < current bid" in car.recommendation_status_reasons:
-                                pass
-                            else:
-                                car.recommendation_status_reasons += "suggested bid < current bid;"
-
-            await db.commit()
-            return {"status": "success", "updated_cars": len(data)}
-
-        except Exception as e:
-            logger.error(f"Error in _update_car_bids_async: {e}", exc_info=True)
+            db.rollback()
+            logger.error(f"parse_and_update_car failed for VIN {vin}: {e}", exc_info=True)
             raise
 
 
 @app.task(name="tasks.task.update_car_bids")
-def update_car_bids():
-    return anyio.run(_update_car_bids_async)
+def update_car_bids() -> Dict[str, Any]:
+    """
+    Тягнемо поточні біди з парсера та оновлюємо активні авто.
+    """
+    logger.info("update_car_bids: start")
 
-
-# Asynchronous function to update fees
-async def _update_car_fees_async():
-    logger.info("Starting _update_car_fees_async")
-    engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True)
-    AsyncSessionFactory = async_sessionmaker(bind=engine, expire_on_commit=False)
-
-    async with AsyncSessionFactory() as db:
+    with SessionLocal() as db:
         try:
-            # Perform HTTP request to the endpoint
-            async with httpx.AsyncClient(timeout=60) as client:
-                response = await client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
-                response.raise_for_status()  # Raise an exception for bad status codes
+            rows = db.execute(
+                select(CarModel.id, CarModel.link, CarModel.lot, CarModel.auction)
+                .where(CarModel.relevance == RelevanceStatus.ACTIVE)
+            ).all()
+            cars = [{"id": r.id, "url": r.link, "lot": r.lot, "auction": r.auction} for r in rows]
+            if not cars:
+                return {"status": "success", "count": 0}
+
+            resp = http_post_with_retries(
+                url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
+                json={"items": [{"id": c["id"], "url": c["url"], "lot": c["lot"]} for c in cars]},
+                headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
+                timeout=300.0,
+            )
+            data = resp.json()
+            updated = 0
+
+            for item in data.get("bids", []):
+                lot = (item.get("lot_id") or "").split("-")[0]
+                auction = item.get("site")
+                current_bid = item.get("pre_bid")
+                if not lot or current_bid is None:
+                    continue
+
+                car = db.execute(
+                    select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction == auction)).with_for_update()
+                ).scalars().first()
+                if not car:
+                    continue
+
+                car.current_bid = int(float(current_bid))
+                if car.suggested_bid and car.current_bid > car.suggested_bid:
+                    car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    car.predicted_total_investments = (car.sum_of_investments or 0.0) + car.current_bid
+                    if car.predicted_total_investments:
+                        car.predicted_roi = (
+                            (car.avg_market_price - car.predicted_total_investments)
+                            / car.predicted_total_investments
+                            * 100.0
+                        )
+                        car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
+                    # причини
+                    if not car.recommendation_status_reasons:
+                        car.recommendation_status_reasons = "suggested bid < current bid;"
+                    elif "suggested bid < current bid" not in car.recommendation_status_reasons:
+                        car.recommendation_status_reasons += "suggested bid < current bid;"
+
+                updated += 1
+
+            db.commit()
+            logger.info(f"update_car_bids: updated={updated}")
+            return {"status": "success", "updated_cars": updated}
+
+        except Exception as e:
+            db.rollback()
+            logger.error(f"update_car_bids failed: {e}", exc_info=True)
+            raise
+
+
+@app.task(name="tasks.task.update_fees")
+def update_car_fees() -> Dict[str, Any]:
+    """
+    Перетягуємо fee-таблицю з парсера та оновлюємо 'copart'.
+    """
+    logger.info("update_car_fees: start")
+
+    with SessionLocal() as db:
+        try:
+            with httpx.Client(timeout=60) as client:
+                response = client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
+                response.raise_for_status()
                 fees_data = response.json()["fees"]["copart"]["fees"]
 
-            # Delete all existing fees for auction 'copart'
-            await db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
-            logger.info("Deleted all existing fees for auction 'copart'")
+            # wipe old
+            db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
 
-            # Process different types of fees from the response
+            # map
             fee_mappings = {
                 "bidding_fees": fees_data["bidding_fees"]["secured"]["secured"],
                 "gate_fee": {"amount": fees_data["gate_fee"]["amount"]},
@@ -313,50 +417,130 @@ async def _update_car_fees_async():
             }
 
             for fee_type, fee_values in fee_mappings.items():
-                if isinstance(fee_values, dict):  # Check if fee_values is a dictionary
-                    for price_range, amount_str in fee_values.items():
-                        amount = float(amount_str)
-                        is_percent = False
+                if not isinstance(fee_values, dict):
+                    continue
+                for price_range, amount_str in fee_values.items():
+                    amount = float(amount_str)
+                    is_percent = False
 
-                        # Logic to determine if the amount is a percentage
-                        if fee_type == "bidding_fees" and price_range == "0.00+" and 0 < amount < 10:
-                            is_percent = True  # Assume 5.75 is a percentage
+                    # евристика: відсоткова ставка у secured bidding_fees
+                    if fee_type == "bidding_fees" and price_range == "0.00+" and 0 < amount < 10:
+                        is_percent = True
 
-                        if "-" in price_range:  # Price range (e.g., "0.00-49.99")
-                            price_from, price_to = map(float, price_range.replace("+", "").split("-"))
-                        else:  # Single value or "0.00+"
-                            price_from = float(15000) if price_range != "0.00+" else 0.0
-                            price_to = 10000000
+                    if "-" in price_range:
+                        price_from, price_to = map(float, price_range.replace("+", "").split("-"))
+                    else:
+                        price_from = 0.0 if price_range == "0.00+" else 15000.0
+                        price_to = 10_000_000.0
 
-                        fee = FeeModel(
-                            auction="copart",
-                            fee_type=fee_type,
-                            amount=amount,
-                            percent=is_percent,
-                            price_from=price_from,
-                            price_to=price_to,
-                        )
-                        db.add(fee)
-                        logger.info(
-                            f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}"
-                        )
+                    fee = FeeModel(
+                        auction="copart",
+                        fee_type=fee_type,
+                        amount=amount,
+                        percent=is_percent,
+                        price_from=price_from,
+                        price_to=price_to,
+                    )
+                    db.add(fee)
 
-            # Commit changes to the database
-            await db.commit()
-            logger.info("Committed new fees for auction 'copart'")
-
-            return {"status": "success", "count": len(fee_mappings)}
+            db.commit()
+            logger.info("update_car_fees: OK")
+            return {"status": "success", "count": 4}
 
         except httpx.HTTPStatusError as e:
-            logger.error(f"HTTP error fetching fees: {e}", exc_info=True)
+            db.rollback()
+            logger.error(f"update_car_fees HTTP error: {e}", exc_info=True)
             raise
         except Exception as e:
-            logger.error(f"Error in _update_car_fees_async: {e}", exc_info=True)
-            await db.rollback()
+            db.rollback()
+            logger.error(f"update_car_fees failed: {e}", exc_info=True)
             raise
 
 
-# Celery task
-@app.task(name="tasks.task.update_fees")
-def update_car_fees():
-    return anyio.run(_update_car_fees_async)
+# --- kickoff для фільтра: sync + gevent ---
+@app.task(name="tasks.task.kickoff_parse_for_filter")
+def kickoff_parse_for_filter(filter_id: int, batch_size: int = 500, stream_chunk: int = 1000) -> dict:
+    """
+    Одна легка задачка: читає умови фільтра, стрімить усі авто, і шле підзадачі parse_and_update_car пачками.
+    - batch_size: скільки задач відправляти за раз у брокер
+    - stream_chunk: підказка драйверу/ORM для стрімінгу результатів з БД
+    """
+    with SessionLocal() as session:
+        filt = session.get(FilterModel, filter_id)
+        if not filt:
+            return {"status": "error", "reason": "filter_not_found", "filter_id": filter_id}
+
+        conditions = [
+            CarModel.make == filt.make,
+            CarModel.year >= (filt.year_from or 0),
+            CarModel.year <= (filt.year_to or 3000),
+            CarModel.mileage >= (filt.odometer_min or 0),
+            CarModel.mileage <= (filt.odometer_max or 10_000_000),
+        ]
+        if filt.model is not None:
+            conditions.append(CarModel.model == filt.model)
+
+        stmt = (
+            select(
+                CarModel.vin,
+                CarModel.vehicle,
+                CarModel.engine_title,
+                CarModel.mileage,
+                CarModel.make,
+                CarModel.model,
+                CarModel.year,
+                CarModel.transmision,
+            )
+            .where(and_(*conditions))
+            .execution_options(stream_results=True, yield_per=stream_chunk)  # RAM-friendly
+        )
+
+        result = session.execute(stmt)
+
+        batch: List[Dict[str, Any]] = []
+        enqueued = 0
+
+        for row in result.mappings():
+            batch.append(
+                {
+                    "vin": row["vin"],
+                    "vehicle": row["vehicle"],
+                    "engine_title": row["engine_title"],
+                    "mileage": row["mileage"],
+                    "make": row["make"],
+                    "model": row["model"],
+                    "year": row["year"],
+                    "transmision": row["transmision"],
+                }
+            )
+
+            if len(batch) >= batch_size:
+                for v in batch:
+                    parse_and_update_car.delay(
+                        vin=v["vin"],
+                        car_name=v["vehicle"],
+                        car_engine=v["engine_title"],
+                        mileage=v["mileage"],
+                        car_make=v["make"],
+                        car_model=v["model"],
+                        car_year=v["year"],
+                        car_transmison=v["transmision"],
+                    )
+                enqueued += len(batch)
+                batch.clear()
+
+        if batch:
+            for v in batch:
+                parse_and_update_car.delay(
+                    vin=v["vin"],
+                    car_name=v["vehicle"],
+                    car_engine=v["engine_title"],
+                    mileage=v["mileage"],
+                    car_make=v["make"],
+                    car_model=v["model"],
+                    car_year=v["year"],
+                    car_transmison=v["transmision"],
+                )
+            enqueued += len(batch)
+
+        return {"status": "ok", "filter_id": filter_id, "enqueued": enqueued}

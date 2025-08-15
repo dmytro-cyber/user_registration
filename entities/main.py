@@ -11,7 +11,7 @@ from api.v1.routers.inventory import router as inventory_router
 from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
-from tasks.task import _update_car_fees_async
+# from tasks.task import update_car_fees
 
 app = FastAPI(
     title="Cars&Beyond API",
