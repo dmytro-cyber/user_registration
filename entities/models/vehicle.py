@@ -189,7 +189,7 @@ class PartModel(Base):
     name = Column(String, nullable=False)
     value = Column(Float, nullable=True)
 
-    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), index=True)
     car = relationship("CarModel", back_populates="parts")
 
 
@@ -198,7 +198,7 @@ class PhotoModel(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     url = Column(String, nullable=False)
-    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), index=True)
     is_hd = Column(Boolean, default=False, nullable=False)
 
     car_low_res = relationship("CarModel", back_populates="photos")
@@ -209,7 +209,7 @@ class CarSaleHistoryModel(Base):
     __tablename__ = "car_sale_history"
 
     id = Column(Integer, primary_key=True, index=True)
-    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), index=True)
     date = Column(DateTime, nullable=True)
     source = Column(String, nullable=True)
     lot_number = Column(Integer, nullable=True)
@@ -223,7 +223,7 @@ class ConditionAssessmentModel(Base):
     __tablename__ = "condition_assessments"
 
     id = Column(Integer, primary_key=True, index=True)
-    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"))
+    car_id = Column(Integer, ForeignKey("cars.id", ondelete="CASCADE"), index=True)
     type_of_damage = Column(String, nullable=True)
     issue_description = Column(String, nullable=True)
 
@@ -234,7 +234,7 @@ class AutoCheckModel(Base):
     __tablename__ = "auto_checks"
 
     id = Column(Integer, primary_key=True, index=True)
-    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False)
+    car_id = Column(Integer, ForeignKey("cars.id"), nullable=False, index=True)
     screenshot_url = Column(String, nullable=True)
     created_at = Column(DateTime, default=func.now(), nullable=False)
 
