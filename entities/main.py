@@ -10,6 +10,7 @@ from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
 from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
+from core.celery_config import app as celery_app
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
 # from tasks.task import update_car_fees
 
@@ -19,17 +20,20 @@ app = FastAPI(
 )
 
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await create_roles()
+@app.on_event("startup")
+async def on_startup():
+    await create_roles()
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await _update_car_fees_async()
+@app.on_event("startup")
+async def on_startup():
+    celery_app.send_task(
+        "tasks.task.update_fees",
+        queue="car_parsing_queue",
+    )
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await import_us_zips_from_csv()
+@app.on_event("startup")
+async def on_startup():
+    await import_us_zips_from_csv()
 #     await match_and_update_locations()
 
 
