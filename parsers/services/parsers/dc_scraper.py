@@ -61,8 +61,8 @@ class Config:
             "--ignore-certificate-errors",
         ],
     }
+
     CREDENTIALS = {}
-    UPDATING_CREDENTIALS = False
 
     TIMEOUT = 10
     MAX_WAIT_VERIFICATION = 30
@@ -148,8 +148,7 @@ class DealerCenterScraper:
         self.model = model
         self.odometer = odometer
         self.transmission = transmission
-        # self.proxy_host = os.getenv("PROXY_HOST")
-        # self.proxy_port = os.getenv("PROXY_PORT")
+
         self.credentials_file = "credentials.json"
         self.dc_username = os.getenv("DC_USERNAME")
         self.dc_password = os.getenv("DC_PASSWORD")
@@ -158,42 +157,50 @@ class DealerCenterScraper:
         if not smtp_user or not smtp_password:
             raise ValueError("SMTP_USER and SMTP_PASSWORD must be set in .env file")
         self.email_client = EmailClient(smtp_user, smtp_password)
+
         self.cookies = []
         self.access_token = None
         self._load_credentials()
 
+        # --- single-flight sync primitives (instance-level)  # <<< added
+        self._login_lock = asyncio.Lock()                    # <<< added
+        self._login_ready = asyncio.Event()                  # <<< added
+        if self.cookies and self.access_token:               # <<< added
+            self._login_ready.set()                          # <<< added
+        else:                                                # <<< added
+            self._login_ready.clear()                        # <<< added
+
     def _load_credentials(self):
-        """Load saved cookies and access token from file."""
-        if Config.CREDENTIALS != {}:
-            self.cookies = Config.CREDENTIALS.get("cookies", [])
+        """Load saved cookies and access token from memory cache."""
+        if Config.CREDENTIALS:
+            self.cookies = Config.CREDENTIALS.get("cookies", []) or []
             self.access_token = Config.CREDENTIALS.get("access_token")
             logging.info("Loaded saved credentials")
 
     def _save_credentials(self):
-        """Save cookies and access token to file."""
+        """Save cookies and access token to memory cache."""
         Config.CREDENTIALS = {"cookies": self.cookies, "access_token": self.access_token}
         logging.info("Saved credentials to Config.CREDENTIALS")
 
     def _get_headers(self):
         """Generate headers with dynamic Authorization and Cookie."""
         headers = Config.BASE_HEADERS.copy()
-        headers["Authorization"] = f"Bearer {self.access_token}"
-        headers["Cookie"] = "; ".join([f"{cookie['name']}={cookie['value']}" for cookie in self.cookies])
+        if self.access_token:                                 # <<< added (safe guard)
+            headers["Authorization"] = f"Bearer {self.access_token}"
+        cookie_header = "; ".join([f"{c['name']}={c['value']}" for c in (self.cookies or [])])
+        if cookie_header:
+            headers["Cookie"] = cookie_header
         return headers
 
     def _get_cookies_dict(self):
         """Generate cookies dictionary from stored cookies."""
-        return {cookie["name"]: cookie["value"] for cookie in self.cookies}
+        return {cookie["name"]: cookie["value"] for cookie in (self.cookies or [])}
 
     async def _perform_login(self):
         """Perform the full login process using Playwright."""
         start_time = time.time()
         async with async_playwright() as p:
             browser_args = Config.BROWSER_ARGS.copy()
-            # if self.proxy_host and self.proxy_port:
-            #     browser_args["proxy"] = {"server": f"socks5://{self.proxy_host}:{self.proxy_port}"}
-            #     logging.info(f"Configured SOCKS5 proxy: {self.proxy_host}:{self.proxy_port}")
-
             browser = await p.chromium.launch(**browser_args)
             context = await browser.new_context(
                 user_agent=Config.BASE_HEADERS["User-Agent"],
@@ -240,14 +247,15 @@ class DealerCenterScraper:
 
                 await asyncio.sleep(5)
 
+                # save cookies
                 self.cookies = await context.cookies()
                 self._save_credentials()
 
+                # fetch token
                 await page.goto(Config.TOKEN_VALIDATION_URL)
                 await page.wait_for_load_state("networkidle")
 
                 content = await page.content()
-                logging.info(content)
                 match = re.search(r"<pre>({.*})</pre>", content)
                 if not match:
                     logging.error("Failed to extract token from response")
@@ -265,12 +273,31 @@ class DealerCenterScraper:
         end_time = time.time()
         logging.info(f"Login completed in {end_time - start_time} seconds")
 
+    # --- single-flight guard method (same semantics as local version)  # <<< added
+    async def _ensure_logged_in_singleflight(self):
+        # fast path: already ready
+        if self._login_ready.is_set():
+            return
+
+        # someone else is logging in → wait until ready
+        if self._login_lock.locked():
+            await self._login_ready.wait()
+            return
+
+        # we are leader
+        async with self._login_lock:
+            if self._login_ready.is_set():
+                return
+            self._login_ready.clear()
+            try:
+                await self._perform_login()
+            finally:
+                self._login_ready.set()
+
     async def authenticate_and_prepare_async(self) -> Tuple[Optional[httpx.Proxy], dict, dict, dict]:
-        """Authenticate and prepare credentials, falling back to login if needed."""
+        """Authenticate and prepare credentials; retry login on 401/403 via single-flight."""
         start_time = time.time()
         proxy = None
-        # if self.proxy_host and self.proxy_port:
-        #     proxy = httpx.Proxy(f"socks5://{self.proxy_host}:{self.proxy_port}")
 
         payload = {
             "auctionVehicleId": None,
@@ -283,57 +310,41 @@ class DealerCenterScraper:
             "userAgent": None,
             "vin": self.vin,
         }
+
+        async def _probe(headers: dict, cookies_dict: dict):
+            async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
+                r = await client.post(
+                    Config.AUTOCHECK_URL,
+                    headers=headers,
+                    cookies=cookies_dict,
+                    json=payload,
+                )
+                r.raise_for_status()
+                return r
+
         headers = self._get_headers()
         cookies_dict = self._get_cookies_dict()
 
+        # 1) If we already have creds, try probe; on 401/403 → single-flight login and retry
         if self.cookies and self.access_token:
-            async with httpx.AsyncClient() as client:
-                try:
-                    response = await client.post(
-                        Config.AUTOCHECK_URL,
-                        headers=headers,
-                        cookies=cookies_dict,
-                        json=payload,
-                        timeout=Config.TIMEOUT,
-                    )
-                    response.raise_for_status()
-                    logging.info("API call succeeded with saved credentials")
-                except httpx.HTTPStatusError as e:
-                    if e.response.status_code in (401, 403):
-                        logging.info("Saved credentials invalid, performing full login")
-                        if not Config.UPDATING_CREDENTIALS:
-                            Config.UPDATING_CREDENTIALS = True
-                            await self._perform_login()
-                            Config.UPDATING_CREDENTIALS = False
-                        else:
-                            while True:
-                                await asyncio.sleep(5)
-                                if Config.UPDATING_CREDENTIALS:
-                                    break
-                    else:
-                        raise
-                except Exception as e:
-                    logging.error(f"API call failed: {str(e)}")
-                    if not Config.UPDATING_CREDENTIALS:
-                        Config.UPDATING_CREDENTIALS = True
-                        await self._perform_login()
-                        Config.UPDATING_CREDENTIALS = False
-                    else:
-                        while True:
-                            await asyncio.sleep(5)
-                            if Config.UPDATING_CREDENTIALS:
-                                break
+            try:
+                await _probe(headers, cookies_dict)
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (401, 403):
+                    logging.info("Saved credentials invalid → performing single-flight login")
+                    await self._ensure_logged_in_singleflight()
+                    headers = self._get_headers()
+                    cookies_dict = self._get_cookies_dict()
+                    await _probe(headers, cookies_dict)
+                else:
+                    raise
         else:
-            logging.info("No saved credentials, performing full login")
-            if not Config.UPDATING_CREDENTIALS:
-                Config.UPDATING_CREDENTIALS = True
-                await self._perform_login()
-                Config.UPDATING_CREDENTIALS = False
-            else:
-                while True:
-                    await asyncio.sleep(5)
-                    if Config.UPDATING_CREDENTIALS:
-                        break
+            # 2) No creds at all → single-flight login
+            logging.info("No saved credentials → performing single-flight login")
+            await self._ensure_logged_in_singleflight()
+            headers = self._get_headers()
+            cookies_dict = self._get_cookies_dict()
+            await _probe(headers, cookies_dict)
 
         end_time = time.time()
         logging.info(f"Authentication prepared in {end_time - start_time} seconds")
@@ -344,13 +355,13 @@ class DealerCenterScraper:
     ) -> dict:
         """Retrieve market data including AutoCheck report, JD valuation, and market price statistics."""
         start_time = time.time()
-        response = await httpx.AsyncClient().post(
-            Config.AUTOCHECK_URL,
-            headers=headers,
-            cookies=cookies_dict,
-            json=initial_payload,
-            timeout=Config.TIMEOUT,
-        )
+        async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
+            response = await client.post(
+                Config.AUTOCHECK_URL,
+                headers=headers,
+                cookies=cookies_dict,
+                json=initial_payload,
+            )
         response.raise_for_status()
         response_json = response.json()
 
@@ -416,23 +427,22 @@ class DealerCenterScraper:
             ],
         }
 
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
             response = await client.post(
                 Config.VALUATION_URL,
                 headers=headers,
                 cookies=cookies_dict,
                 json=payload_jd,
-                timeout=Config.TIMEOUT,
             )
-            response.raise_for_status()
-            response_json = response.json()
-            jd = None
-            manheim = None
-            try:
-                jd = int(float(response_json.get("nada", {}).get("retailBook")))
-                manheim = int(float(response_json.get("manheim", {}).get("adjustedRetailAverage")))
-            except Exception:
-                logging.error("Failed to extract valuation data")
+        response.raise_for_status()
+        response_json = response.json()
+        jd = None
+        manheim = None
+        try:
+            jd = int(float(response_json.get("nada", {}).get("retailBook")))
+            manheim = int(float(response_json.get("manheim", {}).get("adjustedRetailAverage")))
+        except Exception:
+            logging.error("Failed to extract valuation data")
 
         market_data_url = Config.MARKET_DATA_URL
         payload_market_data = {
@@ -479,21 +489,20 @@ class DealerCenterScraper:
             },
             "maxDigitalPriceLockType": None,
         }
-        async with httpx.AsyncClient() as client:
+        async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
             response = await client.post(
                 market_data_url,
                 headers=headers,
                 cookies=cookies_dict,
                 json=payload_market_data,
-                timeout=Config.TIMEOUT,
             )
-            response.raise_for_status()
-            response_json = response.json()
-            d_max = None
-            try:
-                d_max = int(float(response_json.get("priceAvg")))
-            except Exception:
-                logging.error("Failed to extract priceAvg, defaulting to 0")
+        response.raise_for_status()
+        response_json = response.json()
+        d_max = None
+        try:
+            d_max = int(float(response_json.get("priceAvg")))
+        except Exception:
+            logging.error("Failed to extract priceAvg, defaulting to 0")
 
         result = {
             "owners": owners_value,
@@ -512,13 +521,14 @@ class DealerCenterScraper:
         """Collect only vehicle history data."""
         start_time = time.time()
         proxy, headers, cookies_dict, payload = await self.authenticate_and_prepare_async()
-        response = await httpx.AsyncClient().post(
-            Config.AUTOCHECK_URL,
-            headers=headers,
-            cookies=cookies_dict,
-            json=payload,
-            timeout=Config.TIMEOUT,
-        )
+
+        async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
+            response = await client.post(
+                Config.AUTOCHECK_URL,
+                headers=headers,
+                cookies=cookies_dict,
+                json=payload,
+            )
         response.raise_for_status()
         response_json = response.json()
 
@@ -526,10 +536,6 @@ class DealerCenterScraper:
         if not html_data:
             logging.error("htmlResponseData key not found in response")
             raise Exception("htmlResponseData key not found in response")
-
-        # with open("response.html", "w", encoding="utf-8") as f:
-        #     f.write(html_data)
-        # logging.info("HTML saved to response.html")
 
         soup = BeautifulSoup(html_data, "html.parser")
 

@@ -31,10 +31,10 @@ app = FastAPI(
 #         queue="car_parsing_queue",
 #     )
 
-@app.on_event("startup")
-async def on_startup():
-    # await import_us_zips_from_csv()
-    await match_and_update_locations()
+# @app.on_event("startup")
+# async def on_startup():
+#     await import_us_zips_from_csv()
+#     await match_and_update_locations()
 
 
 app.add_middleware(
