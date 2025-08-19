@@ -68,7 +68,7 @@ class Config:
     # in-memory кеш для токена/куків (на процес)
     CREDENTIALS: Dict[str, Any] = {}
 
-    TIMEOUT = 10
+    TIMEOUT = 100
     MAX_WAIT_VERIFICATION = 30
     POLL_INTERVAL = 4
     VIEWPORT = {"width": 1280, "height": 720}
