@@ -132,7 +132,7 @@ def http_post_with_retries(
 # =========================
 def maybe_run_async(func: Callable, *args, **kwargs):
     if asyncio.iscoroutinefunction(func):
-        return anyio.run(func(*args, **kwargs))
+        return anyio.run(func, *args, **kwargs)
     return func(*args, **kwargs)
 
 
