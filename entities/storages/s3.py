@@ -41,6 +41,29 @@ class S3StorageClient(S3StorageInterface):
         except ClientError as e:
             raise e
 
+    def upload_fileobj_sync(self, file_key: str, file_obj: IO, *, content_type: str | None = None, public: bool = False) -> None:
+        try:
+            file_obj.seek(0)
+        except Exception:
+            pass
+
+        ct = content_type or (mimetypes.guess_type(file_key)[0] or "application/octet-stream")
+        extra_args = {"ContentType": ct}
+        if public:
+            extra_args["ACL"] = "public-read"
+
+        try:
+            self._s3_client.upload_fileobj(
+                Fileobj=file_obj,
+                Bucket=self._bucket_name,
+                Key=file_key,
+                ExtraArgs=extra_args,
+            )
+        except (ConnectionError, HTTPClientError, NoCredentialsError) as e:
+            raise S3ConnectionError(f"Failed to connect to S3 storage: {e}") from e
+        except (ClientError, BotoCoreError) as e:
+            raise S3FileUploadError(f"Failed to upload to S3 storage: {e}") from e
+
     def upload_file(self, file_name: str, file_data: Union[bytes, bytearray]) -> None:
         """
         Uploads a file to the S3-compatible storage.

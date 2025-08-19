@@ -130,18 +130,16 @@ def http_post_with_retries(
 # =========================
 # Small util: виконає async-функцію через asyncio.run, якщо вона coroutine; інакше — як є
 # =========================
-def maybe_run_async(func: Callable[..., Any], *args, **kwargs) -> Union[Any, asyncio.Task]:
-    if asyncio.iscoroutinefunction(func):
-        try:
-            loop = asyncio.get_running_loop()   # є активний loop у цьому потоці
-        except RuntimeError:
-            # loop не запущено — можна стартувати власний
-            return anyio.run(func, *args, **kwargs)
-        else:
-            # loop вже працює — плануємо завдання і ПОВЕРТАЄМО Task
-            return loop.create_task(func(*args, **kwargs))
-    # sync — викликаємо напряму
-    return func(*args, **kwargs)
+def run_async(func: Callable[..., Any], *args, **kwargs) -> Union[Any, asyncio.Task]:
+    try:
+        loop = asyncio.get_running_loop()   # є активний loop у цьому потоці
+    except RuntimeError:
+        # loop не запущено — можна стартувати власний
+        return anyio.run(func, *args, **kwargs)
+    else:
+        # loop вже працює — плануємо завдання і ПОВЕРТАЄМО Task
+        return loop.create_task(func(*args, **kwargs))
+
 
 
 # =========================
@@ -197,7 +195,7 @@ def parse_and_update_car(
     with SessionLocal() as db:
         # 1) Sales history — не валимо таску, якщо сервіс впав
         try:
-            maybe_run_async(scrape_and_save_sales_history, vin, db, settings)  # підтримка і sync, і async
+            run_async(scrape_and_save_sales_history, vin, db, settings)  # підтримка і sync, і async
         except Exception as e:
             logger.warning(f"scrape_and_save_sales_history failed for {vin}: {e}")
 
@@ -316,7 +314,7 @@ def parse_and_update_car(
                     bucket_name=settings.S3_BUCKET_NAME,
                 )
                 file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                s3_storage.upload_fileobj(file_key, BytesIO(html_data.encode("utf-8")))
+                s3_storage.upload_fileobj_sync(file_key, BytesIO(html_data.encode("utf-8")))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
