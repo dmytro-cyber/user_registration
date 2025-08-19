@@ -12,7 +12,7 @@ import asyncio
 import anyio
 from datetime import datetime
 from io import BytesIO
-from typing import Any, Dict, Optional, List, Callable
+from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
 from sqlalchemy import and_, delete, func, select, create_engine
