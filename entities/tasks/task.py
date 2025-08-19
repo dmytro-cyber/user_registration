@@ -130,9 +130,17 @@ def http_post_with_retries(
 # =========================
 # Small util: виконає async-функцію через asyncio.run, якщо вона coroutine; інакше — як є
 # =========================
-def maybe_run_async(func: Callable, *args, **kwargs):
+def maybe_run_async(func: Callable[..., Any], *args, **kwargs) -> Union[Any, asyncio.Task]:
     if asyncio.iscoroutinefunction(func):
-        return anyio.run(func, *args, **kwargs)
+        try:
+            loop = asyncio.get_running_loop()   # є активний loop у цьому потоці
+        except RuntimeError:
+            # loop не запущено — можна стартувати власний
+            return anyio.run(func, *args, **kwargs)
+        else:
+            # loop вже працює — плануємо завдання і ПОВЕРТАЄМО Task
+            return loop.create_task(func(*args, **kwargs))
+    # sync — викликаємо напряму
     return func(*args, **kwargs)
 
 
