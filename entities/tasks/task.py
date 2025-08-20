@@ -30,6 +30,7 @@ from models.vehicle import (
     RecommendationStatus,
     RelevanceStatus,
 )
+from schemas.vehicle import CarCreateSchema
 from services.vehicle import scrape_and_save_sales_history  # може бути sync або async
 from storages import S3StorageClient
 
