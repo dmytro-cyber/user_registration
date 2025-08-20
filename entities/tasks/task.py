@@ -25,6 +25,7 @@ from models.admin import ROIModel, FilterModel
 from models.vehicle import (
     AutoCheckModel,
     CarModel,
+    CarSaleHistoryModel,
     FeeModel,
     RecommendationStatus,
     RelevanceStatus,
@@ -185,7 +186,7 @@ def parse_and_update_car(
 ) -> Dict[str, Any]:
     """
     Повністю синхронна таска:
-    - (опціонально) тягне sales history (твій сервіс, якщо async — виконаємо один раз через asyncio.run)
+    - тягне sales history напряму
     - дергає парсер
     - оновлює машину
     - зберігає html у S3 (якщо є)
@@ -193,21 +194,62 @@ def parse_and_update_car(
     logger.info(f"parse_and_update_car: VIN={vin}")
 
     with SessionLocal() as db:
-        # 1) Sales history — не валимо таску, якщо сервіс впав
+        # 1) Sales history inline
         try:
-            run_async(scrape_and_save_sales_history, vin, db, settings)  # підтримка і sync, і async
+            url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
+            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
+            resp = http_get_with_retries(url, headers=headers, timeout=30.0)
+            resp.raise_for_status()
+            result = CarCreateSchema.model_validate(resp.json())
+
+            logger.info(f"Successfully scraped sales history data {result.sales_history}")
+
+            car = db.execute(
+                select(CarModel).where(CarModel.vin == vin).limit(1)
+            ).scalars().first()
+            if car:
+                sale_history_data = result.sales_history
+                if len(sale_history_data) >= 4:
+                    logger.debug(
+                        f"More than 3 sales history records for VIN={vin}. Not recommended."
+                    )
+                    car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    if not car.recommendation_status_reasons:
+                        car.recommendation_status_reasons = (
+                            f"sales at auction in the last 3 years: {len(sale_history_data)};"
+                        )
+                    else:
+                        car.recommendation_status_reasons += (
+                            f"sales at auction in the last 3 years: {len(sale_history_data)};"
+                        )
+                    db.add(car)
+                    db.flush()
+
+                for history_data in sale_history_data:
+                    sales_history = CarSaleHistoryModel(
+                        **history_data.dict(), car_id=car.id
+                    )
+                    if not sales_history.source:
+                        sales_history.source = "Unknown"
+                    db.add(sales_history)
+
+                db.commit()
         except Exception as e:
-            logger.warning(f"scrape_and_save_sales_history failed for {vin}: {e}")
+            logger.warning(f"Sales history fetch failed for {vin}: {e}")
 
         try:
-            # 2) шукаємо «поточну» машину за сьогодні/мілежу
+            # 2) шукаємо «поточну» машину
             current_date = datetime.utcnow().date()
             q_current = (
                 select(CarModel)
                 .where(
                     and_(
-                        func.lower(CarModel.vehicle) == func.lower(car_name) if car_name else True,
-                        CarModel.mileage.between(mileage - 1500, mileage + 1500) if mileage else True,
+                        func.lower(CarModel.vehicle) == func.lower(car_name)
+                        if car_name
+                        else True,
+                        CarModel.mileage.between(mileage - 1500, mileage + 1500)
+                        if mileage
+                        else True,
                         func.date(CarModel.created_at) == current_date,
                         CarModel.predicted_total_investments.isnot(None),
                     )
@@ -234,7 +276,7 @@ def parse_and_update_car(
             resp = http_get_with_retries(url, headers=headers, timeout=300.0)
             data = resp.json()
 
-            # 4) беремо car під lock та оновлюємо
+            # 4) оновлення машини під lock
             car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
@@ -249,13 +291,14 @@ def parse_and_update_car(
                 car.has_correct_vin = False
                 raise ValueError(f"Scraping error: {data['error']}")
 
-            # поля з парсера
             car.owners = data.get("owners")
             car.has_correct_vin = True
 
             if data.get("mileage") is not None and car.mileage is None:
                 try:
-                    car.has_correct_mileage = int(car.mileage) == int(data.get("mileage", 0))
+                    car.has_correct_mileage = int(car.mileage) == int(
+                        data.get("mileage", 0)
+                    )
                 except Exception:
                     car.has_correct_mileage = False
             else:
@@ -270,36 +313,59 @@ def parse_and_update_car(
                 car.has_correct_accidents = True
 
             # середні ціни
-            prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
+            prices = [
+                int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)
+            ]
             if existing_car and existing_car.avg_market_price:
                 car.avg_market_price = existing_car.avg_market_price
             else:
-                car.avg_market_price = int(sum(prices) / len(prices) if prices else 0)
+                car.avg_market_price = (
+                    int(sum(prices) / len(prices)) if prices else 0
+                )
 
             # ROI / інвестиції / маржа
             default_roi = _load_default_roi(db)
             if existing_car:
-                car.predicted_total_investments = existing_car.predicted_total_investments
+                car.predicted_total_investments = (
+                    existing_car.predicted_total_investments
+                )
                 car.predicted_profit_margin = existing_car.predicted_profit_margin
-                car.predicted_profit_margin_percent = existing_car.predicted_profit_margin_percent
+                car.predicted_profit_margin_percent = (
+                    existing_car.predicted_profit_margin_percent
+                )
             elif default_roi:
                 car.predicted_total_investments = (
-                    car.avg_market_price / (1 + default_roi.roi / 100.0) if car.avg_market_price else 0.0
+                    car.avg_market_price / (1 + default_roi.roi / 100.0)
+                    if car.avg_market_price
+                    else 0.0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
-                car.predicted_profit_margin = car.avg_market_price * (default_roi.profit_margin / 100.0)
+                car.predicted_profit_margin = car.avg_market_price * (
+                    default_roi.profit_margin / 100.0
+                )
             else:
                 car.predicted_total_investments = 0.0
                 car.predicted_profit_margin_percent = 0.0
                 car.predicted_profit_margin = 0.0
 
             # комісії аукціону
-            fees = _load_fees(db, car.auction, float(car.predicted_total_investments or 0.0))
-            car.auction_fee = _apply_fees(float(car.predicted_total_investments or 0.0), fees)
+            fees = _load_fees(
+                db, car.auction, float(car.predicted_total_investments or 0.0)
+            )
+            car.auction_fee = _apply_fees(
+                float(car.predicted_total_investments or 0.0), fees
+            )
 
             # suggested bid / ROI
-            car.suggested_bid = int((car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0))
-            car.predicted_roi = default_roi.roi if (default_roi and (car.predicted_total_investments or 0.0) > 0) else 0.0
+            car.suggested_bid = int(
+                (car.predicted_total_investments or 0.0)
+                - (car.sum_of_investments or 0.0)
+            )
+            car.predicted_roi = (
+                default_roi.roi
+                if (default_roi and (car.predicted_total_investments or 0.0) > 0)
+                else 0.0
+            )
 
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
@@ -314,7 +380,9 @@ def parse_and_update_car(
                     bucket_name=settings.S3_BUCKET_NAME,
                 )
                 file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                s3_storage.upload_fileobj_sync(file_key, BytesIO(html_data.encode("utf-8")))
+                s3_storage.upload_fileobj_sync(
+                    file_key, BytesIO(html_data.encode("utf-8"))
+                )
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
