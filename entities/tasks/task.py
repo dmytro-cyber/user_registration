@@ -440,20 +440,31 @@ def update_car_bids() -> Dict[str, Any]:
                 car.current_bid = int(float(current_bid))
                 if car.suggested_bid and car.current_bid > car.suggested_bid:
                     car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    car.predicted_total_investments = (car.sum_of_investments or 0.0) + car.current_bid
-                    if car.predicted_total_investments:
-                        car.predicted_roi = (
-                            (car.avg_market_price - car.predicted_total_investments)
-                            / car.predicted_total_investments
-                            * 100.0
-                        )
-                        car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
-                    # причини
+
                     if not car.recommendation_status_reasons:
                         car.recommendation_status_reasons = "suggested bid < current bid;"
                     elif "suggested bid < current bid" not in car.recommendation_status_reasons:
                         car.recommendation_status_reasons += "suggested bid < current bid;"
 
+                if car.suggested_bid and car.current_bid <= car.suggested_bid:
+
+
+                    if car.recommendation_status_reasons == "suggested bid < current bid;":
+                        car.recommendation_status = RecommendationStatus.RECOMMENDED
+                        car.recommendation_status_reasons = ""
+                    elif "suggested bid < current bid" in car.recommendation_status_reasons:
+                        car.recommendation_status_reasons = car.recommendation_status_reasons.replace("suggested bid < current bid;", "")
+                    else:
+                        pass
+
+                car.predicted_total_investments = (car.sum_of_investments or 0.0) + car.current_bid
+                if car.predicted_total_investments:
+                    car.predicted_roi = (
+                        (car.avg_market_price - car.predicted_total_investments)
+                        / car.predicted_total_investments
+                        * 100.0
+                    )
+                    car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
                 updated += 1
 
             db.commit()
