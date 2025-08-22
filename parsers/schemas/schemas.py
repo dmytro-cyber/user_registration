@@ -30,4 +30,4 @@ class UpdateCurrentBidListRequestSchema(BaseModel):
 
 
 class UpdateCurrentBidListResponseSchema(BaseModel):
-    bids: list[UpdateCurrentBidResponseSchema]
+    bids: list[dict]
