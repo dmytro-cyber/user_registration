@@ -188,7 +188,7 @@ async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
     """
 
     # Create tasks for all URLs
-    logger.info(f"where tuple? type: {type(urls)}")
+    # logger.info(f"where tuple? type: {type(urls)}")
     payload = []
     for obj in urls:
         payload.append(
