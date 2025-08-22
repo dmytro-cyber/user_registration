@@ -203,6 +203,6 @@ async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
     for i in range(0, len(payload), batch_size):
         batch = payload[i: i + batch_size]
         result = await fetch_current_bids(batch)
-        results.append(result)
+        results.extend(result)
 
     return results
