@@ -173,7 +173,9 @@ async def fetch_current_bids(lots: list[dict]) -> list[dict]:
                 json={"lots": lots},
             )
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            logger.info(f"AAAAAAAA {result}")
+            return result
         except httpx.HTTPStatusError as e:
             print(f"HTTP error occurred: {e.response.status_code} - {e.response.text}")
         except httpx.RequestError as e:
