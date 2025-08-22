@@ -443,7 +443,7 @@ def update_car_bids() -> Dict[str, Any]:
 
                     if not car.recommendation_status_reasons:
                         car.recommendation_status_reasons = "suggested bid < current bid;"
-                    elif "suggested bid < current bid" not in car.recommendation_status_reasons:
+                    elif car.recommendation_status_reasons and "suggested bid < current bid" not in car.recommendation_status_reasons:
                         car.recommendation_status_reasons += "suggested bid < current bid;"
 
                 if car.suggested_bid and car.current_bid <= car.suggested_bid:
@@ -452,7 +452,7 @@ def update_car_bids() -> Dict[str, Any]:
                     if car.recommendation_status_reasons == "suggested bid < current bid;":
                         car.recommendation_status = RecommendationStatus.RECOMMENDED
                         car.recommendation_status_reasons = ""
-                    elif "suggested bid < current bid" in car.recommendation_status_reasons:
+                    elif car.recommendation_status_reasons and "suggested bid < current bid" in car.recommendation_status_reasons:
                         car.recommendation_status_reasons = car.recommendation_status_reasons.replace("suggested bid < current bid;", "")
                     else:
                         pass
