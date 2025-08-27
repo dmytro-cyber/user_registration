@@ -381,10 +381,10 @@ async def get_filtered_vehicles(
         )
         .filter(
             CarModel.relevance == RelevanceStatus.ACTIVE,
-            # CarModel.predicted_total_investments.isnot(None),
-            # CarModel.predicted_total_investments > 0,
-            # CarModel.suggested_bid.isnot(None),
-            # CarModel.suggested_bid > 0,
+            CarModel.predicted_total_investments.isnot(None),
+            CarModel.predicted_total_investments > 0,
+            CarModel.suggested_bid.isnot(None),
+            CarModel.suggested_bid > 0,
         )
     )
 
