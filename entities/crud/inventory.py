@@ -24,6 +24,7 @@ from schemas.inventory import (
     CarInventoryInvestmentsCreate,
     CarInventoryInvestmentsUpdate,
     CarInventoryUpdate,
+    CarInventoryUpdateStatus,
     PartInventoryCreate,
     PartInventoryStatusUpdate,
     PartInventoryUpdate,
@@ -159,7 +160,7 @@ async def get_car_inventories(
 async def update_car_inventory(
     db: AsyncSession,
     inventory_id: int,
-    inventory: CarInventoryUpdate,
+    inventory: CarInventoryUpdate | CarInventoryUpdateStatus,
     user_id: str = "N/A",
     request_id: str = "N/A",
 ):
@@ -184,8 +185,9 @@ async def update_car_inventory(
         update_data = inventory.dict(exclude_unset=True)
         action = "Updated: "
         for key, value in update_data.items():
-            action += f"{key} {getattr(db_inventory, key)} -> {value}, "
-            setattr(db_inventory, key, value)
+            if key != "comment":
+                action += f"{key} {getattr(db_inventory, key)} -> {value}, "
+                setattr(db_inventory, key, value)
         await update_inventory_financials(db, inventory_id)
         await db.commit()
         await db.refresh(db_inventory)

@@ -157,11 +157,10 @@ async def update_inventory_status(
     db: AsyncSession = Depends(get_db),
     current_user=Depends(get_current_user),
 ):
-    db_inventory = await get_car_inventory(db, inventory_id, user_id=str(current_user.id))
-    if db_inventory is None:
-        raise HTTPException(status_code=404, detail="Inventory not found")
+    # db_inventory = await get_car_inventory(db, inventory_id, user_id=str(current_user.id))
+    # if db_inventory is None:
+    #     raise HTTPException(status_code=404, detail="Inventory not found")
 
-    previous_status = db_inventory.car_status
     db_inventory = await update_car_inventory(db, inventory_id, inventory, user_id=str(current_user.id))
     if db_inventory is None:
         raise HTTPException(status_code=404, detail="Inventory not found")
