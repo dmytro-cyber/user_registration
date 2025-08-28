@@ -475,7 +475,7 @@ async def get_avg_sale_prices(
     engine_type_list = normalize_csv_param(engine_type)
     transmission_list = normalize_csv_param(transmission)
     drive_train_list = normalize_csv_param(drive_train)
-    cylinder_list = [int(value) for value in normalize_csv_param(cylinder)]
+    cylinder_list = [int(value) for value in normalize_csv_param(cylinder)] if cylinder else None
     auction_names_list = normalize_csv_param(auction_names)
     body_style_list = normalize_csv_param(body_style)
 
