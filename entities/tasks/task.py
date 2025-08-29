@@ -457,14 +457,14 @@ def update_car_bids() -> Dict[str, Any]:
                     else:
                         pass
 
-                car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
+                # car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
                 if car.predicted_total_investments and car.avg_market_price:
                     car.predicted_roi = (
-                        (car.avg_market_price - car.predicted_total_investments)
-                        / car.predicted_total_investments
+                        (car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0)))
+                        / (car.sum_of_investments + (car.current_bid or 0))
                         * 100.0
                     )
-                    car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
+                    car.predicted_profit_margin = car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0))
                 updated += 1
 
             db.commit()
