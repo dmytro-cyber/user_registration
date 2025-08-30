@@ -184,8 +184,11 @@ async def update_car_inventory(
         update_data = inventory.dict(exclude_unset=True)
         action = "Updated: "
         for key, value in update_data.items():
-            action += f"{key} {getattr(db_inventory, key)} -> {value}, "
-            setattr(db_inventory, key, value)
+            if key != "car_status":
+                action += f"{key} {getattr(db_inventory, key)} -> {value}, "
+                setattr(db_inventory, key, value)
+            else:
+                db_inventory.car_status = value
         await update_inventory_financials(db, inventory_id)
         await db.commit()
         await db.refresh(db_inventory)

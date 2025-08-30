@@ -39,7 +39,7 @@ class CarModel(Base):
     mileage = Column(Integer, nullable=True, index=True)
     auction = Column(String, nullable=True)
     auction_name = Column(String, nullable=True)
-    date = Column(DateTime, nullable=True)
+    date = Column(DateTime(timezone=True), nullable=True)
     lot = Column(Integer, nullable=True)
     seller = Column(String, nullable=True)
     seller_type = Column(String, nullable=True)
