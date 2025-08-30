@@ -154,13 +154,15 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     if not existing_vehicle.recommendation_status_reasons:
                         existing_vehicle.recommendation_status_reasons = f"{value};"
                     else:
-                        existing_vehicle.recommendation_status_reasons += f"{value};"
+                        if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons += f"{value};"
                 if field == "transmision" and value != "Automatic":
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not existing_vehicle.recommendation_status_reasons:
                         existing_vehicle.recommendation_status_reasons = f"{value};"
                     else:
-                        existing_vehicle.recommendation_status_reasons += f"{value};"
+                        if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons += f"{value};"
 
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
             new_photos = []
@@ -206,7 +208,8 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
                         else:
-                            existing_vehicle.recommendation_status_reasons += f"i{assessment.issue_description};"
+                            if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
 
             if (
                 vehicle_data.current_bid is not None
@@ -381,10 +384,10 @@ async def get_filtered_vehicles(
         )
         .filter(
             CarModel.relevance == RelevanceStatus.ACTIVE,
-            # CarModel.predicted_total_investments.isnot(None),
-            # CarModel.predicted_total_investments > 0,
-            # CarModel.suggested_bid.isnot(None),
-            # CarModel.suggested_bid > 0,
+            CarModel.predicted_total_investments.isnot(None),
+            CarModel.predicted_total_investments > 0,
+            CarModel.suggested_bid.isnot(None),
+            CarModel.suggested_bid > 0,
         )
     )
 

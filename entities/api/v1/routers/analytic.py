@@ -1,11 +1,12 @@
 import logging
 import sys
+from collections import defaultdict
 from datetime import datetime, timedelta, time, timezone
 from itertools import chain
 from typing import Literal, Optional, List
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select, and_, func, or_
+from sqlalchemy import select, and_, func, or_, exists, literal_column
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
@@ -446,18 +447,24 @@ async def get_avg_sale_prices(
     session: AsyncSession = Depends(get_db),
 ):
     logger.debug("Entering get_avg_sale_prices endpoint")
+
+    # helper: "a,b,c" -> ["a","b","c"]
     def csv(param: Optional[str]) -> Optional[list[str]]:
         return [x.strip() for x in param.split(",") if x.strip()] if param else None
 
+    # validate interval unit (хоч це й Literal, але буває, що приходить raw)
+    if interval_unit not in ("day", "week", "month"):
+        raise HTTPException(status_code=400, detail="interval_unit must be one of: day, week, month")
+
+    # VIN shortcut: підставляємо make/model/year_* із еталонного авто
     if vin is not None:
         if len(vin) != 17:
             logger.error(f"Invalid VIN length: {len(vin)}")
             raise HTTPException(status_code=400, detail="VIN must be exactly 17 characters long.")
 
-        query = select(CarModel).where(CarModel.vin == vin)
-        result = await session.execute(query)
-        vehicle = result.scalar_one_or_none()
-
+        q_vehicle = select(CarModel).where(CarModel.vin == vin)
+        res = await session.execute(q_vehicle)
+        vehicle = res.scalar_one_or_none()
         if not vehicle:
             logger.warning(f"Car with VIN {vin} not found")
             raise HTTPException(status_code=404, detail=f"Car with VIN {vin} not found.")
@@ -467,28 +474,45 @@ async def get_avg_sale_prices(
         year_start = vehicle.year
         year_end = vehicle.year
 
-    location_list = normalize_csv_param(locations)
-    auctions_list = normalize_csv_param(auctions)
-    vehicle_condition_list = normalize_csv_param(vehicle_condition)
-    vehicle_types_list = normalize_csv_param(vehicle_types)
-    engine_type_list = normalize_csv_param(engine_type)
-    transmission_list = normalize_csv_param(transmission)
-    drive_train_list = normalize_csv_param(drive_train)
-    cylinder_list = [int(value) for value in normalize_csv_param(cylinder)]
-    auction_names_list = normalize_csv_param(auction_names)
-    body_style_list = normalize_csv_param(body_style)
+    # парсимо CSV-параметри
+    location_list = csv(locations)
+    auctions_list = csv(auctions)
+    vehicle_condition_list = csv(vehicle_condition)
+    vehicle_types_list = csv(vehicle_types)
+    engine_type_list = csv(engine_type)
+    transmission_list = csv(transmission)
+    drive_train_list = csv(drive_train)
+    auction_names_list = csv(auction_names)
+    body_style_list = csv(body_style)
+
+    cyl_raw = csv(cylinder) or []
+    try:
+        cylinder_list = [int(v) for v in cyl_raw]
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Parameter 'cylinder' must contain only integers, e.g. 4,6,8")
+
+    # часові межі
+    if sale_start and sale_end and sale_start > sale_end:
+        raise HTTPException(status_code=400, detail="'sale_start' must be <= 'sale_end'")
 
     ref_date = reference_date or datetime.utcnow()
-    start_date = ref_date - timedelta(days=interval_amount * {"day": 1, "week": 7, "month": 30}[interval_unit])
+    days_map = {"day": 1, "week": 7, "month": 30}
+    start_date = ref_date - timedelta(days=interval_amount * days_map[interval_unit])
 
+    # ОДИН вираз period — перевикористовуємо скрізь (уникаємо GroupingError)
+    period = func.date_trunc(literal_column(f"'{interval_unit}'"), CarSaleHistoryModel.date).label("period")
+
+    # базовий SELECT
     query = (
         select(
-            func.date_trunc(interval_unit, CarSaleHistoryModel.date).label("period"),
-            func.avg(CarSaleHistoryModel.final_bid).label("avg_price")
+            period,
+            func.avg(CarSaleHistoryModel.final_bid).label("avg_price"),
         )
+        .select_from(CarSaleHistoryModel)
         .join(CarModel, CarSaleHistoryModel.car_id == CarModel.id)
-        .outerjoin(ConditionAssessmentModel, CarModel.id == ConditionAssessmentModel.car_id)
     )
+
+    # фільтри
     filters = [
         CarSaleHistoryModel.status == "Sold",
         CarSaleHistoryModel.final_bid.isnot(None),
@@ -515,8 +539,6 @@ async def get_avg_sale_prices(
         filters.append(CarModel.year >= year_start)
     if year_end is not None:
         filters.append(CarModel.year <= year_end)
-    if vehicle_condition_list:
-        filters.append(ConditionAssessmentModel.issue_description.in_(vehicle_condition_list))
     if vehicle_types_list:
         filters.append(CarModel.vehicle_type.in_(vehicle_types_list))
     if make:
@@ -550,17 +572,31 @@ async def get_avg_sale_prices(
     elif sale_end:
         filters.append(CarSaleHistoryModel.date <= sale_end)
 
+    # vehicle_condition — через EXISTS, щоб не множити рядки агрегату
+    if vehicle_condition_list:
+        cond_exists = exists(
+            select(1)
+            .select_from(ConditionAssessmentModel)
+            .where(
+                ConditionAssessmentModel.car_id == CarModel.id,
+                ConditionAssessmentModel.issue_description.in_(vehicle_condition_list),
+            )
+        )
+        filters.append(cond_exists)
+
     if filters:
         query = query.filter(and_(*filters))
-    query = query.group_by(func.date_trunc(interval_unit, CarSaleHistoryModel.date)).order_by("period")
 
+    query = query.group_by(period).order_by(period)
+
+    # виконання
     result = await session.execute(query)
     rows = result.fetchall()
 
     data = [
         {
             "period": row.period.date().isoformat(),
-            "avg_price": float(row.avg_price) if row.avg_price else 0.0
+            "avg_price": float(row.avg_price) if row.avg_price is not None else 0.0,
         }
         for row in rows
     ]

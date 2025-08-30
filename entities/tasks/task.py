@@ -457,14 +457,14 @@ def update_car_bids() -> Dict[str, Any]:
                     else:
                         pass
 
-                car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
+                # car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
                 if car.predicted_total_investments and car.avg_market_price:
                     car.predicted_roi = (
-                        (car.avg_market_price - car.predicted_total_investments)
-                        / car.predicted_total_investments
+                        (car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0)))
+                        / (car.sum_of_investments + (car.current_bid or 0))
                         * 100.0
                     )
-                    car.predicted_profit_margin = car.avg_market_price - car.predicted_total_investments
+                    car.predicted_profit_margin = car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0))
                 updated += 1
 
             db.commit()
@@ -545,7 +545,7 @@ def update_car_fees() -> Dict[str, Any]:
 
 # --- kickoff для фільтра: sync + gevent ---
 @app.task(name="tasks.task.kickoff_parse_for_filter")
-def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk: int = 1000) -> dict:
+def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk: int = 400) -> dict:
     """
     Одна легка задачка: читає умови фільтра, стрімить усі авто, і шле підзадачі parse_and_update_car пачками.
     - batch_size: скільки задач відправляти за раз у брокер
