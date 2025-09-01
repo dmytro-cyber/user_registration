@@ -1,8 +1,9 @@
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+from zoneinfo import ZoneInfo
 
 # Налаштування логування
 logging.basicConfig(
@@ -26,13 +27,37 @@ def is_salvage_from_document(document: str) -> bool:
     return document.lower() == "salvage"
 
 
-def parse_auction_date(date_str: str) -> Optional[datetime]:
-    """Parse ISO 8601 date string to datetime."""
-    try:
-        return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ")
-    except ValueError as e:
-        logger.warning(f"Invalid auction_date format: {date_str} -> {e}")
+def parse_auction_date(s: str,
+                       default_tz: str | None = "UTC",
+                       to_utc: bool = True) -> Optional[datetime]:
+    """
+    Returns the timezone-aware datetime.
+    - If the string contains a TZ (Z or ±HH:MM), we use it.
+    - If there is no TZ, set default_tz (IANA, e.g. ‘Europe/Kyiv’).
+    - If to_utc=True, convert the result to UTC.
+    """
+    if not s:
         return None
+    raw = s.strip()
+    try:
+        iso = raw[:-1] + '+00:00' if raw.endswith('Z') else raw
+        dt = datetime.fromisoformat(iso)
+    except ValueError:
+        for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
+                break
+            except ValueError:
+                dt = None
+        if dt is None:
+            return None
+
+    if dt.tzinfo is None:
+        if default_tz is None:
+            return None
+        dt = dt.replace(tzinfo=ZoneInfo(default_tz))
+
+    return dt.astimezone(timezone.utc) if to_utc else dt
 
 
 def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
