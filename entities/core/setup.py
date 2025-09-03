@@ -117,7 +117,7 @@ def haversine(lat1, lon1, lat2, lon2):
 def get_location_coordinates(query):
     conn = http.client.HTTPSConnection("google.serper.dev")
     payload = json.dumps({"q": query, "location": "United States"})
-    headers = {"X-API-KEY": "0a4e26f91d1544f04d8a0a3e9bc2d9f125f8aabd", "Content-Type": "application/json"}
+    headers = {"X-API-KEY": "bab5fa7203c8e6eeaaacbf0041782fdc5dab1e59", "Content-Type": "application/json"}
     conn.request("POST", "/places", payload, headers)
     res = conn.getresponse()
     data = res.read()
