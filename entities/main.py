@@ -33,10 +33,9 @@ app = FastAPI(
 # async def on_startup():
 
 
-# @app.on_event("startup")
-# async def on_startup():
-
-#     await match_and_update_locations()
+@app.on_event("startup")
+async def on_startup():
+    await match_and_update_locations()
 
 
 app.add_middleware(
