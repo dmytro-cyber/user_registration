@@ -389,7 +389,7 @@ async def get_filtered_vehicles(
             CarModel.suggested_bid.isnot(None),
             CarModel.suggested_bid > 0,
             or_(            
-                func.date(CarModel.date) >= today,
+                CarModel.date.isnot(None),
                 CarModel.auction_name == "Buynow")
         )
     )
