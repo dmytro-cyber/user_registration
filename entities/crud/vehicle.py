@@ -245,24 +245,24 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                 else:
                     vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
 
-            query = select(FilterModel).where(
-                FilterModel.make == vehicle_data.make,
-                or_(
-                    FilterModel.model == vehicle_data.model,
-                    FilterModel.model.is_(None)
-                ),
-                FilterModel.year_from <= vehicle_data.year,
-                FilterModel.year_to >= vehicle_data.year,
-                FilterModel.odometer_max >= vehicle_data.mileage
-            )
-            filter_ex = await db.execute(query)
-            filter_res = filter_ex.scalars().one_or_none()
-            if filter_res:
-                vehicle.relevance = RelevanceStatus.ACTIVE
-                to_parse = True
-            else:
-                vehicle.relevance = RelevanceStatus.IRRELEVANT
-                to_parse = False
+            # query = select(FilterModel).where(
+            #     FilterModel.make == vehicle_data.make,
+            #     or_(
+            #         FilterModel.model == vehicle_data.model,
+            #         FilterModel.model.is_(None)
+            #     ),
+            #     FilterModel.year_from <= vehicle_data.year,
+            #     FilterModel.year_to >= vehicle_data.year,
+            #     FilterModel.odometer_max >= vehicle_data.mileage
+            # )
+            # filter_ex = await db.execute(query)
+            # filter_res = filter_ex.scalars().one_or_none()
+            # if filter_res:
+            #     vehicle.relevance = RelevanceStatus.ACTIVE
+            #     to_parse = True
+            # else:
+            #     vehicle.relevance = RelevanceStatus.IRRELEVANT
+            #     to_parse = False
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.issue_description != "Unknown":
@@ -375,7 +375,7 @@ async def get_filtered_vehicles(
         )
     )
 
-    # ---- базовий запит БЕЗ join-ів (щоб не плодити рядки) ----
+    today = datetime.utcnow().date()
     base_query = (
         select(CarModel)
         .options(
@@ -388,6 +388,9 @@ async def get_filtered_vehicles(
             CarModel.predicted_total_investments > 0,
             CarModel.suggested_bid.isnot(None),
             CarModel.suggested_bid > 0,
+            or_(            
+                func.date(CarModel.date) >= today,
+                CarModel.auction_name == "Buynow")
         )
     )
 
@@ -564,8 +567,7 @@ async def get_filtered_vehicles(
 
     vehicles: List[CarModel] = []
     for car, liked in rows:
-        car.liked = bool(liked)  # доступно як булевий прапорець
-        # car.photos та car.condition_assessments вже підвантажені selectinload
+        car.liked = bool(liked)
         vehicles.append(car)
 
     return vehicles, total_count, total_pages, bids_info
