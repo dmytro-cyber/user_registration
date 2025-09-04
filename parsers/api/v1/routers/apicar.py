@@ -80,7 +80,7 @@ async def get_sales_history(car_vin: str):
     "/apicar/{car_vin}",
     description="Get data from apicar",
 )
-async def get_sales_history(car_vin: str):
+async def get_update(car_vin: str):
     """
     Get data from apicar.
     """
@@ -97,7 +97,7 @@ async def get_sales_history(car_vin: str):
         logger.error(f"Failed to fetch API data for VIN {car_vin}: {e}")
         return None
 
-    formatted_vehicle = format_car_data(data.get("data"))
+    formatted_vehicle = format_car_data(data[0])
     adapted_vehicle = {
         "vin": formatted_vehicle["vin"],
         "vehicle": formatted_vehicle.get("vehicle"),
