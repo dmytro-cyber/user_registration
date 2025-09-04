@@ -897,6 +897,7 @@ async def update_car_info(
         raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")
 
     vehicle_data = car_to_dict(vehicle)
+    vehicle_data["liked"] = False
     validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
 
     return CarListResponseSchema(cars=[validated_vehicle], page_links={})

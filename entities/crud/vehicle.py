@@ -148,21 +148,22 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             for field, value in vehicle_data.dict(
                 exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
             ).items():
-                setattr(existing_vehicle, field, value)
-                if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"{value};"
-                    else:
-                        if f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons += f"{value};"
-                if field == "transmision" and value != "Automatic":
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"{value};"
-                    else:
-                        if f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons += f"{value};"
+                if (value is not None or field == "date"):
+                    setattr(existing_vehicle, field, value)
+                    if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{value};"
+                        else:
+                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{value};"
+                    if field == "transmision" and value != "Automatic":
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{value};"
+                        else:
+                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{value};"
 
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
             new_photos = []
