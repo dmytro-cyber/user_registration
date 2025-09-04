@@ -6,6 +6,7 @@ from collections import defaultdict
 from datetime import date
 from typing import Dict, List, Optional
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -23,6 +24,7 @@ from crud.vehicle import (
     get_parts_by_vehicle_id,
     get_vehicle_by_id,
     get_vehicle_by_vin,
+    save_vehicle_with_photos,
     update_part,
     update_vehicle_status,
     update_cars_relevance,
@@ -836,3 +838,65 @@ async def toggle_like(
         user.liked_cars.append(car)
         await db.commit()
         return {"detail": "Liked"}
+
+@router.post("/update-car-info/{vehicle_id}", response_model=CarListResponseSchema)
+async def update_car_info(
+    vehicle_id: int,
+    db: AsyncSession = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    # 1) Дістаємо авто за PK
+    vehicle = await db.get(CarModel, vehicle_id)
+    if not vehicle:
+        raise HTTPException(status_code=404, detail=f"Vehicle id={vehicle_id} not found")
+
+    vin = vehicle.vin
+    if not vin or len(vin) != 17:
+        raise HTTPException(status_code=400, detail="Vehicle has invalid or missing VIN")
+
+    # 2) Тягнемо дані з парсера по VIN
+    try:
+        async with httpx.AsyncClient(timeout=10.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}) as client:
+            resp = await client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                body = None
+                try:
+                    body = e.response.text[:500]
+                except Exception:
+                    pass
+                # 404 від парсера → 404 у нас; інші → 502
+                if e.response is not None and e.response.status_code == 404:
+                    raise HTTPException(status_code=404, detail=f"Parser: VIN {vin} not found")
+                raise HTTPException(status_code=502, detail=f"Parser error {e.response.status_code}: {body}")
+            payload = resp.json()
+    except httpx.RequestError as e:
+        # мережеві/таймаут/DNS збої
+        raise HTTPException(status_code=503, detail=f"Cannot reach parser service: {e!s}")
+
+    # 3) Валідую в DTO
+    try:
+        dto = CarCreateSchema.model_validate(payload)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Invalid data from parser: {e.errors()}")
+
+    # 4) Зберігаю/оновлюю
+    saved = await save_vehicle_with_photos(dto, "update", db)
+    await db.commit()
+    # Для режиму update НЕ трактуємо "вже існує" як помилку; if saved is False — все одно йдемо далі
+
+    # 5) Повертаю свіже авто по VIN
+    result = await db.execute(
+        select(CarModel)
+        .options(selectinload(CarModel.photos))
+        .where(CarModel.vin == vin)
+    )
+    vehicle = result.scalars().first()
+    if not vehicle:
+        raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")
+
+    vehicle_data = car_to_dict(vehicle)
+    validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+
+    return CarListResponseSchema(cars=[validated_vehicle], page_links={})
