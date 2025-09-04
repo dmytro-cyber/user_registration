@@ -857,7 +857,7 @@ async def update_car_info(
     # 2) Тягнемо дані з парсера по VIN
     try:
         async with httpx.AsyncClient(timeout=10.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}) as client:
-            resp = await client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
+            resp = await client.get(f"http://parsers:8001/api/v1/apicar/{vin}")
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
