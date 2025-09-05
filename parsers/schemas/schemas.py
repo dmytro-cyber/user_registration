@@ -16,18 +16,15 @@ class DCResponseSchema(BaseModel):
 
 class UpdateCurrentBidRequestSchema(BaseModel):
     id: int
-    url: str
+    source: str
     lot: int
-
-
-class UpdateCurrentBidResponseSchema(BaseModel):
-    id: int
-    value: float | None = None
-
 
 class UpdateCurrentBidListRequestSchema(BaseModel):
     items: list[UpdateCurrentBidRequestSchema]
 
+class UpdateCurrentBidResponseSchema(BaseModel):
+    id: int
+    value: float | None = None
 
 class UpdateCurrentBidListResponseSchema(BaseModel):
     bids: list[dict]

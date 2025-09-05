@@ -195,7 +195,7 @@ async def get_current_bid(urls: list[UpdateCurrentBidRequestSchema]):
     for obj in urls:
         payload.append(
             {"lot_id": obj.lot,
-             "site": 1 if "copart" in obj.url else 2}
+             "site": 1 if ("copart" in obj.source.lower() or "copart" == obj.source.lower()) else 2}
         )
     
     batch_size = 20

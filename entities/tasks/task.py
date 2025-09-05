@@ -417,7 +417,7 @@ def update_car_bids() -> Dict[str, Any]:
 
             resp = http_post_with_retries(
                 url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
-                json={"items": [{"id": c["id"], "url": c["url"], "lot": c["lot"]} for c in cars]},
+                json={"items": [{"id": c["id"], "source": c["auction"], "lot": c["lot"]} for c in cars]},
                 headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
                 timeout=300.0,
             )
