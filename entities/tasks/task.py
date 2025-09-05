@@ -432,9 +432,12 @@ def update_car_bids() -> Dict[str, Any]:
                 if not lot or current_bid is None:
                     continue
 
-                car = db.execute(
-                    select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction.ilike(auction)).with_for_update()
-                )).scalars().first()
+                stmt = (
+                    select(CarModel)
+                    .where(and_(CarModel.lot == lot, CarModel.auction.ilike(auction)))
+                    .with_for_update()
+                )
+                car = db.execute(stmt).scalars().first()
                     
                 if not car:
                     continue
