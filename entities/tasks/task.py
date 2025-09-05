@@ -426,14 +426,16 @@ def update_car_bids() -> Dict[str, Any]:
 
             for item in data.get("bids", []):
                 lot = (item.get("lot_id") or "").split("-")[0]
+                lot = int(lot) if lot else None
                 auction = item.get("site")
                 current_bid = item.get("pre_bid")
                 if not lot or current_bid is None:
                     continue
 
                 car = db.execute(
-                    select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction == auction)).with_for_update()
-                ).scalars().first()
+                    select(CarModel).where(and_(CarModel.lot == lot, CarModel.auction.ilike(auction)).with_for_update()
+                )).scalars().first()
+                    
                 if not car:
                     continue
 
