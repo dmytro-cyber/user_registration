@@ -474,6 +474,7 @@ def update_car_bids() -> Dict[str, Any]:
                     updated += 1
                 except Exception as e:
                     logger.info(f"Catch {e}")
+                    continue
 
             db.commit()
             logger.info(f"update_car_bids: updated={updated}")
