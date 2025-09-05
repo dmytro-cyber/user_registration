@@ -466,7 +466,7 @@ def update_car_bids() -> Dict[str, Any]:
                 if car.predicted_total_investments and car.avg_market_price:
                     car.predicted_roi = (
                         (car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0)))
-                        / (car.sum_of_investments + (car.current_bid or 0))
+                        / ((car.sum_of_investments or 1) + (car.current_bid or 1))
                         * 100.0
                     )
                     car.predicted_profit_margin = car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0))
