@@ -457,7 +457,7 @@ def update_car_bids() -> Dict[str, Any]:
 
                     site = _norm_site(item.get("site"))
                     pre_bid = item.get("pre_bid")
-                    if pre_bid is None:
+                    if pre_bid is None and pre_bid != 0:
                         logger.debug("skip: no pre_bid for lot=%s site=%s", lot, site)
                         continue
 
