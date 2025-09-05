@@ -425,52 +425,55 @@ def update_car_bids() -> Dict[str, Any]:
             updated = 0
 
             for item in data.get("bids", []):
-                lot = (item.get("lot_id") or "").split("-")[0]
-                lot = int(lot) if lot else None
-                auction = item.get("site")
-                current_bid = item.get("pre_bid")
-                if not lot or current_bid is None:
-                    continue
+                try:
+                    lot = (item.get("lot_id") or "").split("-")[0]
+                    lot = int(lot) if lot else None
+                    auction = item.get("site")
+                    current_bid = item.get("pre_bid")
+                    if not lot or current_bid is None:
+                        continue
 
-                stmt = (
-                    select(CarModel)
-                    .where(and_(CarModel.lot == lot, CarModel.auction.ilike(auction)))
-                    .with_for_update()
-                )
-                car = db.execute(stmt).scalars().first()
-                    
-                if not car:
-                    continue
-
-                car.current_bid = int(float(current_bid))
-                if car.suggested_bid and car.current_bid > car.suggested_bid:
-                    car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-
-                    if not car.recommendation_status_reasons or car.recommendation_status_reasons is None or car.recommendation_status_reasons == "":
-                        car.recommendation_status_reasons = "suggested bid < current bid;"
-                    elif car.recommendation_status_reasons and "suggested bid < current bid" not in car.recommendation_status_reasons:
-                        car.recommendation_status_reasons += "suggested bid < current bid;"
-
-                if car.suggested_bid and car.current_bid <= car.suggested_bid:
-
-
-                    if car.recommendation_status_reasons == "suggested bid < current bid;":
-                        car.recommendation_status = RecommendationStatus.RECOMMENDED
-                        car.recommendation_status_reasons = ""
-                    elif car.recommendation_status_reasons and "suggested bid < current bid" in car.recommendation_status_reasons:
-                        car.recommendation_status_reasons = car.recommendation_status_reasons.replace("suggested bid < current bid;", "")
-                    else:
-                        pass
-
-                # car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
-                if car.predicted_total_investments and car.avg_market_price:
-                    car.predicted_roi = (
-                        (car.avg_market_price - (car.sum_of_investments + (car.current_bid or 1)))
-                        / ((car.sum_of_investments or 1) + (car.current_bid or 1))
-                        * 100.0
+                    stmt = (
+                        select(CarModel)
+                        .where(and_(CarModel.lot == lot, CarModel.auction.ilike(auction)))
+                        .with_for_update()
                     )
-                    car.predicted_profit_margin = car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0))
-                updated += 1
+                    car = db.execute(stmt).scalars().first()
+                        
+                    if not car:
+                        continue
+
+                    car.current_bid = int(float(current_bid))
+                    if car.suggested_bid and car.current_bid > car.suggested_bid:
+                        car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+
+                        if not car.recommendation_status_reasons or car.recommendation_status_reasons is None or car.recommendation_status_reasons == "":
+                            car.recommendation_status_reasons = "suggested bid < current bid;"
+                        elif car.recommendation_status_reasons and "suggested bid < current bid" not in car.recommendation_status_reasons:
+                            car.recommendation_status_reasons += "suggested bid < current bid;"
+
+                    if car.suggested_bid and car.current_bid <= car.suggested_bid:
+
+
+                        if car.recommendation_status_reasons == "suggested bid < current bid;":
+                            car.recommendation_status = RecommendationStatus.RECOMMENDED
+                            car.recommendation_status_reasons = ""
+                        elif car.recommendation_status_reasons and "suggested bid < current bid" in car.recommendation_status_reasons:
+                            car.recommendation_status_reasons = car.recommendation_status_reasons.replace("suggested bid < current bid;", "")
+                        else:
+                            pass
+
+                    # car.predicted_total_investments = (car.sum_of_investments or 0.0) + (car.current_bid or 0)
+                    if car.predicted_total_investments and car.avg_market_price:
+                        car.predicted_roi = (
+                            (car.avg_market_price - (car.sum_of_investments + (car.current_bid or 1)))
+                            / ((car.sum_of_investments or 1) + (car.current_bid or 1))
+                            * 100.0
+                        )
+                        car.predicted_profit_margin = car.avg_market_price - (car.sum_of_investments + (car.current_bid or 0))
+                    updated += 1
+                except Exception as e:
+                    logger.info(f"Catch {e}")
 
             db.commit()
             logger.info(f"update_car_bids: updated={updated}")
