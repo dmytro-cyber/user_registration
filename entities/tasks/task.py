@@ -429,7 +429,6 @@ def update_car_bids() -> Dict[str, Any]:
                     )
                 )
             ).all()
-
             cars = [{"id": r.id, "lot": r.lot, "auction": r.auction} for r in rows]
             if not cars:
                 return {"status": "success", "updated_cars": 0}

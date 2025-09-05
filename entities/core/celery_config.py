@@ -3,6 +3,12 @@
 
 from celery import Celery
 from celery.schedules import crontab
+from celery.signals import worker_process_init
+
+@worker_process_init.connect
+def _gevent_patch_in_child(**_):
+    from gevent import monkey
+    monkey.patch_all()
 
 app = Celery("tasks", broker="redis://redis_1:6380/0", backend="redis://redis_1:6380/0")
 
