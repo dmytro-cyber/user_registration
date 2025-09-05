@@ -1,9 +1,9 @@
 # tasks.py — синхронні Celery-таски для gevent-пулу
 # --------------------------------------------------
 import os
-if os.environ.get("CELERY_GEVENT", "0") == "1":
-    from gevent import monkey
-    monkey.patch_all()
+# if os.environ.get("CELERY_GEVENT", "0") == "1":
+#     from gevent import monkey
+#     monkey.patch_all()
 
 import logging
 import os
@@ -15,7 +15,7 @@ from io import BytesIO
 from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
-from sqlalchemy import and_, delete, func, select, create_engine
+from sqlalchemy import and_, delete, func, select, create_engine, or_
 from sqlalchemy.orm import sessionmaker, Session, selectinload
 
 from core.celery_config import app
@@ -31,7 +31,6 @@ from models.vehicle import (
     RelevanceStatus,
 )
 from schemas.vehicle import CarCreateSchema
-from services.vehicle import scrape_and_save_sales_history  # може бути sync або async
 from storages import S3StorageClient
 
 
@@ -426,6 +425,10 @@ def update_car_bids() -> Dict[str, Any]:
                         CarModel.relevance == RelevanceStatus.ACTIVE,
                         CarModel.lot.isnot(None),
                         CarModel.auction.isnot(None),
+                        or_(
+                            CarModel.date.isnot(None),
+                            func.lower(CarModel.auction_name) == "buynow",
+                        )
                     )
                 )
             ).all()
