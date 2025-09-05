@@ -23,9 +23,9 @@ app.conf.result_serializer = "json"
 app.conf.task_always_eager = False
 
 app.conf.beat_schedule = {
-    "update-car-bids-every-15-minutes": {
+        "update-car-bids-every-15-minutes": {
         "task": "tasks.task.update_car_bids",
-        "schedule": crontab(minute="*/15"),
+        "schedule": crontab(minute="10-59/15"),
     },
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
