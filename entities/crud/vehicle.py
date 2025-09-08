@@ -143,7 +143,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
 
             
-            logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
+            # logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
 
             for field, value in vehicle_data.dict(
                 exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
