@@ -145,7 +145,7 @@ def fetch_api_data(size: int = None, base_url: str = None):
 
         if processed_vehicles:
             save_url = "http://entities:8000/api/v1/vehicles/bulk"
-            for batch in chunked(processed_vehicles, 50):
+            for batch in chunked(processed_vehicles, 25):
                 payload = {
                     "ivent": "created" if base_url else "updated",
                     "vehicles": batch

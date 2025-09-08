@@ -305,8 +305,10 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
+            logger.info(f"Exception {e} for vin: {vehicle_data.vin}")
             return False
     except Exception as e:
+        logger.info(f"Exception {e} for vin: {vehicle_data.vin}")
         return False
 
 

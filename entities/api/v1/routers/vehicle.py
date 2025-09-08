@@ -784,7 +784,7 @@ async def bulk_create_cars(
                     queue="car_parsing_queue",)
 
 
-                await scrape_and_save_sales_history(vehicle_data.vin, db, settings)
+                # await scrape_and_save_sales_history(vehicle_data.vin, db, settings)
 
         return response
     except Exception as e:

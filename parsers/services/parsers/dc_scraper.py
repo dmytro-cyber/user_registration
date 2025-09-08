@@ -255,7 +255,7 @@ class DealerCenterScraper:
                 await page.wait_for_selector("#email-passcode-input")
                 await page.fill("#email-passcode-input", code)
                 await page.click("#email-passcode-submit")
-                await asyncio.sleep(10)
+                await asyncio.sleep(20)
 
                 # save cookies
                 self.cookies = await context.cookies()
