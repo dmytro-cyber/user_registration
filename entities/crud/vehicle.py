@@ -121,10 +121,11 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
+        to_parse = False
         existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
         if existing_vehicle:
             if existing_vehicle.relevance == RelevanceStatus.ACTIVE:
-                to_parse = False
+                pass
             elif existing_vehicle.relevance == RelevanceStatus.ARCHIVAL and ivent == "update":
                 query = select(FilterModel).where(
                     FilterModel.make == vehicle_data.make,
@@ -140,7 +141,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     to_parse = True
                 else:
                     existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
-                    to_parse = False
 
             
             logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
@@ -263,7 +263,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                 to_parse = True
             else:
                 vehicle.relevance = RelevanceStatus.IRRELEVANT
-                to_parse = False
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.issue_description != "Unknown":
