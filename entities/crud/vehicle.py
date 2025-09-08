@@ -418,6 +418,18 @@ async def get_filtered_vehicles(
                 include_aliases=True,
             )
         )
+    else:
+        default_excluded = ["Biohazard/Chemical", "Water/Flood", "Rejected Repair"]
+        base_query = base_query.filter(
+            ~exists(
+                select(1)
+                .select_from(ConditionAssessmentModel)
+                .where(
+                    (ConditionAssessmentModel.car_id == CarModel.id) &
+                    (ConditionAssessmentModel.issue_description.in_(default_excluded))
+                )
+            )
+        )
 
     # ---- ZIP search ----
     if filters.get("zip_search"):
@@ -474,6 +486,8 @@ async def get_filtered_vehicles(
         values = filters.get(field_name)
         if values:
             base_query = base_query.filter(_str_in(column, values))
+        elif field_name == "fuel_type":
+            base_query = base_query.filter(CarModel.fuel_type != "Hybrid")
 
     # ---- integer filters ----
     if filters.get("engine_cylinder"):
