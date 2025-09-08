@@ -180,7 +180,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
 
             if new_photos:
                 db.add_all(new_photos)
-                logger.info(f"Added {len(new_photos)} new photos for VIN {vehicle_data.vin}")
+                # logger.info(f"Added {len(new_photos)} new photos for VIN {vehicle_data.vin}")
 
             await db.execute(
                 delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
@@ -304,10 +304,10 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
-            logger.info(f"Exception {e} for vin: {vehicle_data.vin}")
+            logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
             return False
     except Exception as e:
-        logger.info(f"Exception {e} for vin: {vehicle_data.vin}")
+        logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
         return False
 
 
