@@ -76,7 +76,7 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
         return
 
     filter_condition = or_(*[
-        and_(CarModel.auction == site, CarModel.lot.in_(lot_ids))
+        and_(func.lower(CarModel.auction) == site.lower(), CarModel.lot.in_(lot_ids))
         for site, lot_ids in lots_by_site.items()
     ])
 

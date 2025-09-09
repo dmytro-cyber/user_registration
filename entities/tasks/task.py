@@ -1,4 +1,4 @@
-# tasks.py — синхронні Celery-таски для gevent-пулу
+# tasks.py — synchronous Celery tasks for gevent pool
 # --------------------------------------------------
 import os
 # if os.environ.get("CELERY_GEVENT", "0") == "1":
@@ -10,12 +10,13 @@ import os
 import time
 import asyncio
 import anyio
-from datetime import datetime
+from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
 from sqlalchemy import and_, delete, func, select, create_engine, or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session, selectinload
 
 from core.celery_config import app
@@ -29,6 +30,8 @@ from models.vehicle import (
     FeeModel,
     RecommendationStatus,
     RelevanceStatus,
+    PhotoModel,
+    ConditionAssessmentModel
 )
 from schemas.vehicle import CarCreateSchema
 from storages import S3StorageClient
@@ -40,7 +43,7 @@ from storages import S3StorageClient
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Глушимо надмірні логи SQLAlchemy (INSERT ... VALUES ..., pool і т.д.)
+# Suppress excessive SQLAlchemy logs (INSERT ... VALUES ..., pool, etc.)
 for name in (
     "sqlalchemy",
     "sqlalchemy.engine",
@@ -129,16 +132,16 @@ def http_post_with_retries(
 
 
 # =========================
-# Small util: виконає async-функцію через asyncio.run, якщо вона coroutine; інакше — як є
+# Small util: run an async function via asyncio.run if it's a coroutine; otherwise — call it as is
 # =========================
 def run_async(func: Callable[..., Any], *args, **kwargs) -> Union[Any, asyncio.Task]:
     try:
-        loop = asyncio.get_running_loop()   # є активний loop у цьому потоці
+        loop = asyncio.get_running_loop()   # there is an active loop in this thread
     except RuntimeError:
-        # loop не запущено — можна стартувати власний
+        # no loop is running — start our own
         return anyio.run(func, *args, **kwargs)
     else:
-        # loop вже працює — плануємо завдання і ПОВЕРТАЄМО Task
+        # loop is already running — schedule the task and RETURN the Task
         return loop.create_task(func(*args, **kwargs))
 
 
@@ -185,11 +188,11 @@ def parse_and_update_car(
     car_transmison: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    Повністю синхронна таска:
-    - тягне sales history напряму
-    - дергає парсер
-    - оновлює машину
-    - зберігає html у S3 (якщо є)
+    Fully synchronous task:
+    - pulls sales history directly
+    - calls the parser
+    - updates the vehicle
+    - stores HTML in S3 (if present)
     """
     logger.info(f"parse_and_update_car: VIN={vin}")
 
@@ -238,7 +241,7 @@ def parse_and_update_car(
             logger.warning(f"Sales history fetch failed for {vin}: {e}")
 
         try:
-            # 2) шукаємо «поточну» машину
+            # 2) find a “current” vehicle
             current_date = datetime.utcnow().date()
             q_current = (
                 select(CarModel)
@@ -258,7 +261,7 @@ def parse_and_update_car(
             )
             existing_car = db.execute(q_current).scalars().first()
 
-            # 3) виклик парсера
+            # 3) call the parser
             only_history = "true" if existing_car else "false"
             url = (
                 "http://parsers:8001/api/v1/parsers/scrape/dc"
@@ -276,7 +279,7 @@ def parse_and_update_car(
             resp = http_get_with_retries(url, headers=headers, timeout=300.0)
             data = resp.json()
 
-            # 4) оновлення машини під lock
+            # 4) update the vehicle under lock
             car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
@@ -312,7 +315,7 @@ def parse_and_update_car(
             else:
                 car.has_correct_accidents = True
 
-            # середні ціни
+            # average prices
             prices = [
                 int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)
             ]
@@ -323,7 +326,7 @@ def parse_and_update_car(
                     int(sum(prices) / len(prices)) if prices else 0
                 )
 
-            # ROI / інвестиції / маржа
+            # ROI / investments / margin
             default_roi = _load_default_roi(db)
             if existing_car:
                 car.predicted_total_investments = (
@@ -348,7 +351,7 @@ def parse_and_update_car(
                 car.predicted_profit_margin_percent = 0.0
                 car.predicted_profit_margin = 0.0
 
-            # комісії аукціону
+            # auction fees
             fees = _load_fees(
                 db, car.auction, float(car.predicted_total_investments or 0.0)
             )
@@ -370,7 +373,7 @@ def parse_and_update_car(
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
-            # 5) HTML в S3
+            # 5) HTML to S3
             html_data = data.get("html_data")
             if html_data:
                 s3_storage = S3StorageClient(
@@ -409,15 +412,15 @@ def _norm_site(val) -> str:
 @app.task(name="tasks.task.update_car_bids")
 def update_car_bids() -> Dict[str, Any]:
     """
-    Тягнемо поточні біди з парсера та оновлюємо активні авто.
-    Матчимо по (lot + auction) без урахування регістру; якщо не знайшли — фолбек по одному lot.
+    Pull current bids from the parser and update active vehicles.
+    Match by (lot + auction) case-insensitively; if not found — fallback by lot only.
     """
     logger.info("update_car_bids: start")
     updated = 0
 
     with SessionLocal() as db:
         try:
-            # беремо активні з валідними lot/auction
+            # take active vehicles with valid lot/auction
             rows = db.execute(
                 select(CarModel.id, CarModel.lot, CarModel.auction)
                 .where(
@@ -436,7 +439,7 @@ def update_car_bids() -> Dict[str, Any]:
             if not cars:
                 return {"status": "success", "updated_cars": 0}
 
-            # дернемо парсер
+            # call the parser
             resp = http_post_with_retries(
                 url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
                 json={"items": [{"id": c["id"], "source": c["auction"], "lot": c["lot"]} for c in cars]},
@@ -448,7 +451,7 @@ def update_car_bids() -> Dict[str, Any]:
 
             for item in bids:
                 try:
-                    # lot_id типу "68271795-1" -> беремо ліву частину
+                    # lot_id like "68271795-1" -> take the left part
                     lot_raw = str(item.get("lot_id") or "").split("-")[0].strip()
                     if not lot_raw.isdigit():
                         logger.debug("skip: bad lot_id=%r", item.get("lot_id"))
@@ -461,7 +464,7 @@ def update_car_bids() -> Dict[str, Any]:
                         logger.debug("skip: no pre_bid for lot=%s site=%s", lot, site)
                         continue
 
-                    # 1) match по lot + auction (без регістру)
+                    # 1) match by lot + auction (case-insensitive)
                     stmt = (
                         select(CarModel)
                         .where(
@@ -474,7 +477,7 @@ def update_car_bids() -> Dict[str, Any]:
                     )
                     car = db.execute(stmt).scalars().first()
 
-                    # 2) fallback — лише lot (на випадок розбіжностей у назві аукціону в БД)
+                    # 2) fallback — by lot only (in case of auction name discrepancies in DB)
                     if not car:
                         # stmt2 = (
                         #     select(CarModel)
@@ -486,7 +489,7 @@ def update_car_bids() -> Dict[str, Any]:
                         #     logger.debug("not found: lot=%s site=%s", lot, site)
                         continue
 
-                    # апдейт ставок/статусу
+                    # update bids/status
                     try:
                         car.current_bid = int(float(pre_bid))
                     except (ValueError, TypeError):
@@ -500,7 +503,7 @@ def update_car_bids() -> Dict[str, Any]:
                             if "suggested bid < current bid;" not in reasons:
                                 car.recommendation_status_reasons = (reasons + "suggested bid < current bid;").strip()
                         else:
-                            # поточна ставка не перевищує рекомендовану
+                            # current bid does not exceed suggested
                             if car.recommendation_status_reasons:
                                 car.recommendation_status_reasons = car.recommendation_status_reasons.replace(
                                     "suggested bid < current bid;", ""
@@ -531,7 +534,7 @@ def update_car_bids() -> Dict[str, Any]:
 @app.task(name="tasks.task.update_fees")
 def update_car_fees() -> Dict[str, Any]:
     """
-    Перетягуємо fee-таблицю з парсера та оновлюємо 'copart'.
+    Pull the fee table from the parser and update 'copart'.
     """
     logger.info("update_car_fees: start")
 
@@ -549,7 +552,7 @@ def update_car_fees() -> Dict[str, Any]:
             fee_mappings = {
                 "bidding_fees": fees_data["bidding_fees"]["secured"]["secured"],
                 "gate_fee": {"amount": fees_data["gate_fee"]["amount"]},
-                "virtual_bid_fee": {k: v for k, v in fees_data["virtual_bid_fee"]["live_bid"].items()},
+                "virtual_bid_fee": {k: v for k, v in fees_data["virtual_bid_fee"]["live_bid"].items() },
                 "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
             }
 
@@ -560,7 +563,7 @@ def update_car_fees() -> Dict[str, Any]:
                     amount = float(amount_str)
                     is_percent = False
 
-                    # евристика: відсоткова ставка у secured bidding_fees
+                    # heuristic: percentage rate in secured bidding_fees
                     if fee_type == "bidding_fees" and price_range == "0.00+" and 0 < amount < 10:
                         is_percent = True
 
@@ -594,13 +597,13 @@ def update_car_fees() -> Dict[str, Any]:
             raise
 
 
-# --- kickoff для фільтра: sync + gevent ---
+# --- kickoff for filter: sync + gevent ---
 @app.task(name="tasks.task.kickoff_parse_for_filter")
 def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk: int = 400) -> dict:
     """
-    Одна легка задачка: читає умови фільтра, стрімить усі авто, і шле підзадачі parse_and_update_car пачками.
-    - batch_size: скільки задач відправляти за раз у брокер
-    - stream_chunk: підказка драйверу/ORM для стрімінгу результатів з БД
+    One lightweight task: reads filter conditions, streams all vehicles, and sends parse_and_update_car sub-tasks in batches.
+    - batch_size: how many tasks to send to the broker at once
+    - stream_chunk: a hint to the driver/ORM for streaming DB results
     """
     with SessionLocal() as session:
         filt = session.get(FilterModel, filter_id)
@@ -681,3 +684,205 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
             enqueued += len(batch)
 
         return {"status": "ok", "filter_id": filter_id, "enqueued": enqueued}
+
+
+@app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")
+def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
+    """
+    Synchronous task:
+    - selects ACTIVE vehicles with CarModel.date <= utc_now
+    - pulls data from the parser
+      - 404 -> relevance = ARCHIVAL
+      - 200 -> updates the existing vehicle from payload (no creation)
+    """
+    stats = {"checked": 0, "archived": 0, "updated": 0, "errors": 0}
+
+    def _apply_update_from_schema(db, existing_vehicle: CarModel, vehicle_info: CarCreateSchema) -> None:
+        """
+        Updates an existing CarModel based on CarCreateSchema.
+        Reproduces business rules from the async variant: fuel_type / transmision / risk assessments / bids / history / photos.
+        """
+        # 1) Simple fields (no lists)
+        for field, value in vehicle_info.dict(
+            exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
+        ).items():
+            if (value is not None) or (field == "date"):
+                setattr(existing_vehicle, field, value)
+                if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    if not existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons = f"{value};"
+                    elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons += f"{value};"
+                if field == "transmision" and value != "Automatic":
+                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    if not existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons = f"{value};"
+                    elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons += f"{value};"
+
+        # 2) Photos — only add new URLs
+        existing_photo_urls = {p.url for p in existing_vehicle.photos}
+        new_photos = []
+        if vehicle_info.photos:
+            for p in vehicle_info.photos:
+                if p.url not in existing_photo_urls:
+                    new_photos.append(PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=False))
+        if vehicle_info.photos_hd:
+            for p in vehicle_info.photos_hd:
+                if p.url not in existing_photo_urls:
+                    new_photos.append(PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=True))
+        if new_photos:
+            db.add_all(new_photos)
+
+        # 3) Condition assessments — full replacement
+        db.execute(
+            delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
+        )
+        if vehicle_info.condition_assessments:
+            for a in vehicle_info.condition_assessments:
+                db.add(ConditionAssessmentModel(
+                    type_of_damage=a.type_of_damage,
+                    issue_description=a.issue_description,
+                    car_id=existing_vehicle.id,
+                ))
+                if a.issue_description in [
+                    "Rejected Repair",
+                    "Burn Engine",
+                    "Mechanical",
+                    "Replaced Vin",
+                    "Burn",
+                    "Undercarriage",
+                    "Water/Flood",
+                    "Burn Interior",
+                    "Rollover",
+                ]:
+                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    reason = f"{a.issue_description};"
+                    if not existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons = reason
+                    elif reason not in existing_vehicle.recommendation_status_reasons:
+                        existing_vehicle.recommendation_status_reasons += reason
+
+        # 4) Bid higher than suggested
+        if (
+            vehicle_info.current_bid is not None
+            and existing_vehicle.suggested_bid is not None
+            and vehicle_info.current_bid > existing_vehicle.suggested_bid
+        ):
+            existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+
+        # 5) Sales history — add only if DB still doesn't have it
+        if not existing_vehicle.sales_history and vehicle_info.sales_history:
+            if len(vehicle_info.sales_history) >= 4:
+                existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                reason = f"sales at auction in the last 3 years: {len(vehicle_info.sales_history)};"
+                if not existing_vehicle.recommendation_status_reasons:
+                    existing_vehicle.recommendation_status_reasons = reason
+                elif reason not in existing_vehicle.recommendation_status_reasons:
+                    existing_vehicle.recommendation_status_reasons += reason
+
+            buf = []
+            for h in vehicle_info.sales_history:
+                m = CarSaleHistoryModel(**h.dict(), car_id=existing_vehicle.id)
+                if not m.source:
+                    m.source = "Unknown"
+                buf.append(m)
+            if buf:
+                db.add_all(buf)
+
+        db.add(existing_vehicle)
+
+    with SessionLocal() as db:
+        utc_now = datetime.now(timezone.utc)
+
+        vin_rows = db.execute(
+            select(CarModel.vin).where(
+                and_(
+                    CarModel.relevance == RelevanceStatus.ACTIVE,
+                    CarModel.date <= utc_now,
+                )
+            )
+        ).scalars().all()
+
+        for vin in vin_rows:
+            stats["checked"] += 1
+
+            # 1) Get parser response
+            try:
+                resp = httpx.get(f"http://parsers:8001/api/v1/apicar/{vin}", timeout=30.0)
+            except Exception as e:
+                logger.exception("VIN %s: HTTP request failed: %s", vin, e)
+                stats["errors"] += 1
+                continue
+
+            # 2) 404 -> ARCHIVAL
+            if resp.status_code == 404:
+                try:
+                    existing = db.execute(
+                        select(CarModel).where(CarModel.vin == vin)
+                    ).scalars().first()
+                    if existing:
+                        existing.relevance = RelevanceStatus.ARCHIVAL
+                        db.add(existing)
+                        db.commit()
+                        logger.info("VIN %s marked as ARCHIVAL after 404 from parser", vin)
+                        stats["archived"] += 1
+                    else:
+                        logger.info("VIN %s not found when marking as ARCHIVAL", vin)
+                except Exception as e:
+                    db.rollback()
+                    logger.exception("VIN %s: failed to mark ARCHIVAL: %s", vin, e)
+                    stats["errors"] += 1
+                continue
+
+            # 3) Other HTTP errors
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as e:
+                logger.exception("VIN %s: parser returned %s", vin, e)
+                stats["errors"] += 1
+                continue
+
+            # 4) Payload validation
+            try:
+                payload = resp.json()
+                vehicle_info = CarCreateSchema.model_validate(payload)
+            except Exception as e:
+                logger.exception("VIN %s: payload validation failed: %s", vin, e)
+                stats["errors"] += 1
+                continue
+
+            # 5) Fetch existing vehicle and UPDATE (no creation)
+            try:
+                existing_vehicle = db.execute(
+                    select(CarModel)
+                    .options(
+                        selectinload(CarModel.photos),
+                        selectinload(CarModel.sales_history),
+                        selectinload(CarModel.condition_assessments),
+                    )
+                    .where(CarModel.vin == vin)
+                ).scalars().first()
+
+                if not existing_vehicle:
+                    # Theoretically should not happen (we selected from DB above),
+                    # but let's guard so the loop doesn't break.
+                    logger.info("VIN %s: not found during update stage", vin)
+                    continue
+
+                _apply_update_from_schema(db, existing_vehicle, vehicle_info)
+                db.commit()
+                stats["updated"] += 1
+
+            except IntegrityError as e:
+                db.rollback()
+                logger.exception("VIN %s: IntegrityError: %s", vin, getattr(e, "orig", e))
+                stats["errors"] += 1
+            except Exception as e:
+                db.rollback()
+                logger.exception("VIN %s: update failed: %s", vin, e)
+                stats["errors"] += 1
+
+    logger.info("Expired auction update finished: %s", stats)
+    return stats

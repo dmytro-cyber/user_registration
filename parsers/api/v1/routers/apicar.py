@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 
 from core.dependencies import get_token
 from schemas.schemas import DCResponseSchema
@@ -77,7 +77,7 @@ async def get_sales_history(car_vin: str):
 
 
 @router.get(
-    "/apicar/{car_vin}",
+    "/apicar/update/{car_vin}",
     description="Get data from apicar",
 )
 async def get_update(car_vin: str):
@@ -95,7 +95,7 @@ async def get_update(car_vin: str):
         data = response.json()
     except httpx.HTTPError as e:
         logger.error(f"Failed to fetch API data for VIN {car_vin}: {e}")
-        return None
+        raise HTTPException(status_code=404, detail=f"VIN {car_vin} not found")
 
     formatted_vehicle = format_car_data(data[0])
     adapted_vehicle = {
