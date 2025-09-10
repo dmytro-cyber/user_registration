@@ -12,6 +12,8 @@ def _gevent_patch_in_child(**_):
 
 app = Celery("tasks", broker="redis://redis_1:6380/0", backend="redis://redis_1:6380/0")
 
+app.conf.timezone = "America/Chicago"
+
 app.conf.task_queues = {
     "default": {"exchange": "default", "routing_key": "default"},
     "car_parsing_queue": {"exchange": "car_parsing_queue", "routing_key": "car_parsing_queue"},
@@ -32,7 +34,7 @@ app.conf.task_always_eager = False
 app.conf.beat_schedule = {
     "update-car-bids-every-15-minutes": {
         "task": "tasks.task.update_car_bids",
-        "schedule": crontab(minute="15,30,45", hour="0-2,4-23", timezone="America/Chicago"),
+        "schedule": crontab(minute="13,30,45", hour="0-2,4-23"),
     },
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
@@ -40,7 +42,7 @@ app.conf.beat_schedule = {
     },
     "expired-auction-daily-3-15am-CT": {
         "task": "tasks.task.parse_and_update_cars_with_expired_auction_date",
-        "schedule": crontab(hour=3, minute=15, timezone="America/Chicago"),  # 03:15 Central Time
+        "schedule": crontab(hour=3, minute=15),  # 03:15 CT
         "options": {"queue": "car_parsing_queue"},
     },
 }
