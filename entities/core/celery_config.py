@@ -20,6 +20,7 @@ app.conf.task_queues = {
 app.conf.task_routes = {
     "tasks.task.parse_and_update_car": {"queue": "car_parsing_queue"},
     "tasks.task.update_car_bids": {"queue": "car_parsing_queue"},
+    "tasks.task.parse_and_update_cars_with_expired_auction_date": {"queue": "car_parsing_queue"},
 }
 
 app.conf.task_track_started = True
@@ -36,6 +37,11 @@ app.conf.beat_schedule = {
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
         "schedule": crontab(day_of_month="1", hour=0, minute=0),
+    },
+    "expired-auction-daily-3am-CT": {  # ⬅️ НОВЕ
+        "task": "tasks.task.parse_and_update_cars_with_expired_auction_date",
+        "schedule": crontab(hour=3, minute=0, timezone="America/Chicago"),  # 03:00 Central Time
+        "options": {"queue": "car_parsing_queue"},
     },
 }
 
