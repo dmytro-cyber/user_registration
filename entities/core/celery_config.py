@@ -32,15 +32,15 @@ app.conf.task_always_eager = False
 app.conf.beat_schedule = {
     "update-car-bids-every-15-minutes": {
         "task": "tasks.task.update_car_bids",
-        "schedule": crontab(minute="15-59/15"),
+        "schedule": crontab(minute="15,30,45", hour="0-2,4-23", timezone="America/Chicago"),
     },
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
         "schedule": crontab(day_of_month="1", hour=0, minute=0),
     },
-    "expired-auction-daily-3am-CT": {  # ⬅️ НОВЕ
+    "expired-auction-daily-3-15am-CT": {
         "task": "tasks.task.parse_and_update_cars_with_expired_auction_date",
-        "schedule": crontab(hour=3, minute=0, timezone="America/Chicago"),  # 03:00 Central Time
+        "schedule": crontab(hour=3, minute=15, timezone="America/Chicago"),  # 03:15 Central Time
         "options": {"queue": "car_parsing_queue"},
     },
 }
