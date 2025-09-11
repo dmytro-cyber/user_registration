@@ -247,7 +247,7 @@ class DealerCenterScraper:
                     await page.wait_for_selector("#WebMFAEmail", timeout=5000)
                     await page.click("#WebMFAEmail")
 
-                await asyncio.sleep(10)
+                await asyncio.sleep(20)
                 code = self.email_client.get_verification_code()
                 if not code:
                     raise Exception("Failed to retrieve verification code.")
