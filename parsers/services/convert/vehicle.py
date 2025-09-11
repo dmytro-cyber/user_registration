@@ -42,7 +42,8 @@ def parse_auction_date(s: str,
     try:
         iso = raw[:-1] + '+00:00' if raw.endswith('Z') else raw
         dt = datetime.fromisoformat(iso)
-    except ValueError:
+    except ValueError as e:
+        logger.info(f"Error --------> {e}")
         for fmt in ("%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ"):
             try:
                 dt = datetime.strptime(raw, fmt).replace(tzinfo=timezone.utc)
@@ -191,5 +192,6 @@ def format_car_data(api_response: Dict[str, Any]) -> Dict[str, Any]:
         condition_assessments.append({"type_of_damage": "damage_sec", "issue_description": api_response["damage_sec"]})
     car_data["condition_assessments"] = condition_assessments
     logger.debug(f"Processed {len(condition_assessments)} condition assessments")
+    logger.info(f"car_data -------> vin: {car_data['vin'],} date: {car_data["date"]}")
 
     return car_data

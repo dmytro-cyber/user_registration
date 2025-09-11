@@ -632,7 +632,7 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
                 CarModel.transmision,
             )
             .where(and_(*conditions))
-            .execution_options(stream_results=True, yield_per=stream_chunk)  # RAM-friendly
+            .execution_options(stream_results=True, yield_per=stream_chunk)
         )
 
         result = session.execute(stmt)
@@ -800,10 +800,11 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
             select(CarModel.vin).where(
                 and_(
                     CarModel.relevance == RelevanceStatus.ACTIVE,
-                    CarModel.date <= utc_now,
+                    CarModel.date <= func.now(),
                 )
             )
         ).scalars().all()
+        logger.info("Expired-auction: selected %d VINs to process", len(vin_rows))
 
         for vin in vin_rows:
             stats["checked"] += 1
@@ -872,6 +873,15 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                     continue
 
                 _apply_update_from_schema(db, existing_vehicle, vehicle_info)
+                if (
+                    existing_vehicle.auction_name and existing_vehicle.auction_name.lower() != "buynow"
+                    and ((existing_vehicle.date is not None
+                    and existing_vehicle.date <= func.now())
+                    or existing_vehicle.date is None
+                    )
+                ):
+                    existing_vehicle.relevance = RelevanceStatus.ARCHIVAL
+                    logger.info("VIN %s archived after update (date still in the past)", vin)
                 db.commit()
                 stats["updated"] += 1
 
