@@ -267,18 +267,7 @@ async def update_filter_and_relevance(
 
         query_res = await db.execute(query)
         vehicles = query_res.mappings().all()
-        for vehicle_data in vehicles:
-
-            parse_and_update_car.delay(
-                vin=vehicle_data.get("vin"),
-                car_name=vehicle_data.get("vehicle"),
-                car_engine=vehicle_data.get("engine_title"),
-                mileage=vehicle_data.get("mileage"),
-                car_make=vehicle_data.get("make"),
-                car_model=vehicle_data.get("model"),
-                car_year=vehicle_data.get("year"),
-                car_transmison=vehicle_data.get("transmision"),
-            )
+        kickoff_result = celery_app.send_task("tasks.task.kickoff_parse_for_filter", kwargs={"filter_id": db_filter.id}, queue="car_parsing_queue",)
         
 
     if to_irrelevant:

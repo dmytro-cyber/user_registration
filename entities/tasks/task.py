@@ -616,6 +616,7 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
             CarModel.year <= (filt.year_to or 3000),
             CarModel.mileage >= (filt.odometer_min or 0),
             CarModel.mileage <= (filt.odometer_max or 10_000_000),
+            CarModel.relevance == RelevanceStatus.IRRELEVANT,
         ]
         if filt.model is not None:
             conditions.append(CarModel.model == filt.model)
