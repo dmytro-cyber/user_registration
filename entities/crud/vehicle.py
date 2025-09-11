@@ -83,7 +83,12 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
     # 1. Delete IRRELEVANT cars directly
     await db.execute(
         delete(CarModel).where(
-            and_(CarModel.relevance == RelevanceStatus.IRRELEVANT, filter_condition)
+            and_(
+                or_(
+                    CarModel.relevance == RelevanceStatus.IRRELEVANT,
+                    CarModel.relevance.is_(None),
+                ),
+            filter_condition)
         )
     )
 
