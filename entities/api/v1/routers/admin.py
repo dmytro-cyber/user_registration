@@ -12,6 +12,8 @@ from sqlalchemy import delete, and_, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from celery.result import AsyncResult
+import redis
 from core.celery_config import app as celery_app
 from core.dependencies import get_current_user, get_token
 from db.session import get_db
@@ -74,66 +76,73 @@ logger.addFilter(ContextFilter())
 router = APIRouter(prefix="/admin")
 
 
+REDIS_HOST = "redis_1"
+REDIS_PORT = 6380
+REDIS_DB   = 1
+
+r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+
+LOCK_KEY = "kickoff_task_lock"
+LOCK_TTL_SEC = 60 * 60 * 2
+
+def is_kickoff_busy() -> bool:
+    task_id = r.get(LOCK_KEY)
+    if not task_id:
+        return False
+    state = AsyncResult(task_id, app=celery_app).state
+    if state in ("SUCCESS", "FAILURE", "REVOKED"):
+        r.delete(LOCK_KEY)
+        return False
+    return True
+
+def set_kickoff_lock(task_id: str) -> None:
+    r.set(LOCK_KEY, task_id, ex=LOCK_TTL_SEC)
+
 @router.post("/filters", response_model=FilterResponse, status_code=status.HTTP_201_CREATED)
 async def create_filter(
     filter: FilterCreate,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings = Depends(get_settings)
+    settings = Depends(get_settings),
 ):
-    """
-    Create a new filter and:
-      1) bulk-активує relevance для всіх авто, що підпадають під фільтр (одним UPDATE)
-      2) запускає одну Celery-задчу kickoff, яка у воркері розкине підзадачі по VIN
-    """
-    request_id = "N/A"
-    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
-    logger.info(f"Creating new filter by user_id={current_user.id}", extra=extra)
-
-    try:
-        db_filter = FilterModel(**filter.dict(exclude_unset=True))
-        db_filter.updated_at = datetime.utcnow()
-        db.add(db_filter)
-
-        conditions = [
-            CarModel.make == db_filter.make,
-            CarModel.year >= (db_filter.year_from or 0),
-            CarModel.year <= (db_filter.year_to or 3000),
-            CarModel.mileage >= (db_filter.odometer_min or 0),
-            CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
-        ]
-        if db_filter.model is not None:
-            conditions.append(CarModel.model == db_filter.model)
-
-        bulk_update_stmt = (
-            update(CarModel)
-            .where(and_(*conditions))
-            .values(relevance=RelevanceStatus.ACTIVE)
-            .execution_options(synchronize_session=False)
-        )
-        await db.execute(bulk_update_stmt)
-
-        await db.commit()
-
-        await db.refresh(db_filter)
-
-        # from tasks.task import kickoff_parse_for_filter
-        # kickoff_result = kickoff_parse_for_filter.delay(filter_id=db_filter.id)
-        kickoff_result = celery_app.send_task("tasks.task.kickoff_parse_for_filter", kwargs={"filter_id": db_filter.id}, queue="car_parsing_queue",)
-
-        logger.info(
-            f"Filter created successfully id={db_filter.id}; kickoff_task_id={getattr(kickoff_result, 'id', None)}",
-            extra=extra,
-        )
-        return db_filter
-
-    except Exception as e:
-        await db.rollback()
-        logger.error(f"Failed to create filter: {str(e)}", extra=extra)
+    if is_kickoff_busy():
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error creating filter",
+            status_code=409,
+            detail="Previous kickoff task is still running. Please wait until it finishes.",
         )
+
+    db_filter = FilterModel(**filter.dict(exclude_unset=True))
+    db_filter.updated_at = datetime.utcnow()
+    db.add(db_filter)
+
+    conditions = [
+        CarModel.make == db_filter.make,
+        CarModel.year >= (db_filter.year_from or 0),
+        CarModel.year <= (db_filter.year_to or 3000),
+        CarModel.mileage >= (db_filter.odometer_min or 0),
+        CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
+    ]
+    if db_filter.model is not None:
+        conditions.append(CarModel.model == db_filter.model)
+
+    bulk_update_stmt = (
+        update(CarModel)
+        .where(and_(*conditions))
+        .values(relevance=RelevanceStatus.ACTIVE)
+        .execution_options(synchronize_session=False)
+    )
+    await db.execute(bulk_update_stmt)
+    await db.commit()
+    await db.refresh(db_filter)
+
+    kickoff_result = celery_app.send_task(
+        "tasks.task.kickoff_parse_for_filter",
+        kwargs={"filter_id": db_filter.id},
+        queue="car_parsing_queue",
+    )
+    set_kickoff_lock(kickoff_result.id)
+
+    return db_filter
 
 
 # Get all filters
@@ -217,75 +226,61 @@ async def update_filter_and_relevance(
     payload: FilterUpdate,
     db: AsyncSession = Depends(get_db),
 ):
-    # 1. Get current filter
-    filter_stmt = select(FilterModel).where(FilterModel.id == filter_id)
-    result = await db.execute(filter_stmt)
-    db_filter = result.scalar_one_or_none()
+    if is_kickoff_busy():
+        raise HTTPException(
+            status_code=409,
+            detail="Previous kickoff task is still running. Please wait until it finishes.",
+        )
 
+    result = await db.execute(select(FilterModel).where(FilterModel.id == filter_id))
+    db_filter = result.scalar_one_or_none()
     if db_filter is None:
         raise HTTPException(status_code=404, detail="Filter not found")
 
-    # 2. Select car IDs that match the current filter
     old_filter_query = build_car_filter_query(db_filter)
     old_ids_stmt = select(CarModel.id).where(*old_filter_query)
-    old_ids_result = await db.execute(old_ids_stmt)
-    old_car_ids = {row[0] for row in old_ids_result.fetchall()}
+    old_car_ids = {row[0] for row in (await db.execute(old_ids_stmt)).all()}
 
-    # 3. Update filter fields
     for key, value in payload.dict(exclude_unset=True).items():
         setattr(db_filter, key, value)
     await db.commit()
-    kickoff_result = celery_app.send_task("tasks.task.kickoff_parse_for_filter", kwargs={"filter_id": db_filter.id}, queue="car_parsing_queue",)
+    await db.refresh(db_filter)
 
-    # 4. Select car IDs that match the updated filter
     new_filter_query = build_car_filter_query(db_filter)
     new_ids_stmt = select(CarModel.id).where(*new_filter_query)
-    new_ids_result = await db.execute(new_ids_stmt)
-    new_car_ids = {row[0] for row in new_ids_result.fetchall()}
+    new_car_ids = {row[0] for row in (await db.execute(new_ids_stmt)).all()}
 
-    # 5. Determine changes
     to_activate = new_car_ids - old_car_ids
     to_irrelevant = old_car_ids - new_car_ids
 
-    # 6. Update relevance
     if to_activate:
         await db.execute(
             update(CarModel)
             .where(CarModel.id.in_(to_activate), CarModel.relevance == RelevanceStatus.IRRELEVANT)
             .values(relevance=RelevanceStatus.ACTIVE)
         )
-        query = select(
-            CarModel.vin,
-            CarModel.vehicle,
-            CarModel.engine_title,
-            CarModel.mileage,
-            CarModel.make,
-            CarModel.model,
-            CarModel.year,
-            CarModel.transmision
-        ).where(CarModel.id.in_(to_activate))
-
-        query_res = await db.execute(query)
-        vehicles = query_res.mappings().all()
-        kickoff_result = celery_app.send_task("tasks.task.kickoff_parse_for_filter", kwargs={"filter_id": db_filter.id}, queue="car_parsing_queue",)
-        
 
     if to_irrelevant:
-        # Set to IRRELEVANT if ACTIVE
         await db.execute(
             update(CarModel)
             .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ACTIVE)
             .values(relevance=RelevanceStatus.IRRELEVANT)
         )
-
-        # Delete if ARCHIVAL
         await db.execute(
             delete(CarModel)
             .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ARCHIVAL)
         )
 
     await db.commit()
-    return {"detail": "Filter updated and car relevance adjusted"}
+
+    kickoff_result = celery_app.send_task(
+        "tasks.task.kickoff_parse_for_filter",
+        kwargs={"filter_id": db_filter.id},
+        queue="car_parsing_queue",
+    )
+    set_kickoff_lock(kickoff_result.id)
+
+    return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 
 
 # @router.patch("/filters/{filter_id}/timestamp")
