@@ -283,55 +283,6 @@ async def update_filter_and_relevance(
     return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 
 
-# @router.patch("/filters/{filter_id}/timestamp")
-# async def update_filter_timestamp(
-#     filter_id: int, update_data: FilterUpdateTimestamp, db: AsyncSession = Depends(get_db)
-# ):
-#     """
-#     Update the timestamp of a filter.
-
-#     Args:
-#         filter_id (int): The ID of the filter to update.
-#         update_data (FilterUpdateTimestamp): The new timestamp data.
-#         db (AsyncSession): The database session dependency.
-
-#     Returns:
-#         FilterModel: The updated filter.
-
-#     Raises:
-#         HTTPException: 404 if the filter is not found.
-#         HTTPException: 500 if an error occurs during update.
-#     """
-#     request_id = "N/A"  # No request object available here
-#     extra = {"request_id": request_id, "user_id": "N/A"}
-#     logger.info(f"Updating timestamp for filter with id={filter_id}", extra=extra)
-
-#     try:
-#         result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
-#         db_filter = result.scalars().first()
-#         if not db_filter:
-#             logger.warning(f"Filter with id={filter_id} not found", extra=extra)
-#             raise HTTPException(status_code=404, detail="Filter not found")
-
-#         updated_at_naive = update_data.updated_at.replace(tzinfo=None)
-#         db_filter.updated_at = updated_at_naive
-#         await db.commit()
-#         await db.refresh(db_filter)
-#         logger.info(f"Timestamp updated successfully for filter with id={filter_id}", extra=extra)
-#         return db_filter
-#     except HTTPException as e:
-#         logger.error(f"Failed to update timestamp for filter with id={filter_id}: {str(e)}", extra=extra)
-#         raise
-#     except Exception as e:
-#         logger.error(
-#             f"Unexpected error while updating timestamp for filter with id={filter_id}: {str(e)}", extra=extra
-#         )
-#         raise HTTPException(
-#             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-#             detail="Error updating filter timestamp",
-#         )
-
-
 # Delete a filter
 @router.delete("/filters/{filter_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_filter(
