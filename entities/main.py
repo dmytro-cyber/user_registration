@@ -20,22 +20,22 @@ app = FastAPI(
 )
 
 
+# @app.on_event("startup")
+# async def on_startup():
+#     await create_roles()
+#     celery_app.send_task(
+#         "tasks.task.update_fees",
+#         queue="car_parsing_queue",
+#     )
+#     await import_us_zips_from_csv()
+
+# @app.on_event("startup")
+# async def on_startup():
+
+
 @app.on_event("startup")
 async def on_startup():
-    await create_roles()
-    celery_app.send_task(
-        "tasks.task.update_fees",
-        queue="car_parsing_queue",
-    )
-    await import_us_zips_from_csv()
-
-# @app.on_event("startup")
-# async def on_startup():
-
-
-# @app.on_event("startup")
-# async def on_startup():
-#     await match_and_update_locations()
+    await match_and_update_locations()
 
 
 app.add_middleware(
