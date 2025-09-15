@@ -46,7 +46,7 @@ class Config:
         "Sec-Ch-Ua-Mobile": "?0",
         "Sec-Ch-Ua-Platform": "macOS",
         "Priority": "u=1, i",
-        "Timezone": "America/Los_Angeles",  # Каліфорнія, США
+        "Timezone": "America/Los_Angeles",  # California, USA
         "Dc-Location": "ceaf9582-d242-4911-9b81-2da5fa48b8bb",
         "Dc-User": "loc=ceaf9582-d242-4911-9b81-2da5fa48b8bb;cache=74e3653a-3a14-43f8-a1c1-64102452b408;type=Self;",
         "Accept-Encoding": "gzip, deflate, br, zstd",
@@ -65,7 +65,7 @@ class Config:
         ],
     }
 
-    # in-memory кеш для токена/куків (на процес)
+    # In-memory credentials cache for the current process
     CREDENTIALS: Dict[str, Any] = {}
 
     TIMEOUT = 100
@@ -75,10 +75,10 @@ class Config:
 
 
 # ------------------------------------------------------------
-# Спеціальний виняток: логін відбувся, підніми ретрай нагору
+# Special exception: login was performed, ask caller to retry
 # ------------------------------------------------------------
 class AuthRefreshedError(RuntimeError):
-    """Use to signal the caller that credentials were refreshed and the call must be retried."""
+    """Signals the caller that credentials were refreshed and the call must be retried."""
     pass
 
 
@@ -96,6 +96,9 @@ class EmailClient:
     def get_verification_code(
         self, max_wait: int = Config.MAX_WAIT_VERIFICATION, poll_interval: int = Config.POLL_INTERVAL
     ) -> Optional[str]:
+        """
+        Poll the inbox for a DealerCenter code email and extract a 6-digit code.
+        """
         start_time = time.time()
         while time.time() - start_time < max_wait:
             try:
@@ -175,7 +178,7 @@ class DealerCenterScraper:
         self.access_token: Optional[str] = None
         self._load_credentials()
 
-        # single-flight primitives
+        # Single-flight primitives for login
         self._login_lock = asyncio.Lock()
         self._login_ready = asyncio.Event()
         self._login_ready.set() if (self.cookies and self.access_token) else self._login_ready.clear()
@@ -183,16 +186,19 @@ class DealerCenterScraper:
     # ----------------------- creds helpers -----------------------
 
     def _load_credentials(self):
+        """Load cached cookies and token from the process-wide cache."""
         if Config.CREDENTIALS:
             self.cookies = Config.CREDENTIALS.get("cookies", []) or []
             self.access_token = Config.CREDENTIALS.get("access_token")
             logging.info("Loaded saved credentials")
 
     def _save_credentials(self):
+        """Save cookies and token to the process-wide cache."""
         Config.CREDENTIALS = {"cookies": self.cookies, "access_token": self.access_token}
         logging.info("Saved credentials to Config.CREDENTIALS")
 
     def _headers(self) -> dict:
+        """Build request headers with Authorization and Cookie if available."""
         h = Config.BASE_HEADERS.copy()
         if self.access_token:
             h["Authorization"] = f"Bearer {self.access_token}"
@@ -202,18 +208,23 @@ class DealerCenterScraper:
         return h
 
     def _cookies_dict(self) -> dict:
+        """Return cookies as a simple dict for httpx."""
         return {c["name"]: c["value"] for c in (self.cookies or [])}
 
     # ----------------------- login flow --------------------------
 
-    async def _ensure_logged_in_singleflight(self):
-        if self._login_ready.is_set():
+    async def _ensure_logged_in_singleflight(self, force: bool = False):
+        """
+        Ensure the scraper is logged in. If another coroutine is logging in, wait for it.
+        If `force=True`, always perform login regardless of the current ready state.
+        """
+        if self._login_ready.is_set() and not force:
             return
         if self._login_lock.locked():
             await self._login_ready.wait()
             return
         async with self._login_lock:
-            if self._login_ready.is_set():
+            if self._login_ready.is_set() and not force:
                 return
             self._login_ready.clear()
             try:
@@ -222,6 +233,7 @@ class DealerCenterScraper:
                 self._login_ready.set()
 
     async def _perform_login(self):
+        """Perform a fresh login with Playwright, store cookies and access token."""
         start_time = time.time()
         async with async_playwright() as p:
             browser = await p.chromium.launch(**Config.BROWSER_ARGS)
@@ -237,6 +249,7 @@ class DealerCenterScraper:
                 await page.fill("#password", self.dc_password)
                 await page.click("#login")
 
+                # Select email MFA option
                 try:
                     await page.wait_for_selector(
                         "xpath=//span[contains(text(), 'Email Verification Code')]/parent::a",
@@ -247,6 +260,7 @@ class DealerCenterScraper:
                     await page.wait_for_selector("#WebMFAEmail", timeout=5000)
                     await page.click("#WebMFAEmail")
 
+                # Wait for email delivery, then fetch code
                 await asyncio.sleep(20)
                 code = self.email_client.get_verification_code()
                 if not code:
@@ -257,11 +271,11 @@ class DealerCenterScraper:
                 await page.click("#email-passcode-submit")
                 await asyncio.sleep(20)
 
-                # save cookies
+                # Save cookies
                 self.cookies = await context.cookies()
                 self._save_credentials()
 
-                # fetch token
+                # Fetch token
                 await page.goto(Config.TOKEN_VALIDATION_URL)
                 await page.wait_for_load_state("networkidle")
                 content = await page.content()
@@ -281,9 +295,9 @@ class DealerCenterScraper:
 
     async def _auth_post(self, url: str, payload: dict) -> httpx.Response:
         """
-        Одноразовий POST з поточними кредами.
-        Якщо 401/403 — виконує single-flight login і підіймає AuthRefreshedError нагору.
-        Інші помилки — просто re-raise.
+        Single POST with current credentials.
+        On 401/403: force a re-login (clear cached creds, reset ready flag), then raise AuthRefreshedError.
+        Other HTTP errors: re-raise.
         """
         headers = self._headers()
         cookies = self._cookies_dict()
@@ -293,10 +307,16 @@ class DealerCenterScraper:
                 r.raise_for_status()
                 return r
             except httpx.HTTPStatusError as e:
-                if e.response.status_code in (401, 403):
-                    logging.info("401/403 received → performing login and raising for external retry")
-                    await self._ensure_logged_in_singleflight()
-                    # важливо: не ретраїмо тут, кидаємо нагору
+                if e.response is not None and e.response.status_code in (401, 403):
+                    logging.info("401/403 received → forcing re-login (clearing cached credentials)")
+                    # Invalidate cached credentials and reset ready flag
+                    self.cookies = []
+                    self.access_token = None
+                    self._save_credentials()
+                    self._login_ready.clear()
+                    # Perform a fresh login (single-flight; forced)
+                    await self._ensure_logged_in_singleflight(force=True)
+                    # Ask the caller to retry the request with fresh creds
                     raise AuthRefreshedError("Credentials refreshed, please retry") from e
                 raise
 
@@ -304,6 +324,9 @@ class DealerCenterScraper:
 
     @staticmethod
     def _parse_history(html_data: str, fallback_odometer: Optional[int]) -> dict:
+        """
+        Extract owners, odometer and accident count from the AutoCheck HTML.
+        """
         soup = BeautifulSoup(html_data, "html.parser")
 
         # owners
@@ -342,6 +365,7 @@ class DealerCenterScraper:
         }
 
     async def _fetch_history_html(self) -> str:
+        """Call AutoCheck endpoint and return the embedded HTML string."""
         payload = {
             "auctionVehicleId": None,
             "deviceType": None,
@@ -361,6 +385,9 @@ class DealerCenterScraper:
         return html_data
 
     async def _fetch_valuation(self) -> Tuple[Optional[int], Optional[int]]:
+        """
+        Request valuation numbers and extract NADA retail and Manheim adjusted retail average, if present.
+        """
         payload_jd = {
             "method": 1,
             "odometer": self.odometer,
@@ -392,6 +419,9 @@ class DealerCenterScraper:
             return jd, manheim
 
     async def _fetch_market_stats(self, odometer_value: Optional[int]) -> Optional[int]:
+        """
+        Request market price statistics and return priceAvg if available.
+        """
         payload_market_data = {
             "vehicleInfo": {
                 "entityID": "00000000-0000-0000-0000-000000000000",
@@ -455,16 +485,16 @@ class DealerCenterScraper:
 
     async def get_history_only_async(self):
         """
-        Збирає тільки історію.
-        ВАЖЛИВО: першим кроком робиться виклик до AUTOCHECK; якщо 401/403 —
-        виконується логін і піднімається AuthRefreshedError (щоб верхній рівень ретраїв).
+        Collect only vehicle history (AutoCheck HTML parsing).
+        IMPORTANT: First step hits AUTOCHECK endpoint. On 401/403 we force a fresh login and
+        raise AuthRefreshedError so the caller can retry with refreshed credentials.
         """
-        # забезпечуємо готовність кредів, якщо вони вже є — це спрацює як fast-path
+        # Fast-path if credentials are already present; otherwise login
         if not (self.cookies and self.access_token):
             await self._ensure_logged_in_singleflight()
 
         start_t = time.time()
-        html_data = await self._fetch_history_html()  # може кинути AuthRefreshedError
+        html_data = await self._fetch_history_html()  # may raise AuthRefreshedError
         parsed = self._parse_history(html_data, self.odometer)
 
         result = {
@@ -481,18 +511,18 @@ class DealerCenterScraper:
 
     async def get_history_and_market_data_async(self):
         """
-        Збирає історію + оцінки + ринкову статистику.
-        Починає з історії; на 401/403 — логін і виняток нагору (для зовнішнього ретраю).
+        Collect history + valuations + market statistics.
+        Starts from history; on 401/403 we force a login and bubble up AuthRefreshedError for an external retry.
         """
         if not (self.cookies and self.access_token):
             await self._ensure_logged_in_singleflight()
 
         start_t = time.time()
         # 1) history
-        html_data = await self._fetch_history_html()  # може кинути AuthRefreshedError
+        html_data = await self._fetch_history_html()  # may raise AuthRefreshedError
         parsed = self._parse_history(html_data, self.odometer)
 
-        # 2) valuations (додаткові запити, вже без внутрішніх ретраїв)
+        # 2) valuations
         jd, manheim = await self._fetch_valuation()
 
         # 3) market stats
@@ -543,7 +573,7 @@ if __name__ == "__main__":
             if k == "html_data":
                 print(f"{k}: {len(str(v))}")
     except AuthRefreshedError:
-        # імітація зовнішнього ретраю (у тебе це зробить FastAPI-роутер)
+        # External retry simulation (your FastAPI route should do this automatically)
         logging.info("Retrying after auth refresh...")
         result = asyncio.run(dc.get_history_and_market_data_async())
         for k, v in result.items():
