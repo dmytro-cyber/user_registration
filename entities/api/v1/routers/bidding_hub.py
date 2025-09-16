@@ -247,6 +247,9 @@ async def update_actual_bid(
                 vehicle.auction_fee += fee.amount
         
         vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
+        total_investments = vehicle.sum_of_investments + data.actual_bid
+        vehicle.roi = ((vehicle.avg_market_price - total_investments) / total_investments) * 100
+        vehicle.profit_margin = vehicle.avg_market_price - total_investments
 
         hub_history = HistoryModel(
             car_id=car_id,
@@ -256,11 +259,11 @@ async def update_actual_bid(
         )
         db.add(hub_history)
         vehicle.actual_bid = data.actual_bid
-        vehicle.roi = data.roi
-        vehicle.profit_margin = data.profit_margin
+        # vehicle.roi = data.roi
+        # vehicle.profit_margin = data.profit_margin
         db.add(vehicle)
         await db.commit()
-        await db.refresh(vehicle)
+        # await db.refresh(vehicle)
         logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
     except Exception as e:
         logger.error(f"Error updating current bid for car_id={car_id}: {str(e)}", extra=extra)
