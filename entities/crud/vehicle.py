@@ -350,31 +350,44 @@ async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optio
 
 
 async def get_filtered_vehicles(
-    db: AsyncSession,
+    db: "AsyncSession",
     filters: Dict[str, Any],
     ordering,
     page: int,
     page_size: int
-) -> Tuple[List[CarModel], int, int, Dict[str, Any]]:
+) -> Tuple[List["CarModel"], int, int, Dict[str, Any]]:
+    """
+    Return vehicles with full filtering, deterministic ordering, and de-duplicated pagination.
 
-    user_id = filters.get("user_id")
+    Strategy to avoid duplicates:
+      1) Build a filtered SELECT over CarModel.id only (no eager loads) -> DISTINCT ids subquery.
+      2) ORDER and paginate those ids.
+      3) Fetch full CarModel rows for the paginated ids (with eager loads) + computed "liked" flag.
+
+    This guarantees: count == size of the DISTINCT id set, and page results have unique cars.
+    """
 
     def _norm_strs(values: Iterable[Any]) -> List[str]:
+        """Lowercase only string values."""
         return [v.lower() for v in values if isinstance(v, str)]
 
     def _str_in(field, values: Iterable[Any]):
+        """Case-insensitive IN against a list of strings; returns SQLA clause or False if empty."""
         vals = _norm_strs(values)
         if not vals:
-            return False  # зробити фільтр "ніщо не знайдено"
+            return False
         return func.lower(field).in_(vals)
 
     def _int_in(field, values: Iterable[Any]):
+        """IN against a list that may contain ints or numeric strings; returns clause or False."""
         ints = [int(v) for v in values if isinstance(v, int) or (isinstance(v, str) and v.isdigit())]
         if not ints:
             return False
         return field.in_(ints)
 
-    # liked як булевий вираз (без JOIN)
+    user_id = filters.get("user_id")
+
+    # liked EXISTS helper (re-used both for filtering and projection)
     liked_exists = exists(
         select(user_likes.c.car_id).where(
             (user_likes.c.car_id == CarModel.id) &
@@ -382,29 +395,31 @@ async def get_filtered_vehicles(
         )
     )
 
-    today = datetime.utcnow().date()
-    base_query = (
-        select(CarModel)
-        .options(
-            selectinload(CarModel.photos),
-            selectinload(CarModel.condition_assessments),
-        )
+    # Base: filter for valid/active sellable cars
+    base_ids = (
+        select(CarModel.id)
         .filter(
             CarModel.relevance == RelevanceStatus.ACTIVE,
             CarModel.predicted_total_investments.isnot(None),
             CarModel.predicted_total_investments > 0,
             CarModel.suggested_bid.isnot(None),
             CarModel.suggested_bid > 0,
-            or_(            
+            or_(
                 CarModel.date.isnot(None),
-                CarModel.auction_name == "Buynow")
+                CarModel.auction_name == "Buynow"
+            ),
         )
     )
 
-    # ---- ConditionAssessments: фільтруємо через EXISTS, а завантаження робимо selectinload ----
+    # ---- ConditionAssessments via EXISTS (no JOIN → no duplication) ----
+    # Also prepare optional loader criteria to restrict loaded related rows.
     cond_values = filters.get("condition_assessments")
+    loader_options = [
+        selectinload(CarModel.photos),
+        selectinload(CarModel.condition_assessments),
+    ]
     if cond_values:
-        base_query = base_query.filter(
+        base_ids = base_ids.filter(
             exists(
                 select(1)
                 .select_from(ConditionAssessmentModel)
@@ -414,8 +429,7 @@ async def get_filtered_vehicles(
                 )
             )
         )
-        # обмежуємо самі завантажені рядки у відношенні (щоб у car.condition_assessments були тільки потрібні)
-        base_query = base_query.options(
+        loader_options.append(
             with_loader_criteria(
                 ConditionAssessmentModel,
                 ConditionAssessmentModel.issue_description.in_(cond_values),
@@ -424,7 +438,7 @@ async def get_filtered_vehicles(
         )
     else:
         default_excluded = ["Biohazard/Chemical", "Water/Flood", "Rejected Repair"]
-        base_query = base_query.filter(
+        base_ids = base_ids.filter(
             ~exists(
                 select(1)
                 .select_from(ConditionAssessmentModel)
@@ -435,7 +449,7 @@ async def get_filtered_vehicles(
             )
         )
 
-    # ---- ZIP search ----
+    # ---- ZIP proximity search (Copart/IAAI yard names) ----
     if filters.get("zip_search"):
         zip_code, radius = filters["zip_search"]
         zip_row = await db.execute(select(USZipModel).where(USZipModel.zip == zip_code))
@@ -444,7 +458,6 @@ async def get_filtered_vehicles(
             raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
 
         lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
-
         distance_expr = (
             3958.8
             * func.acos(
@@ -468,17 +481,17 @@ async def get_filtered_vehicles(
                 zip_names.add(iaai.lower())
 
         if zip_names:
-            base_query = base_query.filter(_str_in(CarModel.location, zip_names))
+            base_ids = base_ids.filter(_str_in(CarModel.location, zip_names))
         else:
-            base_query = base_query.filter(False)  # свідомо "порожньо"
-        logger.debug(f"Nearby location -----> {zip_names}")
+            # Force empty result if within radius there are no known yards.
+            base_ids = base_ids.filter(False)
 
-    # ---- string filters ----
+    # ---- String filters (case-insensitive) ----
     for field_name, column in {
         "make": CarModel.make,
         "body_style": CarModel.body_style,
         "vehicle_type": CarModel.vehicle_type,
-        "transmission": CarModel.transmision,
+        "transmission": CarModel.transmision,   # note: model field is 'transmision'
         "drive_type": CarModel.drive_type,
         "fuel_type": CarModel.fuel_type,
         "condition": CarModel.condition,
@@ -489,15 +502,16 @@ async def get_filtered_vehicles(
     }.items():
         values = filters.get(field_name)
         if values:
-            base_query = base_query.filter(_str_in(column, values))
+            base_ids = base_ids.filter(_str_in(column, values))
         elif field_name == "fuel_type":
-            base_query = base_query.filter(CarModel.fuel_type != "Hybrid")
+            # Default rule from your original code: exclude Hybrids when no explicit fuel_type given
+            base_ids = base_ids.filter(CarModel.fuel_type != "Hybrid")
 
-    # ---- integer filters ----
+    # ---- Integer IN filters ----
     if filters.get("engine_cylinder"):
-        base_query = base_query.filter(_int_in(CarModel.engine_cylinder, filters["engine_cylinder"]))
+        base_ids = base_ids.filter(_int_in(CarModel.engine_cylinder, filters["engine_cylinder"]))
 
-    # ---- numeric ranges ----
+    # ---- Numeric ranges (>= mins) ----
     for key, col in {
         "mileage_min": CarModel.mileage,
         "predicted_profit_margin_min": CarModel.profit_margin,
@@ -508,8 +522,9 @@ async def get_filtered_vehicles(
     }.items():
         val = filters.get(key)
         if val is not None:
-            base_query = base_query.filter(col >= val)
+            base_ids = base_ids.filter(col >= val)
 
+    # ---- Numeric ranges (<= max) ----
     for key, col in {
         "mileage_max": CarModel.mileage,
         "predicted_profit_margin_max": CarModel.profit_margin,
@@ -520,67 +535,61 @@ async def get_filtered_vehicles(
     }.items():
         val = filters.get(key)
         if val is not None:
-            base_query = base_query.filter(col <= val)
+            base_ids = base_ids.filter(col <= val)
 
-    # ---- date range ----
+    # ---- Date range (inclusive day bounds) ----
     if filters.get("date_from"):
         date_from = filters["date_from"]
         if isinstance(date_from, str):
             date_from = datetime.strptime(date_from, "%Y-%m-%d").date()
-        base_query = base_query.filter(CarModel.date >= datetime.combine(date_from, time.min))
+        base_ids = base_ids.filter(CarModel.date >= datetime.combine(date_from, time.min))
 
     if filters.get("date_to"):
         date_to = filters["date_to"]
         if isinstance(date_to, str):
             date_to = datetime.strptime(date_to, "%Y-%m-%d").date()
-        base_query = base_query.filter(CarModel.date <= datetime.combine(date_to, time.max))
+        base_ids = base_ids.filter(CarModel.date <= datetime.combine(date_to, time.max))
 
     # ---- recommended_only ----
     if filters.get("recommended_only"):
-        base_query = base_query.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
+        base_ids = base_ids.filter(CarModel.recommendation_status == RecommendationStatus.RECOMMENDED)
 
-    # ---- liked=True як фільтр ----
+    # ---- liked=True ----
     if filters.get("liked"):
         if user_id is None:
             raise ValueError("user_id is required when filtering by liked=True")
-        base_query = base_query.filter(liked_exists)
+        base_ids = base_ids.filter(liked_exists)
 
-    # ---- count без дублікатів ----
-    count_subq = base_query.with_only_columns(CarModel.id).distinct().subquery()
-    total_count = await db.scalar(select(func.count()).select_from(count_subq))
+    # ----------------------------
+    # COUNT over DISTINCT ids
+    # ----------------------------
+    distinct_ids_sq = base_ids.distinct().subquery()
+    total_count = await db.scalar(select(func.count()).select_from(distinct_ids_sq))
     total_pages = (total_count + page_size - 1) // page_size if page_size > 0 else 1
 
-    # ---- агрегації по distinct id ----
-    bids_info: Dict[str, Any] = {}
-    if page == 1:
-        stats_src = base_query.with_only_columns(CarModel.id, CarModel.current_bid).distinct().subquery()
-        row = (await db.execute(
-            select(
-                func.min(stats_src.c.current_bid),
-                func.max(stats_src.c.current_bid),
-                func.avg(stats_src.c.current_bid),
-            )
-        )).one_or_none()
-        if row:
-            min_bid, max_bid, avg_bid = row
-        else:
-            min_bid = max_bid = 0
-            avg_bid = 0.0
-        bids_info = {
-            "min_bid": min_bid,
-            "max_bid": max_bid,
-            "avg_bid": round(avg_bid or 0.0, 2),
-            "total_count": total_count,
-        }
+    # Determine the ordering
+    ORDERING = globals().get("ORDERING_MAP", {})
+    order_clause = ORDERING.get(ordering, desc(CarModel.created_at))
 
-    # ---- вибірка сторінки + булевий liked ----
-    order_clause = ORDERING_MAP.get(ordering, desc(CarModel.created_at))
-    page_query = (
-        base_query
-        .add_columns(liked_exists.label("liked"))
-        .order_by(order_clause)
-        .offset((page - 1) * page_size)
+    # ----------------------------
+    # Page of ids: ORDER + OFFSET/LIMIT (stable ordering)
+    # ----------------------------
+    paged_ids_sq = (
+        select(distinct_ids_sq.c.id)
+        .join(CarModel, CarModel.id == distinct_ids_sq.c.id)
+        .order_by(order_clause, CarModel.id)  # stable tie-breaker
+        .offset(max(page - 1, 0) * page_size)
         .limit(page_size)
+    ).subquery()
+
+    # ----------------------------
+    # Final fetch: full rows + liked flag (no duplicates)
+    # ----------------------------
+    page_query = (
+        select(CarModel, liked_exists.label("liked"))
+        .where(CarModel.id.in_(select(paged_ids_sq.c.id)))
+        .order_by(order_clause, CarModel.id)
+        .options(*loader_options)
     )
 
     res = await db.execute(page_query)
@@ -588,11 +597,37 @@ async def get_filtered_vehicles(
 
     vehicles: List[CarModel] = []
     for car, liked in rows:
-        car.liked = bool(liked)
+        # attach liked flag for convenience
+        setattr(car, "liked", bool(liked))
         vehicles.append(car)
 
-    return vehicles, total_count, total_pages, bids_info
+    # ----------------------------
+    # Aggregates (first page only) over DISTINCT ids
+    # ----------------------------
+    bids_info: Dict[str, Any] = {}
+    if page == 1:
+        agg_row = (await db.execute(
+            select(
+                func.min(CarModel.current_bid),
+                func.max(CarModel.current_bid),
+                func.avg(CarModel.current_bid),
+            ).where(CarModel.id.in_(select(distinct_ids_sq.c.id)))
+        )).one_or_none()
 
+        if agg_row:
+            min_bid, max_bid, avg_bid = agg_row
+        else:
+            min_bid = max_bid = 0
+            avg_bid = 0.0
+
+        bids_info = {
+            "min_bid": min_bid,
+            "max_bid": max_bid,
+            "avg_bid": round(avg_bid or 0.0, 2),
+            "total_count": total_count,
+        }
+
+    return vehicles, total_count, total_pages, bids_info
 
 
 async def get_bidding_hub_vehicles(
