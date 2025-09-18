@@ -3,7 +3,7 @@ from typing import Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from models.vehicle import CarStatus
+from models.vehicle import CarStatus, RecommendationStatus
 from schemas.user import UserResponseSchema
 
 
@@ -224,6 +224,11 @@ class CarCreateSchema(BaseModel):
     photos_hd: List[PhotoSchema] = Field(default=[], exclude=True)
     condition_assessments: List[ConditionAssessmentResponseSchema] = Field(default=[], exclude=True)
     sales_history: List[SalesHistoryBaseSchema] = Field(default=[], exclude=True)
+
+
+class CarUpdateSchema(BaseModel):
+    avg_market_price: int | None = None
+    recommendation_status: RecommendationStatus | None = None
 
 
 class CarBulkCreateSchema(BaseModel):

@@ -4,7 +4,7 @@ import logging.handlers
 import os
 from collections import defaultdict
 from datetime import date
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -31,7 +31,7 @@ from crud.vehicle import (
 )
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, HistoryModel, RelevanceStatus
+from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus, ROIModel
 from schemas.vehicle import (
     CarBaseSchema,
     CarBulkCreateSchema,
@@ -40,6 +40,7 @@ from schemas.vehicle import (
     CarDetailResponseSchema,
     CarFilterOptionsSchema,
     CarListResponseSchema,
+    CarUpdateSchema,
     PartRequestScheme,
     PartResponseScheme,
     UpdateCarStatusSchema,
@@ -292,6 +293,7 @@ async def get_cars(
     fuel_type: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition: Optional[str] = Query(None, description="Body style (e.g., Sedan, SUV)"),
     condition_assessments: Optional[str] = Query(None, description="e.g., Rear end, Burn"),
+    title: Optional[str] = Query(None, description="Salvage, Clean"),
     zip_search: Optional[str] = Query(None, description="e.g., 12345;200"),
     recommended_only: Optional[bool] = Query(False, description="'true' to show only recomended vehicles"),
     vin: Optional[str] = Query(None, description="VIN-code of the car"),
@@ -371,6 +373,7 @@ async def get_cars(
         "fuel_type": fuel_type.split(",") if fuel_type else None,
         "condition": condition.split(",") if condition else None,
         "condition_assessments": condition_assessments.split(",") if condition_assessments else None,
+        "title": title.split(",") if title else None,
         "zip_search": zip_search if zip_search else None,
         "recommended_only": recommended_only,
     }
@@ -445,6 +448,128 @@ async def get_car_detail(
     logger.info(f"Car condition: {car.condition_assessments}", extra=extra)
     return await prepare_car_detail_response(car)
 
+
+@router.patch(
+    "/cars/{car_id}",
+    status_code=200,
+    summary="Update car",
+    description="Update car fields; when avg_market_price is provided, recompute related pricing fields."
+)
+async def update_car(
+    car_id: int,
+    data: CarUpdateSchema,
+    session: AsyncSession = Depends(get_db),
+    user: UserModel = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Update a car. If `avg_market_price` is provided, recompute:
+      - predicted_total_investments = avg_market_price / (1 + ROI/100)
+      - predicted_profit_margin_percent = default ROI profit margin
+      - predicted_profit_margin = avg_market_price * (profit_margin/100)
+      - auction_fee from matched FeeModel rows (same logic as before)
+      - suggested_bid = predicted_total_investments - sum_of_investments
+
+    Notes:
+    - Keeps original business logic; fixes route, session.get usage, None checks and auction_fee assignment.
+    """
+    # Fetch car (proper AsyncSession.get signature)
+    car = await session.get(CarModel, car_id)
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+
+    # Recompute block if avg_market_price provided
+    if data.avg_market_price is not None:
+        # Get most recent ROI row
+        roi_stmt = (
+            select(ROIModel)
+            .order_by(ROIModel.created_at.desc())
+            .limit(1)
+        )
+        roi_row = await session.execute(roi_stmt)
+        default_roi = roi_row.scalars().first()
+        if default_roi is None:
+            # Can't recompute without ROI baseline
+            raise HTTPException(status_code=400, detail="Default ROI baseline not found")
+
+        # Assign incoming price
+        car.avg_market_price = data.avg_market_price
+
+        # Core formulas (unchanged)
+        car.predicted_total_investments = car.avg_market_price / (1 + default_roi.roi / 100.0)
+        car.predicted_profit_margin_percent = default_roi.profit_margin
+        car.predicted_profit_margin = car.avg_market_price * (default_roi.profit_margin / 100.0)
+
+        # Fees lookup (unchanged logic, still uses *0.8 window)
+        fees_stmt = (
+            select(FeeModel)
+            .where(
+                FeeModel.auction == car.auction,
+                FeeModel.price_from <= (car.predicted_total_investments or 0.0) * 0.8,
+                FeeModel.price_to   >= (car.predicted_total_investments or 0.0) * 0.8,
+            )
+        )
+        fee_rows = (await session.execute(fees_stmt)).scalars().all()
+
+        fee_total = 0.0
+        base_for_percent = (car.predicted_total_investments or 0.0) * 0.8
+        for fee in fee_rows:
+            if fee.percent:
+                fee_total += (float(fee.amount) / 100.0) * base_for_percent
+            else:
+                fee_total += float(fee.amount)
+
+        car.auction_fee = float(fee_total)
+
+        # Keep original suggested_bid logic
+        car.suggested_bid = int(
+            (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
+        )
+
+    # Optional status update
+    if data.recommendation_status is not None:
+        car.recommendation_status = data.recommendation_status
+
+    await session.commit()
+    await session.refresh(car)
+
+    # Lightweight response without changing logic/contracts
+    return {
+        "message": "Car updated",
+        "car_id": car_id,
+        "avg_market_price": car.avg_market_price,
+        "predicted_total_investments": float(car.predicted_total_investments or 0.0),
+        "predicted_profit_margin_percent": float(car.predicted_profit_margin_percent or 0.0),
+        "predicted_profit_margin": float(car.predicted_profit_margin or 0.0),
+        "auction_fee": float(car.auction_fee or 0.0),
+        "suggested_bid": int(car.suggested_bid or 0),
+        "recommendation_status": getattr(car, "recommendation_status", None),
+    }
+
+
+@router.post("/cars/{car_id}/scrape")
+async def scrape_wehicle_by_id(
+    car_id: int,
+    session: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    # Fetch car (proper AsyncSession.get signature)
+    car = await session.get(CarModel, car_id)
+    if not car:
+        raise HTTPException(status_code=404, detail="Car not found")
+    celery_app.send_task(
+        "tasks.task.parse_and_update_car",
+        kwargs={
+            "vin": car.vin,
+            "car_name": car.vehicle,
+            "car_engine": car.engine_title,
+            "mileage": car.mileage,
+            "car_make": car.make,
+            "car_model": car.model,
+            "car_year": car.year,
+            "car_transmison": car.transmision,
+        },
+        queue="car_parsing_queue",)
+    return
 
 @router.patch("/cars/{car_id}/check")
 async def update_car_is_checked(

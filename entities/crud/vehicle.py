@@ -559,7 +559,12 @@ async def get_filtered_vehicles(
         if user_id is None:
             raise ValueError("user_id is required when filtering by liked=True")
         base_ids = base_ids.filter(liked_exists)
-
+    if filters.get("title"):
+        is_salvage = filters.get("title")
+        if is_salvage and len(is_salvage) == 1 and "Salvage" in is_salvage:
+            base_ids = base_ids.filter(CarModel.is_salvage == True)
+        elif is_salvage and len(is_salvage) == 1 and "Clean" in is_salvage:
+            base_ids = base_ids.filter(CarModel.is_salvage == False)
     # ----------------------------
     # COUNT over DISTINCT ids
     # ----------------------------
