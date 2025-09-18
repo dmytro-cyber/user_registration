@@ -31,7 +31,8 @@ from crud.vehicle import (
 )
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus, ROIModel
+from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus
+from models.admin import ROIModel
 from schemas.vehicle import (
     CarBaseSchema,
     CarBulkCreateSchema,
