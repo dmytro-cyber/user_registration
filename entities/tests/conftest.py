@@ -1,72 +1,234 @@
-from unittest.mock import AsyncMock
+# conftest.py
+import asyncio
+import os
+from types import SimpleNamespace
+from pathlib import Path
+import tempfile
+import logging
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
+from sqlalchemy.orm import registry
+import pytest
+from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from models.user import UserRoleModel, UserRoleEnum, UserModel
 
+# ==== FastAPI app ====
+from main import app
+
+# ==== App dependencies to override ====
 from core.dependencies import get_settings
+from db.session import POSTGRESQL_DATABASE_URL  # just to ensure module import side-effects don't break
 from core.security.token_manager import JWTAuthManager
-from db.test_session import get_test_db_session
-from main import app  # Оновлений імпорт (з кореня проєкту)
-from models.user import UserModel, UserRoleEnum, UserRoleModel
+
+# ========= Logging (quieter tests) =========
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+for name in ("sqlalchemy.engine", "sqlalchemy.pool"):
+    logging.getLogger(name).setLevel(logging.WARNING)
 
 
+# ========= Test Settings =========
+class TestSettings:
+    """
+    Minimal test settings stub that mimics the production Settings interface
+    but uses in-memory/harmless defaults.
+    """
+    # DB (unused here; we create our own SQLite engine below)
+    POSTGRES_USER = "test_user"
+    POSTGRES_PASSWORD = "test_password"
+    POSTGRES_HOST = "test_host"
+    POSTGRES_DB_PORT = 5432
+    POSTGRES_DB = "test_db"
+
+    # JWT
+    SECRET_KEY_ACCESS = "test_access_key"
+    SECRET_KEY_REFRESH = "test_refresh_key"
+    SECRET_KEY_USER_INTERACTION = "test_user_interaction_key"
+    JWT_SIGNING_ALGORITHM = "HS256"
+
+    # S3 (dummy)
+    MINIO_HOST = "minio-test"
+    MINIO_PORT = 9000
+    MINIO_ROOT_USER = "minioadmin"
+    MINIO_ROOT_PASSWORD = "minioadmin"
+    MINIO_STORAGE = "test-bucket"
+
+    S3_STORAGE_HOST = "minio-test"
+    S3_STORAGE_PORT = 9000
+    S3_STORAGE_ACCESS_KEY = "minioadmin"
+    S3_STORAGE_SECRET_KEY = "minioadmin"
+    S3_BUCKET_NAME = "test-bucket"
+
+    PARSERS_AUTH_TOKEN = "test-parsers-token"
+
+    @property
+    def S3_STORAGE_ENDPOINT(self) -> str:
+        return f"http://{self.S3_STORAGE_HOST}:{self.S3_STORAGE_PORT}"
+
+
+# ========= event loop =========
 @pytest.fixture(scope="session")
 def event_loop():
-    """Create a single event loop for all tests in the session."""
-    import asyncio
-
-    loop = asyncio.get_event_loop_policy().new_event_loop()
+    """
+    Single event loop for all async tests in the session.
+    """
+    loop = asyncio.new_event_loop()
     yield loop
     loop.close()
 
 
+# ========= async test DB (SQLite aiosqlite) =========
 @pytest.fixture(scope="session")
-def settings():
-    """Fixture for application settings."""
-    return get_settings()
+def _test_db_file(tmp_path_factory):
+    # persistent for the whole test session
+    tmpdir = tmp_path_factory.mktemp("db")
+    return tmpdir / "test.db"
+
+
+@pytest.fixture(scope="session")
+async def engine(_test_db_file):
+    url = f"sqlite+aiosqlite:///{_test_db_file}"
+    eng = create_async_engine(url, echo=False, future=True)
+
+    from models import Base  # <-- імпорт правильного Base
+
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    try:
+        yield eng
+    finally:
+        # drop tables and close engine so Windows дозволив видалити файл
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
+        await eng.dispose()
+
+
+@pytest.fixture(scope="session")
+def async_session_factory(engine):
+    """
+    Factory for AsyncSession.
+    """
+    return async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
 @pytest.fixture(scope="function")
-async def db_session():
-    """Fixture for an async test database session using SQLite."""
-    async with get_test_db_session() as session:
+async def db_session(engine):
+    SessionTest = async_sessionmaker(bind=engine, expire_on_commit=False)
+    async with SessionTest() as session:
         yield session
+        # явний rollback на випадок незакритих транзакцій
+        await session.rollback()
 
 
+# ========= dependency overrides: settings & get_db =========
+@pytest.fixture(scope="session", autouse=True)
+def override_settings_dependency():
+    """
+    Force the app to use TestSettings for the whole test session.
+    """
+    test_settings = TestSettings()
+    app.dependency_overrides[get_settings] = lambda: test_settings
+    yield
+    app.dependency_overrides.pop(get_settings, None)
+
+
+@pytest.fixture(scope="function", autouse=True)
+def override_db_dependency(db_session: AsyncSession):
+    """
+    Override get_db dependency to use the test SQLite session.
+    """
+    from db.session import get_db as real_get_db  # for key
+
+    async def _get_db_override():
+        yield db_session
+
+    app.dependency_overrides[real_get_db] = _get_db_override
+    yield
+    app.dependency_overrides.pop(real_get_db, None)
+
+
+# ========= Celery isolation (no Redis calls) =========
+@pytest.fixture(scope="function", autouse=True)
+def isolate_celery(monkeypatch):
+    """
+    Prevent any real Celery communication:
+    - Patch celery app.send_task to a no-op stub.
+    - If code sometimes calls .delay on tasks, we patch those too (best-effort).
+    """
+    try:
+        from core.celery_config import app as celery_app
+        monkeypatch.setattr(
+            celery_app,
+            "send_task",
+            lambda *args, **kwargs: SimpleNamespace(id="test-task-id", state="SUCCESS"),
+            raising=True,
+        )
+    except Exception:
+        # If celery app fails to import in tests, ignore. Endpoints might not touch it.
+        pass
+
+    # Optionally mark Celery eager if some tasks are imported directly
+    os.environ.setdefault("CELERY_TASK_ALWAYS_EAGER", "1")
+
+
+# ========= JWT manager (helper) =========
 @pytest.fixture(scope="function")
-def jwt_manager(settings):
-    """Fixture for JWTAuthManager."""
+def jwt_manager():
+    """
+    Construct JWTAuthManager with test settings.
+    """
+    s = TestSettings()
     return JWTAuthManager(
-        secret_key_access=settings.SECRET_KEY_ACCESS,
-        secret_key_refresh=settings.SECRET_KEY_REFRESH,
-        secret_key_user_interaction=settings.SECRET_KEY_USER_INTERACTION,
-        algorithm=settings.JWT_SIGNING_ALGORITHM,
+        secret_key_access=s.SECRET_KEY_ACCESS,
+        secret_key_refresh=s.SECRET_KEY_REFRESH,
+        secret_key_user_interaction=s.SECRET_KEY_USER_INTERACTION,
+        algorithm=s.JWT_SIGNING_ALGORITHM,
     )
 
 
+# ========= HTTP client =========
 @pytest.fixture(scope="function")
 async def client():
-    """Fixture for an async HTTP client to test FastAPI endpoints."""
+    """
+    Async HTTP client using in-process ASGITransport.
+    """
     transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as async_client:
-        yield async_client
+    async with AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
 
 
+# ========= DB helpers =========
 @pytest.fixture(scope="function")
 async def reset_db(db_session: AsyncSession):
-    """Fixture to reset the test database."""
-    await db_session.execute(text("DELETE FROM users;"))
-    await db_session.execute(text("DELETE FROM user_roles;"))
+    """
+    Truncate critical tables between tests. Adjust table names to your schema.
+    """
+    # If you use foreign keys, consider disabling/enabling FK checks on SQLite.
+    await db_session.execute(text("PRAGMA foreign_keys = OFF;"))
+    for tbl in ("users", "user_roles"):
+        try:
+            await db_session.execute(text(f"DELETE FROM {tbl};"))
+        except Exception:
+            # ignore if table doesn't exist in current test context
+            pass
     await db_session.commit()
-    await db_session.rollback()
+    await db_session.execute(text("PRAGMA foreign_keys = ON;"))
 
 
 @pytest.fixture(scope="function")
 async def setup_roles(db_session: AsyncSession, reset_db):
-    """Fixture to create user roles in the test database."""
+    """
+    Create default roles for tests.
+    """
+    try:
+        from models.user import UserRoleModel, UserRoleEnum
+    except Exception as e:
+        pytest.skip(f"User models not available: {e}")
+
     roles = [
         UserRoleModel(name=UserRoleEnum.USER),
         UserRoleModel(name=UserRoleEnum.ADMIN),
@@ -80,26 +242,63 @@ async def setup_roles(db_session: AsyncSession, reset_db):
 
 @pytest.fixture(scope="function")
 async def test_user(db_session: AsyncSession, setup_roles):
-    """Fixture to create a test user in the database."""
+    """
+    Create a test user with USER role.
+    """
+    try:
+        from models.user import UserModel, UserRoleModel, UserRoleEnum
+        from sqlalchemy.future import select
+    except Exception as e:
+        pytest.skip(f"User models not available: {e}")
+
     user = UserModel.create(email="testuser@example.com", raw_password="StrongPass123!")
-    user.role_id = (
-        (await db_session.execute(select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER)))
-        .scalars()
-        .first()
-        .id
-    )
+    role = (
+        await db_session.execute(select(UserRoleModel).where(UserRoleModel.name == UserRoleEnum.USER))
+    ).scalars().first()
+    user.role_id = role.id
     db_session.add(user)
     await db_session.commit()
     await db_session.refresh(user)
     return user
 
 
-@pytest.fixture(scope="function")
-def mock_verefy_invite():
-    """Fixture to mock the verefy_invite function."""
-    from services.auth import verefy_invite
+@pytest.fixture
+def patch_verify_invite(monkeypatch):
+    def _fake_verify_invite(user_data, jwt_manager):
+        # Повертаємо мінімум того, що очікує роутер
+        return {
+            "user_email": user_data.email,
+            "role_id": 1,  # існуюча роль у тестовій БД (див. п.3 нижче)
+        }
+    monkeypatch.setattr("services.auth.verify_invite", _fake_verify_invite)
+    return _fake_verify_invite
 
-    mock = AsyncMock(wraps=verefy_invite)
-    app.dependency_overrides[verefy_invite] = lambda: mock
-    yield mock
-    app.dependency_overrides.pop(verefy_invite, None)
+
+@pytest.fixture(scope="session")
+async def seed_roles(engine):
+    # створюємо ролі один раз за сесію
+    async with engine.begin() as conn:
+        await conn.execute(
+            insert(UserRoleModel),
+            [
+                {"name": UserRoleEnum.USER},
+                {"name": UserRoleEnum.ADMIN},
+                {"name": UserRoleEnum.VEHICLE_MANAGER},
+                {"name": UserRoleEnum.PART_MANAGER},
+            ],
+        )
+
+@pytest.fixture
+async def user_role_id(db_session: AsyncSession, seed_roles):
+    row = await db_session.execute(
+        select(UserRoleModel.id).where(UserRoleModel.name == UserRoleEnum.USER)
+    )
+    return row.scalar_one()
+
+async def create_user_with_role(db_session: AsyncSession, email: str, password: str, role_id: int) -> UserModel:
+    u = UserModel.create(email=email, raw_password=password)
+    u.role_id = role_id
+    db_session.add(u)
+    await db_session.commit()
+    await db_session.refresh(u)
+    return u
