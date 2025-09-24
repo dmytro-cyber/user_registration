@@ -50,7 +50,7 @@ class BiddingFeeScraper(FeeScraperStrategy):
                     if "-" in price_range:
                         min_price, max_price = price_range.split(" - ")
                         # Remove '$' and ',' before converting to float
-                        min_price = float(min_price.replace("$", "").replace(",", "")) if min_price != "$0" else 0.0
+                        min_price = float(min_price.replace("$", "").replace(",", "").replace("+" "")) if min_price != "$0" else 0.0
                         max_price = (
                             float(max_price.replace("$", "").replace(",", "").replace("+", ""))
                             if max_price != "$15,000.00+"
