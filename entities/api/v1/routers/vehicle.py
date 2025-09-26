@@ -151,112 +151,103 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info("Fetching filter options for cars", extra=extra)
 
-    try:
-        async with db.begin():
-            active_filter = CarModel.relevance == RelevanceStatus.ACTIVE
+    active_filter = CarModel.relevance == RelevanceStatus.ACTIVE
 
-            auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None), active_filter)
-            auctions = [row[0] for row in (await db.execute(auction_query)).fetchall()]
+    auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None), active_filter)
+    auctions = [row[0] for row in (await db.execute(auction_query)).fetchall()]
 
-            condition_assesstments_query = select(
-                distinct(ConditionAssessmentModel.issue_description)
-            ).where(ConditionAssessmentModel.issue_description.isnot(None))
-            condition_assesstments = [row[0] for row in (await db.execute(condition_assesstments_query)).fetchall()]
+    condition_assesstments_query = select(
+        distinct(ConditionAssessmentModel.issue_description)
+    ).where(ConditionAssessmentModel.issue_description.isnot(None))
+    condition_assesstments = [row[0] for row in (await db.execute(condition_assesstments_query)).fetchall()]
 
-            auction_name_query = select(distinct(CarModel.auction_name)).where(
-                CarModel.auction_name.isnot(None), active_filter
-            )
-            auction_names = [row[0] for row in (await db.execute(auction_name_query)).fetchall()]
+    auction_name_query = select(distinct(CarModel.auction_name)).where(
+        CarModel.auction_name.isnot(None), active_filter
+    )
+    auction_names = [row[0] for row in (await db.execute(auction_name_query)).fetchall()]
 
-            query = select(CarModel.make, CarModel.model).where(
-                CarModel.make.isnot(None), CarModel.model.isnot(None), active_filter
-            ).distinct()
-            make_model_map = defaultdict(list)
-            for make, model in (await db.execute(query)).fetchall():
-                make_model_map[make].append(model)
-            make_model_map = dict(make_model_map)
+    query = select(CarModel.make, CarModel.model).where(
+        CarModel.make.isnot(None), CarModel.model.isnot(None), active_filter
+    ).distinct()
+    make_model_map = defaultdict(list)
+    for make, model in (await db.execute(query)).fetchall():
+        make_model_map[make].append(model)
+    make_model_map = dict(make_model_map)
 
-            transmission_query = select(distinct(CarModel.transmision)).where(
-                CarModel.transmision.isnot(None), active_filter
-            )
-            transmissions = [row[0] for row in (await db.execute(transmission_query)).fetchall()]
+    transmission_query = select(distinct(CarModel.transmision)).where(
+        CarModel.transmision.isnot(None), active_filter
+    )
+    transmissions = [row[0] for row in (await db.execute(transmission_query)).fetchall()]
 
-            body_style_query = select(distinct(CarModel.body_style)).where(
-                CarModel.body_style.isnot(None), active_filter
-            )
-            body_styles = [row[0] for row in (await db.execute(body_style_query)).fetchall()]
+    body_style_query = select(distinct(CarModel.body_style)).where(
+        CarModel.body_style.isnot(None), active_filter
+    )
+    body_styles = [row[0] for row in (await db.execute(body_style_query)).fetchall()]
 
-            vehicle_type_query = select(distinct(CarModel.vehicle_type)).where(
-                CarModel.vehicle_type.isnot(None), active_filter
-            )
-            vehicle_types = [row[0] for row in (await db.execute(vehicle_type_query)).fetchall()]
+    vehicle_type_query = select(distinct(CarModel.vehicle_type)).where(
+        CarModel.vehicle_type.isnot(None), active_filter
+    )
+    vehicle_types = [row[0] for row in (await db.execute(vehicle_type_query)).fetchall()]
 
-            fuel_type_query = select(distinct(CarModel.fuel_type)).where(
-                CarModel.fuel_type.isnot(None), active_filter
-            )
-            fuel_types = [row[0] for row in (await db.execute(fuel_type_query)).fetchall()]
+    fuel_type_query = select(distinct(CarModel.fuel_type)).where(
+        CarModel.fuel_type.isnot(None), active_filter
+    )
+    fuel_types = [row[0] for row in (await db.execute(fuel_type_query)).fetchall()]
 
-            drive_type_query = select(distinct(CarModel.drive_type)).where(
-                CarModel.drive_type.isnot(None), active_filter
-            )
-            drive_types = [row[0] for row in (await db.execute(drive_type_query)).fetchall()]
+    drive_type_query = select(distinct(CarModel.drive_type)).where(
+        CarModel.drive_type.isnot(None), active_filter
+    )
+    drive_types = [row[0] for row in (await db.execute(drive_type_query)).fetchall()]
 
-            condition_query = select(distinct(CarModel.condition)).where(
-                CarModel.condition.isnot(None), active_filter
-            )
-            conditions = [row[0] for row in (await db.execute(condition_query)).fetchall()]
+    condition_query = select(distinct(CarModel.condition)).where(
+        CarModel.condition.isnot(None), active_filter
+    )
+    conditions = [row[0] for row in (await db.execute(condition_query)).fetchall()]
 
-            engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(
-                CarModel.engine_cylinder.isnot(None), active_filter
-            )
-            engine_cylinders = [row[0] for row in (await db.execute(engine_cylinder_query)).fetchall()]
+    engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(
+        CarModel.engine_cylinder.isnot(None), active_filter
+    )
+    engine_cylinders = [row[0] for row in (await db.execute(engine_cylinder_query)).fetchall()]
 
-            location_query = select(distinct(CarModel.location)).where(
-                CarModel.location.isnot(None), active_filter
-            )
-            locations = [row[0] for row in (await db.execute(location_query)).fetchall()]
+    location_query = select(distinct(CarModel.location)).where(
+        CarModel.location.isnot(None), active_filter
+    )
+    locations = [row[0] for row in (await db.execute(location_query)).fetchall()]
 
-            year_range_query = select(func.min(CarModel.year), func.max(CarModel.year)).where(active_filter)
-            year_min, year_max = (await db.execute(year_range_query)).fetchone()
-            year_range = {"min": year_min, "max": year_max} if year_min and year_max else None
+    year_range_query = select(func.min(CarModel.year), func.max(CarModel.year)).where(active_filter)
+    year_min, year_max = (await db.execute(year_range_query)).fetchone()
+    year_range = {"min": year_min, "max": year_max} if year_min and year_max else None
 
-            mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage)).where(active_filter)
-            mileage_min, mileage_max = (await db.execute(mileage_range_query)).fetchone()
-            mileage_range = {"min": mileage_min, "max": mileage_max} if mileage_min and mileage_max else None
+    mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage)).where(active_filter)
+    mileage_min, mileage_max = (await db.execute(mileage_range_query)).fetchone()
+    mileage_range = {"min": mileage_min, "max": mileage_max} if mileage_min and mileage_max else None
 
-            accident_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count)).where(active_filter)
-            accident_count_min, accident_count_max = (await db.execute(accident_range_query)).fetchone()
-            accident_count_range = {"min": accident_count_min, "max": accident_count_max} if accident_count_min and accident_count_max else None
+    accident_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count)).where(active_filter)
+    accident_count_min, accident_count_max = (await db.execute(accident_range_query)).fetchone()
+    accident_count_range = {"min": accident_count_min, "max": accident_count_max} if accident_count_min and accident_count_max else None
 
-            owners_range_query = select(func.min(CarModel.owners), func.max(CarModel.owners)).where(active_filter)
-            owners_min, owners_max = (await db.execute(owners_range_query)).fetchone()
-            owners_range = {"min": owners_min, "max": owners_max} if owners_min and owners_max else None
+    owners_range_query = select(func.min(CarModel.owners), func.max(CarModel.owners)).where(active_filter)
+    owners_min, owners_max = (await db.execute(owners_range_query)).fetchone()
+    owners_range = {"min": owners_min, "max": owners_max} if owners_min and owners_max else None
 
-        return CarFilterOptionsSchema(
-            auctions=auctions,
-            auction_names=auction_names,
-            makes_and_models=make_model_map,
-            locations=locations,
-            years=year_range,
-            mileage_range=mileage_range,
-            accident_count_range=accident_count_range,
-            owners_range=owners_range,
-            condition_assesstments=condition_assesstments,
-            body_styles=body_styles,
-            vehicle_types=vehicle_types,
-            transmissions=transmissions,
-            drive_types=drive_types,
-            engine_cylinders=engine_cylinders,
-            fuel_types=fuel_types,
-            conditions=conditions,
-        )
-
-    except Exception as e:
-        logger.error(f"Error fetching filter options: {str(e)}", extra=extra)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error fetching filter options",
-        )
+    return CarFilterOptionsSchema(
+        auctions=auctions,
+        auction_names=auction_names,
+        makes_and_models=make_model_map,
+        locations=locations,
+        years=year_range,
+        mileage_range=mileage_range,
+        accident_count_range=accident_count_range,
+        owners_range=owners_range,
+        condition_assesstments=condition_assesstments,
+        body_styles=body_styles,
+        vehicle_types=vehicle_types,
+        transmissions=transmissions,
+        drive_types=drive_types,
+        engine_cylinders=engine_cylinders,
+        fuel_types=fuel_types,
+        conditions=conditions,
+    )
 
 
 @router.get(
