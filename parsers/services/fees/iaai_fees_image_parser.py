@@ -1,185 +1,253 @@
-import json
-import logging
-import os
+from typing import Dict, List, Tuple
+from itertools import zip_longest
 import re
-from datetime import datetime
+import statistics
 from io import BytesIO
+import os
 
-import pytesseract
-from bs4 import BeautifulSoup
-from cairosvg import svg2png
-from fastapi import FastAPI, File, HTTPException, UploadFile
 from PIL import Image
+import pytesseract
+from cairosvg import svg2png
+import logging
 
-# Set up logging for debugging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Path to Tesseract executable for Linux (adjust if necessary)
-pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
+
+# ------------------------ OCR / image helpers ------------------------
+
+def _binarize(img: Image.Image, thr: int = 180) -> Image.Image:
+    """
+    Convert to grayscale and apply a fixed threshold. Returns 0/255 'L' image.
+    """
+    g = img.convert("L")
+    bw = g.point(lambda x: 0 if x < thr else 255, mode="1")
+    return bw.convert("L")
 
 
-def parse_svg_table(svg_file_path):
-    """Convert SVG file to PNG and parse fee table via OCR (supports open-ended ranges like $15,000+)."""
-    pytesseract.pytesseract.tesseract_cmd = "/usr/bin/tesseract"
-    if not os.path.exists(svg_file_path):
-        logger.error(f"SVG file {svg_file_path} not found.")
-        return {}
+def _vertical_content_segments(bw_img: Image.Image) -> List[Tuple[int, int]]:
+    """
+    Find horizontal 'content' segments (potential columns) using vertical projection.
+    A segment is a contiguous x-range where dark pixel count exceeds a data-driven threshold.
+    """
+    w, h = bw_img.size
+    pix = bw_img.load()
+    proj = []
+    for x in range(w):
+        dark = 0
+        # sample every 2nd pixel in height for speed (robust enough for wide tables)
+        for y in range(0, h, 2):
+            if pix[x, y] < 128:
+                dark += 1
+        proj.append(dark)
 
-    logger.info(f"Processing SVG file: {svg_file_path}")
+    # Smooth projection to stabilize thresholds
+    win = max(7, int(w * 0.005))
+    smoothed = []
+    for i in range(w):
+        left = max(0, i - win)
+        right = min(w, i + win + 1)
+        smoothed.append(statistics.mean(proj[left:right]))
 
-    # --- SVG -> PNG ---
-    try:
-        with open(svg_file_path, "rb") as svg_file:
-            png_data = svg2png(bytestring=svg_file.read(), output_width=2000)
-        img = Image.open(BytesIO(png_data))
-        img = img.convert("L").point(lambda x: 0 if x < 128 else 255)  # простий бінар
-        # tesseract: psm 6 (один блок із декількома рядками)
-        text = pytesseract.image_to_string(img, config="--oem 3 --psm 6")
-        logger.debug(f"OCR raw text:\n{text}")
-    except Exception as e:
-        logger.error(f"OCR pipeline failed: {e}")
-        return {}
+    # Dynamic threshold: values clearly above "background"
+    # Use median + k * MAD-like factor for robustness
+    med = statistics.median(smoothed)
+    # fallback if all zeros
+    spread = statistics.median([abs(v - med) for v in smoothed]) or 1.0
+    thr = med + 0.75 * spread
 
-    # --- helpers ---
+    mask = [v > thr for v in smoothed]
+
+    # Build segments
+    segs: List[Tuple[int, int]] = []
+    s = None
+    for i, m in enumerate(mask):
+        if m and s is None:
+            s = i
+        elif not m and s is not None:
+            segs.append((s, i - 1))
+            s = None
+    if s is not None:
+        segs.append((s, w - 1))
+
+    # Merge very small gaps or very narrow segments
+    merged: List[Tuple[int, int]] = []
+    MIN_SEG_W = max(10, int(w * 0.03))
+    i = 0
+    while i < len(segs):
+        a, b = segs[i]
+        # skip tiny segments
+        if (b - a + 1) < MIN_SEG_W:
+            i += 1
+            continue
+        j = i + 1
+        while j < len(segs):
+            a2, b2 = segs[j]
+            # if gap between segments is very small, merge
+            if (a2 - b) <= int(w * 0.02):
+                b = b2
+                j += 1
+            else:
+                break
+        merged.append((a, b))
+        i = j
+
+    if not merged:
+        # fallback: treat whole width as a single content block
+        merged = [(int(w * 0.05), int(w * 0.95))]
+
+    return merged
+
+
+def _ocr_lines(img: Image.Image) -> List[str]:
+    """
+    OCR a column crop into clean text lines.
+    """
+    config = "--oem 3 --psm 6"
+    raw = pytesseract.image_to_string(img, config=config)
+
     def _clean_line(s: str) -> str:
         s = s.strip()
         s = s.replace("—", "-").replace("–", "-")
-        s = s.replace("O", "0")  # часта OCR-помилка
-        # прибрати тисячні розділювачі
-        s = re.sub(r"(?<=\d),(?=\d)", "", s)
-        # нормалізувати пробіли
+        s = s.replace("O", "0")  # common OCR error for zero
+        s = re.sub(r"(?<=\d),(?=\d)", "", s)  # remove thousand separators in numbers
         s = re.sub(r"\s+", " ", s)
         return s
 
-    def _to_float(num_str: str) -> float:
-        return float(num_str.replace(",", ""))
+    lines = [_clean_line(l) for l in raw.split("\n")]
+    return [l for l in lines if l]
 
-    # патерни
-    p_range_fee   = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*-\s*\$?([\d,]+(?:\.\d{1,2})?)\s*\$?([\d,]+(?:\.\d{1,2})?)\s*$")
-    p_range_free  = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*-\s*\$?([\d,]+(?:\.\d{1,2})?)\s*(FREE|NO\s*FEE)\s*$", re.I)
-    p_open_pct_in = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*\+\s*(\d+(?:\.\d+)?)\s*%(\s*of\s*sale\s*price)?\s*$", re.I)
-    p_open_amt_in = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*\+\s*\$?([\d,]+(?:\.\d{1,2})?)\s*$")
-    p_open_min    = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*\+\s*$")
 
-    p_pct_only    = re.compile(r"(\d+(?:\.\d+)?)\s*%(\s*of\s*sale\s*price)?\s*$", re.I)
-    p_amt_only    = re.compile(r"^\$?([\d,]+(?:\.\d{1,2})?)\s*$")
-    p_free_only   = re.compile(r"^(FREE|NO\s*FEE)\s*$", re.I)
+# ------------------------ parsing helpers ------------------------
 
-    lines = [_clean_line(l) for l in text.split("\n") if _clean_line(l)]
-    logger.info(f"OCR lines: {len(lines)}")
+def _normalize_price_cell(cell: str, open_cap: float = 1_000_000.0) -> List[str]:
+    """
+    Normalize a price cell into canonical keys:
+      - "$11500 - $11999.99" -> ["11500.00-11999.99"]
+      - "$15000+" -> ["15000.00+", "15000.00-1000000.00"]
+    Returns empty list if not parseable.
+    """
+    s = cell.strip()
+    s = s.replace(",", "")
+    # "$A - $B"
+    m = re.match(r"^\$?(\d+(?:\.\d{1,2})?)\s*-\s*\$?(\d+(?:\.\d{1,2})?)$", s)
+    if m:
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return [f"{lo:.2f}-{hi:.2f}"]
+    # "$A+"
+    m = re.match(r"^\$?(\d+(?:\.\d{1,2})?)\s*\+$", s)
+    if m:
+        lo = float(m.group(1))
+        return [f"{lo:.2f}+", f"{lo:.2f}-{open_cap:.2f}"]
+    return []
 
-    fees: dict[str, float | str] = {}
-    OPEN_CAP = 1_000_000.00
 
-    pending_min: float | None = None  # для кейсу "$15000+"
-    i = 0
-    while i < len(lines):
-        line = lines[i]
+def _parse_fee_cell(cell: str) -> float | str | None:
+    """
+    Parse fee cell to:
+      - float for dollar fees ("$500.00" -> 500.0)
+      - string "<pct>% of sale price" for percentages ("6%" or "6% of sale price")
+      - 0.0 for FREE / NO FEE
+      - None if not recognizable
+    """
+    s = cell.strip()
+    s = s.replace(",", "")
+    # FREE
+    if re.search(r"^(FREE|NO\s*FEE)$", s, re.I):
+        return 0.0
+    # percent
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%(\s*of\s*sale\s*price)?", s, re.I)
+    if m:
+        pct = float(m.group(1))
+        return f"{pct}% of sale price"
+    # dollars
+    m = re.match(r"^\$?(\d+(?:\.\d{1,2})?)$", s)
+    if m:
+        return float(m.group(1))
+    return None
 
-        # 1) Фіксований діапазон із фіксованою сумою: "$11500 - $11999.99 $860.00"
-        m = p_range_fee.match(line)
-        if m:
-            lo, hi, fee_amt = map(_to_float, m.groups())
-            key = f"{lo:.2f}-{hi:.2f}"
-            fees[key] = float(fee_amt)
-            logger.debug(f"[range_fee] {key} -> {fees[key]}")
-            i += 1
+
+def _pair_rows(price_lines: List[str], fee_lines: List[str]) -> Dict[str, float | str | None]:
+    """
+    Pair price and fee lines by index; expand open-ended ranges into two keys.
+    """
+    OPEN_CAP = 1_000_000.0
+    out: Dict[str, float | str | None] = {}
+    for p_txt, f_txt in zip_longest(price_lines, fee_lines, fillvalue=""):
+        price_keys = _normalize_price_cell(p_txt or "", open_cap=OPEN_CAP)
+        if not price_keys:
             continue
+        fee_val = _parse_fee_cell(f_txt or "")
+        for k in price_keys:
+            out[k] = fee_val
+    return out
 
-        # 2) Фіксований діапазон FREE
-        m = p_range_free.match(line)
-        if m:
-            lo, hi = map(_to_float, m.group(1, 2))
-            key = f"{lo:.2f}-{hi:.2f}"
-            fees[key] = 0.0
-            logger.debug(f"[range_free] {key} -> 0.0")
-            i += 1
-            continue
 
-        # 3) Відкритий діапазон з відсотком у тому ж рядку: "$15000+ 6% of sale price"
-        m = p_open_pct_in.match(line)
-        if m:
-            lo = _to_float(m.group(1))
-            pct = float(m.group(2))
-            for key in (f"{lo:.2f}+", f"{lo:.2f}-{OPEN_CAP:.2f}"):
-                fees[key] = f"{pct}% of sale price"
-            logger.debug(f"[open_pct_inline] {lo}+, {pct}%")
-            i += 1
-            continue
+# ------------------------ main public function ------------------------
 
-        # 4) Відкритий діапазон із фіксованою сумою у тому ж рядку: "$15000+ $500.00"
-        m = p_open_amt_in.match(line)
-        if m:
-            lo = _to_float(m.group(1))
-            fee_amt = _to_float(m.group(2))
-            for key in (f"{lo:.2f}+", f"{lo:.2f}-{OPEN_CAP:.2f}"):
-                fees[key] = float(fee_amt)
-            logger.debug(f"[open_amt_inline] {lo}+ -> {fee_amt}")
-            i += 1
-            continue
+def parse_svg_table(svg_file_path: str) -> Dict[str, float | str | None]:
+    """
+    Parse a fee table from SVG or PNG by:
+      1) Rendering SVG -> PNG if needed.
+      2) Binarizing and detecting vertical content segments (columns).
+      3) Taking the left-most segment as the PRICE column, and the right-most segment as the FEE column.
+      4) OCRing both crops and pairing rows.
 
-        # 5) Лише мінімум "$15000+" → подивимось наступний рядок(и) на fee
-        m = p_open_min.match(line)
-        if m:
-            pending_min = _to_float(m.group(1))
-            # заглянемо вперед (1-2 рядки), бо інколи OCR ставить "6% of sale price" окремим рядком
-            consumed = False
-            for j in range(i + 1, min(i + 3, len(lines))):
-                nxt = lines[j]
-                mp = p_pct_only.search(nxt)
-                if mp:
-                    pct = float(mp.group(1))
-                    for key in (f"{pending_min:.2f}+", f"{pending_min:.2f}-{OPEN_CAP:.2f}"):
-                        fees[key] = f"{pct}% of sale price"
-                    logger.debug(f"[open_min -> pct_next] {pending_min}+ -> {pct}%")
-                    i = j + 1
-                    pending_min = None
-                    consumed = True
-                    break
-                ma = p_amt_only.match(nxt)
-                if ma:
-                    fee_amt = _to_float(ma.group(1))
-                    for key in (f"{pending_min:.2f}+", f"{pending_min:.2f}-{OPEN_CAP:.2f}"):
-                        fees[key] = float(fee_amt)
-                    logger.debug(f"[open_min -> amt_next] {pending_min}+ -> {fee_amt}")
-                    i = j + 1
-                    pending_min = None
-                    consumed = True
-                    break
-                mf = p_free_only.match(nxt)
-                if mf:
-                    for key in (f"{pending_min:.2f}+", f"{pending_min:.2f}-{OPEN_CAP:.2f}"):
-                        fees[key] = 0.0
-                    logger.debug(f"[open_min -> free_next] {pending_min}+ -> 0.0")
-                    i = j + 1
-                    pending_min = None
-                    consumed = True
-                    break
-            if consumed:
-                continue
-            # якщо не знайшли fee поруч — просто зафіксуємо відкритий інтервал без значення
-            for key in (f"{pending_min:.2f}+", f"{pending_min:.2f}-{OPEN_CAP:.2f}"):
-                fees[key] = None  # невідомий fee; заповниш пізніше або пропустиш
-            logger.warning(f"[open_min_only] {pending_min}+ -> fee not found nearby")
-            pending_min = None
-            i += 1
-            continue
+    No extra parameters; works for:
+      - 2 columns (takes 1 & 2)
+      - 3+ columns (takes 1 & last)
+    """
+    if not os.path.exists(svg_file_path):
+        logger.error(f"File not found: {svg_file_path}")
+        return {}
 
-        # 6) Якщо рядок містить лише fee (інколи OCR може знести ліву частину)
-        if p_pct_only.search(line) and pending_min is None:
-            # немає контексту price_from — пропускаємо
-            logger.warning(f"Percentage without base price range: {line}")
-            i += 1
-            continue
-        if p_amt_only.match(line) and pending_min is None:
-            logger.warning(f"Amount without base price range: {line}")
-            i += 1
-            continue
+    # Load/render image
+    try:
+        _, ext = os.path.splitext(svg_file_path.lower())
+        if ext == ".svg":
+            with open(svg_file_path, "rb") as f:
+                png_bytes = svg2png(bytestring=f.read(), output_width=2000)
+            img = Image.open(BytesIO(png_bytes)).convert("RGB")
+        else:
+            img = Image.open(svg_file_path).convert("RGB")
+    except Exception as e:
+        logger.error(f"Failed to open/render image: {e}")
+        return {}
 
-        # нічого не підійшло
-        logger.debug(f"[unmatched] {line}")
-        i += 1
+    # Binarize & detect segments
+    bw = _binarize(img)
+    segs = _vertical_content_segments(bw)
+    w, h = bw.size
 
-    logger.info(f"Parsed fees: {fees}")
+    # Choose left-most and right-most segments.
+    if len(segs) == 1:
+        # If only one big block found, split in half.
+        a, b = segs[0]
+        mid = (a + b) // 2
+        left_seg = (a, mid)
+        right_seg = (mid + 1, b)
+    else:
+        left_seg = segs[0]
+        right_seg = segs[-1]
+
+    # Crop with a small horizontal inset to avoid borders
+    def _crop(seg: Tuple[int, int]) -> Image.Image:
+        x0, x1 = seg
+        inset = max(2, int((x1 - x0) * 0.02))
+        return bw.crop((x0 + inset, 0, x1 - inset, h))
+
+    price_img = _crop(left_seg)
+    fee_img = _crop(right_seg)
+
+    try:
+        price_lines = _ocr_lines(price_img)
+        fee_lines = _ocr_lines(fee_img)
+    except Exception as e:
+        logger.error(f"OCR failed: {e}")
+        return {}
+
+    fees = _pair_rows(price_lines, fee_lines)
+    logger.info(
+        f"Parsed {len(fees)} rows from {os.path.basename(svg_file_path)} "
+        f"(segments={len(segs)}; left={left_seg}, right={right_seg})"
+    )
     return fees

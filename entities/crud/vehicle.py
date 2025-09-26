@@ -458,14 +458,15 @@ async def get_filtered_vehicles(
             raise HTTPException(status_code=404, detail=f"ZIP {zip_code} not found")
 
         lat1, lon1 = float(zip_data.lat), float(zip_data.lng)
-        distance_expr = (
-            3958.8
-            * func.acos(
-                func.sin(func.radians(bindparam("lat1"))) * func.sin(func.radians(USZipModel.lat))
-                + func.cos(func.radians(bindparam("lat1"))) * func.cos(func.radians(USZipModel.lat))
-                * func.cos(func.radians(USZipModel.lng) - func.radians(bindparam("lon1")))
-            )
-        ).label("distance")
+        dot = (
+            func.sin(func.radians(bindparam("lat1"))) * func.sin(func.radians(USZipModel.lat)) +
+            func.cos(func.radians(bindparam("lat1"))) * func.cos(func.radians(USZipModel.lat)) *
+            func.cos(func.radians(USZipModel.lng) - func.radians(bindparam("lon1")))
+        )
+
+        clamped = func.least(1.0, func.greatest(-1.0, dot))
+
+        distance_expr = (3958.8 * func.acos(clamped)).label("distance")
 
         zip_subq = (
             select(USZipModel.copart_name, USZipModel.iaai_name)
