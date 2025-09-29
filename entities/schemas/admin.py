@@ -5,12 +5,12 @@ from pydantic import BaseModel
 
 
 class FilterBase(BaseModel):
-    make: str | None
+    make: str | None = None
     model: str | None = None
-    year_from: int | None
-    year_to: int | None
-    odometer_min: int | None
-    odometer_max: int | None
+    year_from: int | None = None
+    year_to: int | None = None
+    odometer_min: int | None = None
+    odometer_max: int | None = None
 
 
 class FilterCreate(FilterBase):

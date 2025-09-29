@@ -108,6 +108,15 @@ async def engine(_test_db_file):
 
 
 @pytest.fixture(scope="session")
+def anyio_backend():
+    """
+    Force AnyIO to use asyncio backend for the whole test session.
+    This avoids ScopeMismatch with our session-scoped async fixtures.
+    """
+    return "asyncio"
+
+
+@pytest.fixture(scope="session")
 def async_session_factory(engine):
     """
     Factory for AsyncSession.

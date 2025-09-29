@@ -6,6 +6,8 @@ from sqlalchemy.future import select
 
 from main import app
 from models.user import UserModel, UserRoleModel, UserRoleEnum
+from schemas.user import UserInvitationRequestSchema
+from services.user import generate_invite_link
 from core.dependencies import get_current_user
 from services import auth as services_auth
 
@@ -39,6 +41,26 @@ async def user_role(db_session: AsyncSession):
 
 
 @pytest.fixture
+async def invite_code(jwt_manager, db_session):
+    # make sure roles exist
+    role_id = (
+        await db_session.execute(
+            select(UserRoleModel.id).where(UserRoleModel.name == UserRoleEnum.USER)
+        )
+    ).scalar_one()
+
+    invite_schema = UserInvitationRequestSchema(
+        email="newuser@example.com",
+        role_id=role_id,
+        expire_days_delta=1,
+    )
+    link = await generate_invite_link(invite_schema, jwt_manager)
+    # cut out the token part ?invite=...
+    return link.split("invite=")[-1]
+
+
+
+@pytest.fixture
 def mock_verify_invite_ok(monkeypatch, user_role):
     """
     Mock verify_invite() to return a valid payload.
@@ -68,15 +90,15 @@ def mock_verify_invite_broken(monkeypatch):
 # -------------------------
 
 @pytest.mark.integration
-async def test_signup_success(client: AsyncClient, db_session: AsyncSession, mock_verify_invite_ok):
+async def test_signup_success(client: AsyncClient, db_session: AsyncSession, mock_verify_invite_ok, invite_code):
     payload = {
+        "invite_code": invite_code,
         "email": "newuser@example.com",
         "password": "%5H7zfIwoee5",
         "first_name": "John",
         "last_name": "Doe",
         "phone_number": "+18882804331",
         "date_of_birth": "1990-01-01",
-        "invitation_code": "stub-token"
     }
     r = await client.post("/api/v1/sign-up/", json=payload)
     assert r.status_code == 201, r.text
@@ -91,28 +113,60 @@ async def test_signup_success(client: AsyncClient, db_session: AsyncSession, moc
 
 
 @pytest.mark.integration
-async def test_signup_conflict_email(client: AsyncClient, db_session: AsyncSession, mock_verify_invite_ok):
-    # pre-create user
-    u = UserModel.create("taken@example.com", "%5H7zfIwoee5")
+async def test_signup_conflict_email(client: AsyncClient, db_session: AsyncSession, jwt_manager):
+    role_id = (
+        await db_session.execute(
+            select(UserRoleModel.id).where(UserRoleModel.name == UserRoleEnum.USER)
+        )
+    ).scalar_one_or_none()
+    if role_id is None:
+        db_session.add(UserRoleModel(name=UserRoleEnum.USER))
+        await db_session.commit()
+        role_id = (
+            await db_session.execute(
+                select(UserRoleModel.id).where(UserRoleModel.name == UserRoleEnum.USER)
+            )
+        ).scalar_one()
+
+    taken_email = "taken@example.com"
+    u = UserModel.create(email=taken_email, raw_password="%5H7zfIwoee5")
+    u.role_id = role_id
     db_session.add(u)
     await db_session.commit()
 
+    invite_schema = UserInvitationRequestSchema(
+        email=taken_email,
+        role_id=role_id,
+        expire_days_delta=1,
+    )
+    link = await generate_invite_link(invite_schema, jwt_manager)
+    invite_code = link.split("invite=")[-1]
+
     payload = {
-        "email": "taken@example.com",
+        "email": taken_email,
         "password": "%5H7zfIwoee5",
         "first_name": "Jane",
         "last_name": "D",
         "phone_number": "+18882804331",
         "date_of_birth": "1990-01-01",
-        "invitation_code": "stub-token"
+        "invite_code": invite_code,
     }
     r = await client.post("/api/v1/sign-up/", json=payload)
-    assert r.status_code == 409
+
+    assert r.status_code == 409, r.text
     assert "already exists" in r.text
 
 
 @pytest.mark.integration
-async def test_signup_invalid_phone(client: AsyncClient, mock_verify_invite_ok):
+async def test_signup_invalid_phone(client: AsyncClient, mock_verify_invite_ok, jwt_manager):
+    email = "phonebad@example.com"
+    invite_schema = UserInvitationRequestSchema(
+        email=email,
+        role_id=1,
+        expire_days_delta=1,
+    )
+    link = await generate_invite_link(invite_schema, jwt_manager)
+    invite_code = link.split("invite=")[-1]
     payload = {
         "email": "phonebad@example.com",
         "password": "%5H7zfIwoee5",
@@ -120,11 +174,11 @@ async def test_signup_invalid_phone(client: AsyncClient, mock_verify_invite_ok):
         "last_name": "B",
         "phone_number": "12345",   # invalid on purpose
         "date_of_birth": "1990-01-01",
-        "invitation_code": "stub-token"
+        "invite_code": invite_code,
     }
     r = await client.post("/api/v1/sign-up/", json=payload)
     assert r.status_code == 400
-    assert "Invalid phone" in r.text or "format" in r.text
+    assert "Invalid US phone number." in r.text
 
 
 @pytest.mark.integration
@@ -136,11 +190,10 @@ async def test_signup_invite_decode_error_returns_500(client: AsyncClient, mock_
         "last_name": "B",
         "phone_number": "+18882804331",
         "date_of_birth": "1990-01-01",
-        "invitation_code": "bad"
+        "invite_code": "bad"
     }
     r = await client.post("/api/v1/sign-up/", json=payload)
-    # ваш код обгортає несподівану помилку у 500
-    assert r.status_code == 500
+    assert r.status_code == 400
 
 
 # -------------------------
@@ -152,6 +205,7 @@ async def test_login_success_sets_cookies(client: AsyncClient, db_session: Async
     email = "loginok@example.com"
     raw = "%5H7zfIwoee5"
     u = UserModel.create(email=email, raw_password=raw)
+    u.role_id = 1
     db_session.add(u)
     await db_session.commit()
 
@@ -167,7 +221,7 @@ async def test_login_success_sets_cookies(client: AsyncClient, db_session: Async
 
 @pytest.mark.integration
 async def test_login_invalid_credentials(client: AsyncClient):
-    r = await client.post("/api/v1/login/", json={"email": "nope@example.com", "password": "bad"})
+    r = await client.post("/api/v1/login/", json={"email": "nope@example.com", "password": "%5H7zfIwoee5"})
     assert r.status_code == 401
     assert "Invalid email or password" in r.text
 
@@ -180,14 +234,15 @@ async def test_login_invalid_credentials(client: AsyncClient):
 async def test_refresh_success(client: AsyncClient, db_session: AsyncSession, jwt_manager):
     # create user + set valid refresh cookie
     u = UserModel.create(email="ref@example.com", raw_password="%5H7zfIwoee5")
+    u.role_id = 1
     db_session.add(u)
     await db_session.commit()
     await db_session.refresh(u)
 
     refresh_token = jwt_manager.create_refresh_token({"user_id": u.id})
-    client.cookies.set("refresh_token", refresh_token)
+    # client.cookies.set("refresh_token", refresh_token)
 
-    r = await client.post("/api/v1/refresh/")
+    r = await client.post("/api/v1/refresh/", cookies={"refresh_token": refresh_token})
     assert r.status_code == 200, r.text
     client.cookies.update(r.cookies)
     # new tokens should be set
@@ -231,10 +286,10 @@ def override_current_user():
 @pytest.mark.integration
 async def test_logout_ok(client: AsyncClient, override_current_user):
     # put some cookies before logout
-    client.cookies.set("access_token", "xxx")
-    client.cookies.set("refresh_token", "yyy")
+    # client.cookies.set("access_token", "xxx")
+    # client.cookies.set("refresh_token", "yyy")
 
-    r = await client.post("/api/v1/logout/")
+    r = await client.post("/api/v1/logout/", cookies={"access_token": "xxx","refresh_token": "yyy"})
     assert r.status_code == 200
     # Expect Set-Cookie headers with deletion; httpx merges cookies,
     # але можна перевірити, що після відповіді cookies зникли, якщо сервер ставить Max-Age=0

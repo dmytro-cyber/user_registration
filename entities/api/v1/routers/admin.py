@@ -316,7 +316,6 @@ async def delete_filter(
             CarModel.year <= (db_filter.year_to or 3000),
             CarModel.mileage >= (db_filter.odometer_min or 0),
             CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
-            CarModel.user_id == current_user.id,
         )
 
         archived_query = select(CarModel.id).where(

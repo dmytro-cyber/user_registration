@@ -278,6 +278,11 @@ def parse_and_update_car(
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
             resp = http_get_with_retries(url, headers=headers, timeout=300.0)
             data = resp.json()
+            try:
+                resp.raise_for_status()
+            except Exception as e:
+                logger.info(f"Exception: {e} for VIN: {vin}")
+                return {"status": "exception", "vin": vin}
 
             # 4) update the vehicle under lock
             car_q = (
@@ -296,6 +301,7 @@ def parse_and_update_car(
 
             car.owners = data.get("owners")
             car.has_correct_vin = True
+            car.relevance = RelevanceStatus.ACTIVE
 
             if data.get("mileage") is not None and car.mileage is None:
                 try:
