@@ -4,6 +4,7 @@ import json
 import os
 from datetime import date, datetime
 from difflib import SequenceMatcher
+from typing import Dict
 from math import atan2, cos, radians, sin, sqrt
 
 from passlib.context import CryptContext
@@ -22,11 +23,71 @@ EARTH_RADIUS_MI = 3958.8
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 
-async def import_us_zips_from_csv(csv_path: str = "uszips.csv"):
+async def import_us_zips_from_csv(
+    csv_path: str = "uszips.csv",
+    iaai_path: str = "locations_iaai_standardized.json",
+    copart_path: str = "locations_copart_standardized.json",
+):
+    """
+    Import/refresh US ZIP records from a CSV and enrich them with IAAI/Copart location names.
+
+    Workflow:
+      1) Read `uszips.csv` and upsert basic ZIP info (zip, lat, lng, city, state_id, state_name).
+      2) Read two JSON files mapping ZIP -> location name:
+         - `locations_iaai_standardized.json` for IAAI (sets `iaai_name`)
+         - `locations_copart_standardized.json` for Copart (sets `copart_name`)
+      3) For matching ZIPs in DB, update `iaai_name` / `copart_name`.
+
+    JSON format supported:
+      - Flat map: {"12345": "Some Location", ...}
+      - Or nested under a known root: {"iaai": {...}} / {"copart": {...}} / {"data": {...}}
+
+    Args:
+        csv_path: Path to the ZIP CSV file.
+        iaai_path: Path to the IAAI ZIP->name JSON.
+        copart_path: Path to the Copart ZIP->name JSON.
+    """
+
+    def _read_json_map(path: str, root_keys: tuple[str, ...]) -> Dict[str, str]:
+        """
+        Read a JSON file and return a ZIP->name mapping.
+
+        Supports either:
+          - a flat dict: {"12345": "Name"}
+          - a dict with a root key that contains the map, e.g. {"iaai": {...}}.
+
+        Returns:
+            Dict[str, str]: Normalized ZIP->name map. Empty dict if file missing/invalid.
+        """
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                raw = json.load(f)
+        except FileNotFoundError:
+            print(f"⚠️  JSON not found: {path} — skipping.")
+            return {}
+        except Exception as e:
+            print(f"⚠️  Failed to read {path}: {e} — skipping.")
+            return {}
+
+        if isinstance(raw, dict):
+            # Nested root?
+            for k in root_keys:
+                if k in raw and isinstance(raw[k], dict):
+                    return {str(z).strip(): str(name).strip() for z, name in raw[k].items()}
+            # Flat dict?
+            if all(isinstance(k, str) for k in raw.keys()):
+                return {str(z).strip(): str(name).strip() for z, name in raw.items()}
+
+        print(f"⚠️  Unexpected JSON structure in {path}.")
+        return {}
+
+    created, updated = 0, 0
+    iaai_updates, copart_updates = 0, 0
+
     async with SessionLocal() as session:
+        # 1) CSV upsert of ZIP base data
         with open(csv_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
-            objects = []
 
             for row in reader:
                 try:
@@ -37,23 +98,66 @@ async def import_us_zips_from_csv(csv_path: str = "uszips.csv"):
                     state_id = row["state_id"].strip()
                     state_name = row["state_name"].strip()
 
-                    zip_obj = USZipModel(
-                        zip=zip_code,
-                        lat=lat,
-                        lng=lng,
-                        city=city,
-                        state_id=state_id,
-                        state_name=state_name,
-                        copart_name=None,
-                        iaai_name=None,
+                    # Check if the ZIP already exists
+                    res = await session.execute(
+                        select(USZipModel).where(USZipModel.zip == zip_code)
                     )
-                    objects.append(zip_obj)
-                except Exception as e:
-                    print(f"⚠️  Skipped: {e}")
+                    obj = res.scalars().first()
 
-            session.add_all(objects)
-            await session.commit()
-            print(f"✅ Created {len(objects)} ZIPs")
+                    if obj:
+                        # Update base fields (in case CSV has newer data)
+                        obj.lat = lat
+                        obj.lng = lng
+                        obj.city = city
+                        obj.state_id = state_id
+                        obj.state_name = state_name
+                        updated += 1
+                    else:
+                        obj = USZipModel(
+                            zip=zip_code,
+                            lat=lat,
+                            lng=lng,
+                            city=city,
+                            state_id=state_id,
+                            state_name=state_name,
+                            copart_name=None,
+                            iaai_name=None,
+                        )
+                        session.add(obj)
+                        created += 1
+
+                except Exception as e:
+                    print(f"⚠️  Skipped CSV row: {e}")
+
+        await session.commit()
+        print(f"✅ CSV: created={created}, updated={updated}")
+
+        # 2) JSON enrichment: IAAI / Copart names
+        iaai_map: Dict[str, str] = _read_json_map(iaai_path, root_keys=("iaai", "data"))
+        copart_map: Dict[str, str] = _read_json_map(copart_path, root_keys=("copart", "data"))
+
+        # Apply IAAI names
+        if iaai_map:
+            res = await session.execute(
+                select(USZipModel).where(USZipModel.zip.in_(list(iaai_map.keys())))
+            )
+            rows = res.scalars().all()
+            for row in rows:
+                row.iaai_name = iaai_map.get(row.zip)
+                iaai_updates += 1
+
+        # Apply Copart names
+        if copart_map:
+            res = await session.execute(
+                select(USZipModel).where(USZipModel.zip.in_(list(copart_map.keys())))
+            )
+            rows = res.scalars().all()
+            for row in rows:
+                row.copart_name = copart_map.get(row.zip)
+                copart_updates += 1
+
+        await session.commit()
+        print(f"✅ JSON: iaai_updates={iaai_updates}, copart_updates={copart_updates}")
 
 
 async def create_roles():
