@@ -62,6 +62,9 @@ class CarModel(Base):
     suggested_bid = Column(Float, nullable=True)
     avg_market_price = Column(Integer, nullable=True)
     fuel_type = Column(String, nullable=True)
+
+    # Additional
+    attempts = Column(Integer, default=0)
     is_checked = Column(Boolean, default=False)
 
     # Additional costs

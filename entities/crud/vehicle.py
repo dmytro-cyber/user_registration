@@ -130,7 +130,8 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
         existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
         if existing_vehicle:
             if existing_vehicle.relevance == RelevanceStatus.ACTIVE:
-                pass
+                if existing_vehicle.is_checked == False and existing_vehicle.attempts < 3:
+                    to_parse = True
             elif existing_vehicle.relevance == RelevanceStatus.ARCHIVAL and ivent == "update":
                 query = select(FilterModel).where(
                     FilterModel.make == vehicle_data.make,
@@ -143,6 +144,8 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                 filter_res = filter_ex.scalars().one_or_none()
                 if filter_res:
                     existing_vehicle.relevance = RelevanceStatus.ACTIVE
+                    existing_vehicle.attempts = 0
+                    existing_vehicle.is_checked = False
                     to_parse = True
                 else:
                     existing_vehicle.relevance = RelevanceStatus.IRRELEVANT
@@ -483,6 +486,7 @@ async def get_filtered_vehicles(
 
         if zip_names:
             base_ids = base_ids.filter(_str_in(CarModel.location, zip_names))
+            logger.info(f"ZIP ------> {zip_names}")
         else:
             # Force empty result if within radius there are no known yards.
             base_ids = base_ids.filter(False)

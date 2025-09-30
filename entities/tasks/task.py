@@ -15,6 +15,7 @@ from io import BytesIO
 from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
+import redis
 from sqlalchemy import and_, delete, func, select, create_engine, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session, selectinload
@@ -216,6 +217,7 @@ def parse_and_update_car(
                     logger.debug(
                         f"More than 3 sales history records for VIN={vin}. Not recommended."
                     )
+                    # keep original behavior
                     car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not car.recommendation_status_reasons:
                         car.recommendation_status_reasons = (
@@ -241,28 +243,7 @@ def parse_and_update_car(
             logger.warning(f"Sales history fetch failed for {vin}: {e}")
 
         try:
-            # 2) find a “current” vehicle
-            current_date = datetime.utcnow().date()
-            q_current = (
-                select(CarModel)
-                .where(
-                    and_(
-                        func.lower(CarModel.vehicle) == func.lower(car_name)
-                        if car_name
-                        else True,
-                        CarModel.mileage.between(mileage - 1500, mileage + 1500)
-                        if mileage
-                        else True,
-                        func.date(CarModel.created_at) == current_date,
-                        CarModel.predicted_total_investments.isnot(None),
-                    )
-                )
-                .limit(1)
-            )
-            existing_car = db.execute(q_current).scalars().first()
-
-            # 3) call the parser
-            only_history = "true" if existing_car else "false"
+            # 2) call the parser (no existing_car logic anymore)
             url = (
                 "http://parsers:8001/api/v1/parsers/scrape/dc"
                 f"?car_vin={vin}"
@@ -273,7 +254,7 @@ def parse_and_update_car(
                 f"&car_model={car_model}"
                 f"&car_year={car_year}"
                 f"&car_transmison={car_transmison}"
-                f"&only_history={only_history}"
+                f"&only_history=false"
             )
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
             resp = http_get_with_retries(url, headers=headers, timeout=300.0)
@@ -282,9 +263,11 @@ def parse_and_update_car(
                 resp.raise_for_status()
             except Exception as e:
                 logger.info(f"Exception: {e} for VIN: {vin}")
+                car.attempts += 1
+                db.commit()
                 return {"status": "exception", "vin": vin}
 
-            # 4) update the vehicle under lock
+            # 3) update the vehicle under lock
             car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
@@ -303,6 +286,7 @@ def parse_and_update_car(
             car.has_correct_vin = True
             car.relevance = RelevanceStatus.ACTIVE
 
+            # mileage correctness flag
             if data.get("mileage") is not None and car.mileage is None:
                 try:
                     car.has_correct_mileage = int(car.mileage) == int(
@@ -313,6 +297,7 @@ def parse_and_update_car(
             else:
                 car.has_correct_mileage = False
 
+            # accidents vs. assessments
             car.accident_count = data.get("accident_count", 0)
             if car.condition_assessments and car.accident_count == 0:
                 car.has_correct_accidents = False
@@ -321,32 +306,15 @@ def parse_and_update_car(
             else:
                 car.has_correct_accidents = True
 
-            # average prices
-            prices = [
-                int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)
-            ]
-            if existing_car and existing_car.avg_market_price:
-                car.avg_market_price = existing_car.avg_market_price
-            else:
-                car.avg_market_price = (
-                    int(sum(prices) / len(prices)) if prices else 0
-                )
+            # average market price from available sources
+            prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
+            car.avg_market_price = int(sum(prices) / len(prices)) if prices else 0
 
-            # ROI / investments / margin
+            # ROI / investments / margin (no reuse from existing_car)
             default_roi = _load_default_roi(db)
-            if existing_car:
-                car.predicted_total_investments = (
-                    existing_car.predicted_total_investments
-                )
-                car.predicted_profit_margin = existing_car.predicted_profit_margin
-                car.predicted_profit_margin_percent = (
-                    existing_car.predicted_profit_margin_percent
-                )
-            elif default_roi:
-                car.predicted_total_investments = (
-                    car.avg_market_price / (1 + default_roi.roi / 100.0)
-                    if car.avg_market_price
-                    else 0.0
+            if default_roi and car.avg_market_price:
+                car.predicted_total_investments = car.avg_market_price / (
+                    1 + default_roi.roi / 100.0
                 )
                 car.predicted_profit_margin_percent = default_roi.profit_margin
                 car.predicted_profit_margin = car.avg_market_price * (
@@ -367,8 +335,7 @@ def parse_and_update_car(
 
             # suggested bid / ROI
             car.suggested_bid = int(
-                (car.predicted_total_investments or 0.0)
-                - (car.sum_of_investments or 0.0)
+                (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
             )
             car.predicted_roi = (
                 default_roi.roi
@@ -376,10 +343,11 @@ def parse_and_update_car(
                 else 0.0
             )
 
+            # recommendation baseline if no reasons set
             if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
-            # 5) HTML to S3
+            # 4) HTML to S3
             html_data = data.get("html_data")
             if html_data:
                 s3_storage = S3StorageClient(
@@ -394,7 +362,7 @@ def parse_and_update_car(
                 )
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
-
+            car.is_checked = True
             db.add(car)
             db.commit()
             logger.info(f"parse_and_update_car: updated VIN={vin}")
@@ -622,7 +590,9 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
             CarModel.year <= (filt.year_to or 3000),
             CarModel.mileage >= (filt.odometer_min or 0),
             CarModel.mileage <= (filt.odometer_max or 10_000_000),
-            CarModel.avg_market_price.is_(None)
+            CarModel.avg_market_price.is_(None),
+            CarModel.is_checked == False,
+            CarModel.attempts < 3 
         ]
         if filt.model is not None:
             conditions.append(CarModel.model == filt.model)
@@ -801,8 +771,6 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
         db.add(existing_vehicle)
 
     with SessionLocal() as db:
-        utc_now = datetime.now(timezone.utc)
-
         vin_rows = db.execute(
             select(CarModel.vin).where(
                 and_(
@@ -874,17 +842,16 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 ).scalars().first()
 
                 if not existing_vehicle:
-                    # Theoretically should not happen (we selected from DB above),
-                    # but let's guard so the loop doesn't break.
                     logger.info("VIN %s: not found during update stage", vin)
                     continue
 
                 _apply_update_from_schema(db, existing_vehicle, vehicle_info)
                 if (
-                    existing_vehicle.auction_name and existing_vehicle.auction_name.lower() != "buynow"
-                    and ((existing_vehicle.date is not None
-                    and existing_vehicle.date <= func.now())
-                    or existing_vehicle.date is None
+                    existing_vehicle.auction_name
+                    and existing_vehicle.auction_name.lower() != "buynow"
+                    and (
+                        (existing_vehicle.date is not None and existing_vehicle.date <= func.now())
+                        or existing_vehicle.date is None
                     )
                 ):
                     existing_vehicle.relevance = RelevanceStatus.ARCHIVAL
@@ -901,5 +868,27 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 logger.exception("VIN %s: update failed: %s", vin, e)
                 stats["errors"] += 1
 
+        # === NEW: hard delete all IRRELEVANT with past date ===
+        try:
+            # Hard-delete cars where relevance == IRRELEVANT and date < now
+            del_stmt = (
+                delete(CarModel)
+                .where(
+                    and_(
+                        CarModel.relevance == RelevanceStatus.IRRELEVANT,
+                        CarModel.date < func.now(),
+                    )
+                )
+                .execution_options(synchronize_session=False)
+            )
+            result = db.execute(del_stmt)
+            db.commit()
+            deleted = result.rowcount or 0
+            logger.info("Cleanup: deleted %d IRRELEVANT cars with past date", deleted)
+        except Exception as e:
+            db.rollback()
+            logger.exception("Cleanup delete failed: %s", e)
+
     logger.info("Expired auction update finished: %s", stats)
     return stats
+
