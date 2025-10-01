@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   redis:
     image: 'redis:latest'
@@ -75,6 +77,9 @@ services:
     mem_limit: 3g
     cpus: 1.5
     restart: always
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     logging:
       driver: "json-file"
       options:
@@ -104,6 +109,9 @@ services:
     mem_limit: 4g
     cpus: 2.0
     restart: always
+    depends_on:
+      migrator:
+        condition: service_completed_successfully
     logging:
       driver: "json-file"
       options:
@@ -128,6 +136,7 @@ services:
       - 8.8.8.8
     mem_limit: 512m
     cpus: 0.3
+    restart: "no"   # one-shot migrator
     logging:
       driver: "json-file"
       options:
@@ -147,6 +156,8 @@ services:
     depends_on:
       redis_1:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
@@ -175,6 +186,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     volumes:
       - ./parsers:/usr/parsers/fastapi
     networks:
@@ -203,6 +216,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     volumes:
       - ./parsers:/usr/parsers/fastapi
     networks:
@@ -231,6 +246,8 @@ services:
     depends_on:
       redis_1:
         condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:

@@ -3,7 +3,7 @@ import logging.handlers
 import os
 import re
 from datetime import datetime
-from typing import List
+from typing import List, Optional, Tuple
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
@@ -517,117 +517,154 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
         )
 
 
+OPEN_CAP = 1_000_000.0
+
+
+def _parse_range_key(range_key: str) -> tuple[float | None, float | None]:
+    """'0.00-99.99' -> (0.0, 99.99); '15000.00+' -> (15000.0, 1e6)"""
+    k = (range_key or "").strip()
+    if "-" in k:
+        a, b = k.split("-", 1)
+        return float(a), float(b)
+    # A+
+    v = float(k.replace("+", ""))
+    return v, OPEN_CAP
+
+
+def _try_parse_amount(raw) -> Optional[Tuple[float, bool]]:
+    """
+    Convert raw amount into (value, is_percent). None якщо не парситься.
+    Підтримка:
+      - float/int
+      - "$500.00" / "500"
+      - "6%" / "6% of sale price"
+      - "FREE"/"NO FEE" -> (0.0, False)
+    """
+    if raw is None:
+        return None
+
+    if isinstance(raw, (int, float)):
+        return float(raw), False
+
+    s = str(raw).strip()
+    if not s or s.lower() == "none":
+        return None
+
+    # FREE / NO FEE
+    if re.fullmatch(r"(free|no\s*fee)", s, re.I):
+        return 0.0, False
+
+    # percent
+    m = re.search(r"(\d+(?:\.\d+)?)\s*%", s)
+    if m:
+        return float(m.group(1)), True
+
+    # dollars
+    s_num = s.replace("$", "").replace(",", "")
+    try:
+        return float(s_num), False
+    except ValueError:
+        logger.warning("Skipping unparsable amount value: %r", raw)
+        return None
+
+
 @router.post("/upload-iaai-fees")
 async def proxy_upload(
-    high_volume: UploadFile = File(...), internet_bid: UploadFile = File(...), db: AsyncSession = Depends(get_db)
-):  # Використовуйте існуючу сесію
+    high_volume: UploadFile = File(...),
+    internet_bid: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Forward two images to parsers app, upsert IAAI fees into DB.
+    For fixed IAAI fees we store range 0..OPEN_CAP (not NULL..NULL).
+    """
     try:
-        # Perform HTTP request to the external endpoint
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:
             files = {
                 "high_volume": (high_volume.filename, await high_volume.read(), high_volume.content_type),
                 "internet_bid": (internet_bid.filename, await internet_bid.read(), internet_bid.content_type),
             }
-            response = await client.post("http://parsers:8001/api/v1/parsers/scrape/iaai/fees", files=files)
+            resp = await client.post("http://parsers:8001/api/v1/parsers/scrape/iaai/fees", files=files)
 
-            # Log response for debugging
-            logger.info(f"Response from external service: status={response.status_code}, body={response.text}")
+        data = resp.json()
+        fees_data = data.get("fees", {})
 
-            # Extract the response directly
-            data = response.json()
-            fees_data = data["fees"]
+        # safe defaults
+        hv = fees_data.get("high_volume_buyer_fees", {"fees": {}}).get("fees", {}) or {}
+        ib = fees_data.get("internet_bid_buyer_fees", {"fees": {}}).get("fees", {}) or {}
 
-            # Update fees in the database using the provided session
-            try:
-                # Delete all existing fees for auction 'iaai'
-                await db.execute(delete(FeeModel).where(FeeModel.auction == "iaai"))
-                logger.info("Deleted all existing fees for auction 'iaai'")
+        service_fee = fees_data.get("service_fee", {"amount": 95.0})
+        environmental_fee = fees_data.get("environmental_fee", {"amount": 15.0})
+        title_handling_fee = fees_data.get("title_handling_fee", {"amount": 20.0})
 
-                # Process different types of fees from the response
-                fee_mappings = {
-                    "high_volume_buyer_fees": fees_data["high_volume_buyer_fees"]["fees"],
-                    "internet_bid_buyer_fees": fees_data["internet_bid_buyer_fees"]["fees"],
-                    "service_fee": {"amount": fees_data["service_fee"]["amount"]},
-                    "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
-                    "title_handling_fee": {"amount": fees_data["title_handling_fee"]["amount"]},
-                }
+        # wipe old IAAI fees
+        await db.execute(delete(FeeModel).where(FeeModel.auction == "iaai"))
+        logger.info("Deleted all existing fees for auction 'iaai'")
 
-                for fee_type, fee_values in fee_mappings.items():
-                    if isinstance(fee_values, dict):
-                        if fee_type in ["service_fee", "environmental_fee", "title_handling_fee"]:
-                            # Handle fixed fees
-                            amount = float(fee_values["amount"])
-                            fee = FeeModel(
-                                auction="iaai",
-                                fee_type=fee_type,
-                                amount=amount,
-                                percent=False,
-                                price_from=None,
-                                price_to=None,
-                            )
-                            db.add(fee)
-                            logger.info(f"Added fee: type={fee_type}, amount={amount}, percent=False, range=None-None")
-                        else:
-                            # Handle fees with price ranges
-                            for price_range, amount_str in fee_values.items():
-                                # Extract numeric value and handle percentage case
-                                is_percent = False
-                                amount = amount_str
-                                if isinstance(amount_str, str) and "%" in amount_str:
-                                    is_percent = True
-                                    # Use regex to extract the number before "%"
-                                    match = re.match(r"([\d.]+)%", amount_str)
-                                    if match:
-                                        amount = float(match.group(1))
-                                    else:
-                                        raise ValueError(f"Invalid percentage format: {amount_str}")
-                                else:
-                                    amount = float(amount_str)
-
-                                if "-" in price_range:  # Price range (e.g., "0.00-99.99")
-                                    price_from, price_to = map(float, price_range.split("-"))
-                                else:  # Single value or "15000.00+"
-                                    price_from = (
-                                        float(price_range.replace("+", "")) if price_range != "15000.00+" else 0.0
-                                    )
-                                    price_to = 1000000
-
-                                fee = FeeModel(
-                                    auction="iaai",
-                                    fee_type=fee_type,
-                                    amount=amount,
-                                    percent=is_percent,
-                                    price_from=price_from,
-                                    price_to=price_to,
-                                )
-                                db.add(fee)
-                                logger.info(
-                                    f"Added fee: type={fee_type}, amount={amount}, percent={is_percent}, range={price_from}-{price_to}"
-                                )
-
-                # Commit changes to the database
-                await db.commit()
-                logger.info("Committed new fees for auction 'iaai'")
-
-            except Exception as e:
-                logger.error(f"Database error updating fees: {e}", exc_info=True)
-                await db.rollback()
-                raise
-
-            return JSONResponse(
-                status_code=response.status_code,
-                content={
-                    "message": "Forwarded successfully",
-                    "external_status": response.status_code,
-                    "response": data,
-                },
+        # --- FIXED FEES as 0..OPEN_CAP (not NULL..NULL) ---
+        for ftype, payload in [
+            ("service_fee", service_fee),
+            ("environmental_fee", environmental_fee),
+            ("title_handling_fee", title_handling_fee),
+        ]:
+            parsed = _try_parse_amount(payload.get("amount"))
+            if not parsed:
+                logger.warning("Skipping fixed fee %s due to missing/invalid amount: %r", ftype, payload)
+                continue
+            amt, is_pct = parsed
+            db.add(
+                FeeModel(
+                    auction="iaai",
+                    fee_type=ftype,
+                    amount=amt,
+                    percent=is_pct,
+                    price_from=0.0,          # <-- 0 instead of None
+                    price_to=OPEN_CAP,       # <-- 1_000_000 instead of None
+                )
             )
+            logger.info("Added fixed fee %s=%s percent=%s range=%s-%s", ftype, amt, is_pct, 0.0, OPEN_CAP)
+
+        # --- RANGE FEES (high volume + internet live bid) ---
+        for ftype, ranges in [
+            ("high_volume_buyer_fees", hv),
+            ("internet_bid_buyer_fees", ib),
+        ]:
+            for rng_key, raw_amount in (ranges or {}).items():
+                parsed = _try_parse_amount(raw_amount)
+                if not parsed:
+                    logger.warning("Skipping %s row due to missing/invalid amount: key=%r value=%r", ftype, rng_key, raw_amount)
+                    continue
+                try:
+                    p_from, p_to = _parse_range_key(rng_key)
+                except Exception:
+                    logger.warning("Skipping %s row due to invalid range key: %r", ftype, rng_key)
+                    continue
+
+                amt, is_pct = parsed
+                db.add(
+                    FeeModel(
+                        auction="iaai",
+                        fee_type=ftype,
+                        amount=amt,
+                        percent=is_pct,
+                        price_from=p_from,
+                        price_to=p_to,
+                    )
+                )
+
+        await db.commit()
+        logger.info("Committed new fees for auction 'iaai'")
+
+        return JSONResponse(
+            status_code=resp.status_code,
+            content={"message": "Forwarded successfully", "external_status": resp.status_code, "response": data},
+        )
 
     except httpx.RequestError as e:
         raise HTTPException(status_code=502, detail=f"Failed to contact external service: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error in proxy_upload: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+        logger.exception("Unexpected error in proxy_upload")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @router.post("/load-db")

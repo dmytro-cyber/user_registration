@@ -13,6 +13,9 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 from webdriver_manager.chrome import ChromeDriverManager
 
+
+MAX_PRICE_CAP = 1_000_000.0
+
 # Set up logging for debugging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -40,34 +43,65 @@ class BiddingFeeScraper(FeeScraperStrategy):
             return {}
 
         def parse_table(table, payment_type):
+            """Parse a price/fee table into { 'min-max': fee } with capped '+' ranges."""
             fees = {}
-            rows = table.find_all("tr")[1:]  # Skip header
+            rows = table.find_all("tr")[1:]  # skip header
             for row in rows:
                 cols = row.find_all("td")
-                if len(cols) >= 2:
-                    price_range = cols[0].get_text(strip=True)
-                    fee = cols[1].get_text(strip=True).replace("$", "").replace("%", "")
-                    if "-" in price_range:
-                        min_price, max_price = price_range.split(" - ")
-                        # Remove '$' and ',' before converting to float
-                        min_price = float(min_price.replace("$", "").replace(",", "").replace("+" "")) if min_price != "$0" else 0.0
-                        max_price = (
-                            float(max_price.replace("$", "").replace(",", "").replace("+", ""))
-                            if max_price != "$15,000.00+"
-                            else None
-                        )
-                    else:
+                if len(cols) < 2:
+                    continue
+
+                # raw texts
+                price_range_raw = cols[0].get_text(strip=True)
+                fee_raw = cols[1].get_text(strip=True)
+
+                # normalize fee -> float (strip $, %, commas)
+                fee_txt = fee_raw.replace("$", "").replace(",", "").replace("%", "").strip()
+                try:
+                    fee = float(fee_txt)
+                except Exception:
+                    # try last-resort split on '%'
+                    fee = float(fee_txt.split("%")[0])
+
+                # normalize range
+                rng = price_range_raw.replace(",", "").strip()
+
+                # cases:
+                # 1) "$X - $Y" => X..Y
+                # 2) "$X+"     => X..MAX_PRICE_CAP
+                # 3) anything else (unknown/”Any”) => 0..MAX_PRICE_CAP
+                min_price, max_price = 0.0, MAX_PRICE_CAP
+                if "-" in rng:
+                    left, right = [s.strip() for s in rng.split("-", 1)]
+                    # left like "$0" or "$15000.00"
+                    left = left.replace("$", "").replace("+", "")
+                    right = right.replace("$", "").replace("+", "")
+                    try:
+                        min_price = float(left) if left else 0.0
+                    except Exception:
                         min_price = 0.0
-                        max_price = None
-                        # Handle fee conversion
-                        if fee.replace(".", "").isdigit():
-                            fee = float(fee)
-                        else:
-                            fee = float(fee.split("%")[0]) / 100
-                    key = f"{min_price:.2f}-{max_price:.2f}" if max_price else f"{min_price:.2f}+"
-                    fees[key] = fee
+                    try:
+                        max_price = float(right) if right else MAX_PRICE_CAP
+                    except Exception:
+                        max_price = MAX_PRICE_CAP
+                elif rng.endswith("+"):
+                    # "$15000.00+" => 15000..MAX_PRICE_CAP
+                    base = rng.replace("$", "").replace("+", "")
+                    try:
+                        min_price = float(base) if base else 0.0
+                    except Exception:
+                        min_price = 0.0
+                    max_price = MAX_PRICE_CAP
+                else:
+                    # no explicit bounds => 0..MAX_PRICE_CAP
+                    min_price, max_price = 0.0, MAX_PRICE_CAP
+
+                key = f"{min_price:.2f}-{max_price:.2f}"
+                fees[key] = fee
+
             return {payment_type: fees}
 
+        # If you later add non-secured table parsing, plug it here as well.
         return {"secured": parse_table(bidding_tables[0], "secured")}
 
 
@@ -94,26 +128,62 @@ class VirtualBidFeeScraper(FeeScraperStrategy):
 
     def scrape(self, soup):
         """Scrape virtual bid fees from the provided soup object."""
-        virtual_bid_table = soup.find(string="Virtual Bid Fee")
-        if not virtual_bid_table:
+        virtual_bid_header = soup.find(string="Virtual Bid Fee")
+        if not virtual_bid_header:
             logger.warning("Virtual Bid Fee section not found.")
             return {"live_bid": {}}
-        virtual_bid_table = virtual_bid_table.find_next("table")
+
+        table = virtual_bid_header.find_next("table")
+        if not table:
+            logger.warning("Virtual Bid Fee table not found after header.")
+            return {"live_bid": {}}
+
         live_bid = {}
-        rows = virtual_bid_table.find_all("tr")[1:]  # Skip header
+        rows = table.find_all("tr")[1:]  # skip header
         for row in rows:
             cols = row.find_all("td")
-            if len(cols) >= 2:  # Ensure at least two columns
-                price_range = cols[0].get_text(strip=True)
-                fee = cols[1].get_text(strip=True).replace("$", "")  # Single fee column
-                min_price, max_price = (
-                    price_range.split(" - ") if "-" in price_range else (price_range.replace("+", ""), None)
-                )
-                min_price = float(min_price.replace("$", "").replace(",", "")) if min_price != "$0" else 0.0
-                max_price = float(max_price.replace("$", "").replace(",", "")) if max_price else None
-                key = f"{min_price:.2f}-{max_price:.2f}" if max_price else f"{min_price:.2f}+"
-                fee_value = float(fee) if fee != "FREE" else 0.0
-                live_bid[key] = fee_value
+            if len(cols) < 2:
+                continue
+
+            price_range_raw = cols[0].get_text(strip=True)
+            fee_raw = cols[1].get_text(strip=True)
+
+            # fee can be "$X" or "FREE"
+            fee_txt = fee_raw.replace("$", "").replace(",", "").strip().upper()
+            fee_value = 0.0 if fee_txt == "FREE" else float(fee_txt)
+
+            rng = price_range_raw.replace(",", "").strip()
+
+            # cases mirror the bidding scraper:
+            # 1) "$X - $Y" => X..Y
+            # 2) "$X+"     => X..MAX_PRICE_CAP
+            # 3) else      => 0..MAX_PRICE_CAP
+            min_price, max_price = 0.0, MAX_PRICE_CAP
+            if "-" in rng:
+                left, right = [s.strip() for s in rng.split("-", 1)]
+                left = left.replace("$", "").replace("+", "")
+                right = right.replace("$", "").replace("+", "")
+                try:
+                    min_price = float(left) if left else 0.0
+                except Exception:
+                    min_price = 0.0
+                try:
+                    max_price = float(right) if right else MAX_PRICE_CAP
+                except Exception:
+                    max_price = MAX_PRICE_CAP
+            elif rng.endswith("+"):
+                base = rng.replace("$", "").replace("+", "")
+                try:
+                    min_price = float(base) if base else 0.0
+                except Exception:
+                    min_price = 0.0
+                max_price = MAX_PRICE_CAP
+            else:
+                min_price, max_price = 0.0, MAX_PRICE_CAP
+
+            key = f"{min_price:.2f}-{max_price:.2f}"
+            live_bid[key] = fee_value
+
         return {"live_bid": live_bid}
 
 

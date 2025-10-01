@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import JSONResponse
 
 from core.config import settings
 from core.dependencies import get_token
@@ -17,8 +18,7 @@ from schemas.schemas import (
     UpdateCurrentBidResponseSchema,
 )
 from services.fees.copart_fees_parser import scrape_copart_fees
-from services.fees.iaai_fees_image_parser import parse_svg_table
-from services.fees.iaai_fees_parser import scrape_iaai_fees
+from services.fees.iaai_fees_image_parser import parse_fee_table
 from services.parsers.copart_current_bid_parser import get_current_bid
 
 if settings.ENVIRON == "dev":
@@ -130,57 +130,53 @@ async def scrape_fees():
 
 @router.post("/scrape/iaai/fees")
 async def parse_fees(high_volume: UploadFile = File(...), internet_bid: UploadFile = File(...)):
-    """Endpoint to parse fees from two uploaded images (SVG or PNG)."""
+    """Parse fees from two uploaded images (SVG or PNG). Internet file -> use 'Live Bid' column."""
     try:
         logger.info(f"Received files: high_volume={high_volume.filename}, internet_bid={internet_bid.filename}")
-
-        # Define expected file extensions
         expected_extensions = {".png", ".svg"}
 
-        # Save uploaded files
         files = {"high_volume": high_volume, "internet_bid": internet_bid}
-
         saved_paths = {}
         for name, file in files.items():
             filename = file.filename
             _, ext = os.path.splitext(filename.lower())
-            logger.info(f"Processing {name} with extension {ext}")
             if ext not in expected_extensions:
                 raise HTTPException(status_code=400, detail=f"File {filename} must be .png or .svg")
-
             file_path = f"/tmp/{name}_{filename}"
             with open(file_path, "wb") as buffer:
                 buffer.write(await file.read())
             saved_paths[name] = file_path
-            logger.info(f"Saved uploaded file as {file_path}")
 
-        # Parse each image
-        fees = {}
-        for name, path in saved_paths.items():
-            parsed_fees = parse_svg_table(path)
-            if parsed_fees:
-                fees[f"{name}_buyer_fees"] = {
-                    "fees": parsed_fees,
-                    "currency": "USD",
-                    "description": f"Parsed fees for {name.replace('_', ' ').title()} section",
-                }
-                logger.info(f"Parsed {name} fees: {parsed_fees}")
-            else:
-                logger.warning(f"No fees parsed from {name} image.")
+        # Parse:
+        #  - High volume: “звичайний” останній стовпчик (або той, що позначений як PRICE/BID -> fee = right-most)
+        hv_fees = parse_fee_table(saved_paths["high_volume"])
+        #  - Internet:  беремо саме колонку з хедером "LIVE BID"
+        internet_live_fees = parse_fee_table(saved_paths["internet_bid"], target_fee_header="LIVE BID")
 
-        # Add fixed fees
-        fees.update(
-            {
-                "service_fee": {"amount": 95.0, "currency": "USD", "description": "Per unit for vehicle handling"},
-                "environmental_fee": {
-                    "amount": 15.0,
-                    "currency": "USD",
-                    "description": "Per unit for environmental regulations",
-                },
-                "title_handling_fee": {"amount": 20.0, "currency": "USD", "description": "Applied to all purchases"},
-            }
-        )
-        logger.info("Added fixed fees: Service Fee, Environmental Fee, Title Handling Fee")
+        fees = {
+            # стабільні ключі для backend
+            "high_volume_buyer_fees": {
+                "fees": hv_fees,
+                "currency": "USD",
+                "description": "Parsed fees for High Volume section",
+            },
+            "internet_bid_buyer_fees": {
+                "fees": internet_live_fees,
+                "currency": "USD",
+                "description": "Parsed fees for Internet Live Bid section",
+            },
+            # фіксовані комісії — залишив як у тебе
+            "service_fee": {"amount": 95.0, "currency": "USD", "description": "Per unit for vehicle handling"},
+            "environmental_fee": {"amount": 15.0, "currency": "USD", "description": "Per unit for environmental regulations"},
+            "title_handling_fee": {"amount": 20.0, "currency": "USD", "description": "Applied to all purchases"},
+        }
+
+        # cleanup
+        for path in saved_paths.values():
+            try:
+                os.remove(path)
+            except OSError:
+                pass
 
         result = {
             "source": "iaai",
@@ -188,16 +184,10 @@ async def parse_fees(high_volume: UploadFile = File(...), internet_bid: UploadFi
             "fees": fees,
             "scraped_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         }
+        return JSONResponse(status_code=200, content=result)
 
-        # Clean up temporary files
-        for path in saved_paths.values():
-            if os.path.exists(path):
-                os.remove(path)
-                logger.info(f"Removed temporary file: {path}")
-
-        print(result)
-        return result
-
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error processing files: {str(e)}")
+        logger.exception("Error processing files")
         raise HTTPException(status_code=500, detail=f"Error processing files: {str(e)}")

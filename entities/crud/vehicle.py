@@ -44,7 +44,7 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
             f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase."
         )
         car = await get_vehicle_by_id(db, car_id)
-        car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
+        car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
         if not car.recommendation_status_reasons:
             car.recommendation_status_reasons = f"sales at auction in the last 3 years: {len(sale_history_data)};"
         else:

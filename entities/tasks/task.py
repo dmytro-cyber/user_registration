@@ -190,61 +190,83 @@ def parse_and_update_car(
 ) -> Dict[str, Any]:
     """
     Fully synchronous task:
-    - pulls sales history directly
-    - calls the parser
-    - updates the vehicle
-    - stores HTML in S3 (if present)
+    1) (First attempt only) pulls sales history directly and stores it.
+    2) Calls the parser (scrape/dc) and updates the vehicle using payload values.
+    3) Computes avg market price, investments, margins, fees, suggested bid, ROI.
+    4) Stores HTML to S3 (if present).
+    5) Baseline: RECOMMENDED only if no reasons collected and status wasn't NOT_RECOMMENDED.
     """
     logger.info(f"parse_and_update_car: VIN={vin}")
 
     with SessionLocal() as db:
-        # 1) Sales history inline
-        try:
-            url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
-            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-            resp = http_get_with_retries(url, headers=headers, timeout=30.0)
-            resp.raise_for_status()
-            result = CarCreateSchema.model_validate(resp.json())
+        # -----------------------------------------
+        # helpers
+        # -----------------------------------------
+        def add_reason(_car: CarModel, text: str) -> None:
+            if not text:
+                return
+            reason = text if text.endswith(";") else f"{text};"
+            if not _car.recommendation_status_reasons:
+                _car.recommendation_status_reasons = reason
+            elif reason not in _car.recommendation_status_reasons:
+                _car.recommendation_status_reasons += reason
 
-            logger.info(f"Successfully scraped sales history data {result.sales_history}")
+        # прочитаємо car одразу (щоб знати attempts для логіки history)
+        car_pre = db.execute(
+            select(CarModel).where(CarModel.vin == vin).limit(1)
+        ).scalars().first()
 
-            car = db.execute(
-                select(CarModel).where(CarModel.vin == vin).limit(1)
-            ).scalars().first()
-            if car:
-                sale_history_data = result.sales_history
+        # --------------------------
+        # 1) Sales history (FIRST ATTEMPT ONLY)
+        # --------------------------
+        # тягнемо історію лише якщо це перша спроба (attempts == 0/None)
+        if car_pre and ((car_pre.attempts or 0) == 0):
+            try:
+                hist_url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
+                headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
+                hist_resp = http_get_with_retries(hist_url, headers=headers, timeout=30.0)
+                hist_resp.raise_for_status()
+                hist_result = CarCreateSchema.model_validate(hist_resp.json())
+
+                logger.info(f"Successfully scraped sales history data {hist_result.sales_history}")
+
+                sale_history_data = hist_result.sales_history or []
+
+                # If 4+ sales in last years -> NOT_RECOMMENDED with a reason
                 if len(sale_history_data) >= 4:
                     logger.debug(
-                        f"More than 3 sales history records for VIN={vin}. Not recommended."
+                        "More than 3 sales history records for VIN=%s. Not recommended.",
+                        vin,
                     )
-                    # keep original behavior
-                    car.recomendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not car.recommendation_status_reasons:
-                        car.recommendation_status_reasons = (
-                            f"sales at auction in the last 3 years: {len(sale_history_data)};"
-                        )
-                    else:
-                        car.recommendation_status_reasons += (
-                            f"sales at auction in the last 3 years: {len(sale_history_data)};"
-                        )
-                    db.add(car)
+                    car_pre.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    add_reason(
+                        car_pre,
+                        f"sales at auction in the last 3 years: {len(sale_history_data)};"
+                    )
+                    db.add(car_pre)
                     db.flush()
 
-                for history_data in sale_history_data:
-                    sales_history = CarSaleHistoryModel(
-                        **history_data.dict(), car_id=car.id
-                    )
-                    if not sales_history.source:
-                        sales_history.source = "Unknown"
-                    db.add(sales_history)
+                # Persist history entries (fill default source if empty)
+                for h in sale_history_data:
+                    item = CarSaleHistoryModel(**h.dict(), car_id=car_pre.id)
+                    if not item.source:
+                        item.source = "Unknown"
+                    db.add(item)
 
                 db.commit()
-        except Exception as e:
-            logger.warning(f"Sales history fetch failed for {vin}: {e}")
+            except Exception as e:
+                logger.warning(f"Sales history fetch failed for {vin}: {e}")
+        else:
+            logger.info(
+                "Skipping sales history fetch for VIN=%s (attempts=%s)",
+                vin, None if not car_pre else (car_pre.attempts or 0)
+            )
 
+        # --------------------------
+        # 2) Main parsing + updates
+        # --------------------------
         try:
-            # 2) call the parser (no existing_car logic anymore)
-            url = (
+            parse_url = (
                 "http://parsers:8001/api/v1/parsers/scrape/dc"
                 f"?car_vin={vin}"
                 f"&car_mileage={mileage}"
@@ -257,17 +279,10 @@ def parse_and_update_car(
                 f"&only_history=false"
             )
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-            resp = http_get_with_retries(url, headers=headers, timeout=300.0)
+            resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
             data = resp.json()
-            try:
-                resp.raise_for_status()
-            except Exception as e:
-                logger.info(f"Exception: {e} for VIN: {vin}")
-                car.attempts += 1
-                db.commit()
-                return {"status": "exception", "vin": vin}
 
-            # 3) update the vehicle under lock
+            # lock the car row up-front (so we can safely mutate + count attempts on HTTP error)
             car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
@@ -278,44 +293,60 @@ def parse_and_update_car(
             if not car:
                 raise ValueError(f"Car with VIN {vin} not found")
 
-            if data.get("error"):
+            # HTTP status failure -> mark attempt + vin flag + reason, return exception
+            try:
+                resp.raise_for_status()
+            except Exception as e:
+                logger.info(f"Exception: {e} for VIN: {vin}")
+                car.attempts = (car.attempts or 0) + 1
                 car.has_correct_vin = False
+                add_reason(car, "upstream parser error;")
+                db.commit()
+                return {"status": "exception", "vin": vin}
+
+            # payload-level error
+            if data.get("error"):
+                # let outer except rollback — nothing persisted from this branch
                 raise ValueError(f"Scraping error: {data['error']}")
 
+            # --------------------------
+            # 3) Field updates & flags
+            # --------------------------
             car.owners = data.get("owners")
             car.has_correct_vin = True
             car.relevance = RelevanceStatus.ACTIVE
 
-            # mileage correctness flag
-            if data.get("mileage") is not None and car.mileage is None:
+            # mileage correctness: True лише якщо обидва наявні та рівні
+            incoming_mileage = data.get("mileage")
+            if incoming_mileage is not None and car.mileage is not None:
                 try:
-                    car.has_correct_mileage = int(car.mileage) == int(
-                        data.get("mileage", 0)
-                    )
+                    car.has_correct_mileage = int(car.mileage) == int(incoming_mileage)
                 except Exception:
                     car.has_correct_mileage = False
             else:
                 car.has_correct_mileage = False
 
-            # accidents vs. assessments
+            # accidents vs assessments
             car.accident_count = data.get("accident_count", 0)
             if car.condition_assessments and car.accident_count == 0:
                 car.has_correct_accidents = False
+                add_reason(car, "accident count mismatch with assessments;")
             elif car.accident_count > 0 and not car.condition_assessments:
                 car.has_correct_accidents = False
+                add_reason(car, "accidents present but no assessments;")
             else:
                 car.has_correct_accidents = True
 
-            # average market price from available sources
+            # --------------------------
+            # 4) Avg price / ROI / Fees
+            # --------------------------
             prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
             car.avg_market_price = int(sum(prices) / len(prices)) if prices else 0
 
-            # ROI / investments / margin (no reuse from existing_car)
             default_roi = _load_default_roi(db)
             if default_roi and car.avg_market_price:
-                car.predicted_total_investments = car.avg_market_price / (
-                    1 + default_roi.roi / 100.0
-                )
+                inv = car.avg_market_price / (1 + default_roi.roi / 100.0)
+                car.predicted_total_investments = inv
                 car.predicted_profit_margin_percent = default_roi.profit_margin
                 car.predicted_profit_margin = car.avg_market_price * (
                     default_roi.profit_margin / 100.0
@@ -325,7 +356,6 @@ def parse_and_update_car(
                 car.predicted_profit_margin_percent = 0.0
                 car.predicted_profit_margin = 0.0
 
-            # auction fees
             fees = _load_fees(
                 db, car.auction, float(car.predicted_total_investments or 0.0)
             )
@@ -333,7 +363,6 @@ def parse_and_update_car(
                 float(car.predicted_total_investments or 0.0), fees
             )
 
-            # suggested bid / ROI
             car.suggested_bid = int(
                 (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
             )
@@ -343,11 +372,18 @@ def parse_and_update_car(
                 else 0.0
             )
 
-            # recommendation baseline if no reasons set
-            if not car.recommendation_status_reasons or car.recommendation_status_reasons == "":
+            # --------------------------------
+            # 5) Baseline recommendation logic
+            # --------------------------------
+            if (
+                car.recommendation_status != RecommendationStatus.NOT_RECOMMENDED
+                and (not car.recommendation_status_reasons or car.recommendation_status_reasons == "")
+            ):
                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
-            # 4) HTML to S3
+            # --------------------------
+            # 6) HTML to S3 (optional)
+            # --------------------------
             html_data = data.get("html_data")
             if html_data:
                 s3_storage = S3StorageClient(
@@ -357,12 +393,13 @@ def parse_and_update_car(
                     bucket_name=settings.S3_BUCKET_NAME,
                 )
                 file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                s3_storage.upload_fileobj_sync(
-                    file_key, BytesIO(html_data.encode("utf-8"))
-                )
+                s3_storage.upload_fileobj_sync(file_key, BytesIO(html_data.encode("utf-8")))
                 screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
                 db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
+
+            # success marker
             car.is_checked = True
+
             db.add(car)
             db.commit()
             logger.info(f"parse_and_update_car: updated VIN={vin}")
@@ -505,70 +542,144 @@ def update_car_bids() -> Dict[str, Any]:
             logger.exception("update_car_bids failed")
             raise
 
+def _coerce_amount_and_percent(v) -> tuple[float, bool]:
+    """Accept number or {'amount': num, 'percent': bool}. Return (amount, is_percent)."""
+    if isinstance(v, dict):
+        amt = v.get("amount", 0.0)
+        pct = bool(v.get("percent", False))
+        return float(amt), pct
+    return float(v), False
+
+def _inner_range_map(maybe_wrapped: dict) -> dict:
+    """
+    Unwrap one level if the dict is a container with a single section key
+    like {'secured': {...}} or {'live_bid': {...}}. If already ranges -> return as is.
+    """
+    if not isinstance(maybe_wrapped, dict):
+        return {}
+    # If keys look like labels, not ranges, unwrap one layer
+    label_like = {"secured", "unsecured", "live_bid", "online", "onsite", "credit", "cash"}
+    keys = list(maybe_wrapped.keys())
+    if len(keys) == 1 and keys[0] in label_like and isinstance(maybe_wrapped[keys[0]], dict):
+        return maybe_wrapped[keys[0]]
+    return maybe_wrapped
+
+_MAX_PRICE = 1_000_000.0
+
+def _parse_range_key(k: str) -> tuple[float, float]:
+    """
+    Parse 'min-max', 'min+', '+min', single value, or empty.
+    - '8000.00+' -> (8000.0, _MAX_PRICE)
+    - '+15000'   -> (15000.0, _MAX_PRICE)
+    - '0.00-100.00' -> (0.0, 100.0)
+    - '' or None -> (0.0, _MAX_PRICE)
+    """
+    if not k:
+        return 0.0, _MAX_PRICE
+    s = k.strip()
+    # guard against accidental labels like 'secured'
+    if not any(ch.isdigit() for ch in s):
+        return 0.0, _MAX_PRICE
+    if "-" in s:
+        a, b = s.split("-", 1)
+        a = a.replace("$", "").replace(",", "").replace("+", "").strip()
+        b = b.replace("$", "").replace(",", "").replace("+", "").strip()
+        p_from = float(a or 0.0)
+        p_to = float(b) if b else _MAX_PRICE
+        return p_from, p_to
+    if s.endswith("+") or s.startswith("+"):
+        base = s.replace("$", "").replace(",", "").replace("+", "").strip()
+        p_from = float(base or 0.0)
+        return p_from, _MAX_PRICE
+    # single number
+    single = float(s.replace("$", "").replace(",", ""))
+    return single, single
+
 @app.task(name="tasks.task.update_fees")
 def update_car_fees() -> Dict[str, Any]:
     """
     Pull the fee table from the parser and update 'copart'.
     """
     logger.info("update_car_fees: start")
-
     with SessionLocal() as db:
         try:
             with httpx.Client(timeout=60) as client:
-                response = client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
-                response.raise_for_status()
-                fees_data = response.json()["fees"]["copart"]["fees"]
+                r = client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
+                r.raise_for_status()
+                payload = r.json()
 
-            # wipe old
+            fees_data = payload["fees"]["copart"]["fees"]
+
+            # Wipe old Copart fees
             db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
 
-            # map
-            fee_mappings = {
-                "bidding_fees": fees_data["bidding_fees"]["secured"]["secured"],
-                "gate_fee": {"amount": fees_data["gate_fee"]["amount"]},
-                "virtual_bid_fee": {k: v for k, v in fees_data["virtual_bid_fee"]["live_bid"].items() },
-                "environmental_fee": {"amount": fees_data["environmental_fee"]["amount"]},
-            }
+            # --- Bidding fees ---
+            bidding_section = fees_data.get("bidding_fees", {})
+            bidding_secured = bidding_section.get("secured", {})
+            bidding_ranges = _inner_range_map(_inner_range_map(bidding_secured))
+            for rng_key, raw in bidding_ranges.items():
+                amount, is_percent = _coerce_amount_and_percent(raw)
+                p_from, p_to = _parse_range_key(rng_key)
+                db.add(FeeModel(
+                    auction="copart",
+                    fee_type="bidding_fees",
+                    amount=amount,
+                    percent=is_percent,
+                    price_from=p_from,
+                    price_to=p_to,
+                ))
 
-            for fee_type, fee_values in fee_mappings.items():
-                if not isinstance(fee_values, dict):
-                    continue
-                for price_range, amount_str in fee_values.items():
-                    amount = float(amount_str)
-                    is_percent = False
+            # --- Virtual bid fee ---
+            vbf_section = fees_data.get("virtual_bid_fee", {})
+            vbf_live = vbf_section.get("live_bid", {})
+            vbf_ranges = _inner_range_map(vbf_live)
+            for rng_key, raw in vbf_ranges.items():
+                amount, is_percent = _coerce_amount_and_percent(raw)
+                p_from, p_to = _parse_range_key(rng_key)
+                db.add(FeeModel(
+                    auction="copart",
+                    fee_type="virtual_bid_fee",
+                    amount=amount,
+                    percent=is_percent,
+                    price_from=p_from,
+                    price_to=p_to,
+                ))
 
-                    # heuristic: percentage rate in secured bidding_fees
-                    if fee_type == "bidding_fees" and price_range == "0.00+" and 0 < amount < 10:
-                        is_percent = True
+            # --- Gate fee ---
+            gate = fees_data.get("gate_fee", {})
+            if isinstance(gate, dict) and "amount" in gate:
+                db.add(FeeModel(
+                    auction="copart",
+                    fee_type="gate_fee",
+                    amount=float(gate["amount"]),
+                    percent=False,
+                    price_from=0.0,
+                    price_to=_MAX_PRICE,
+                ))
 
-                    if "-" in price_range:
-                        price_from, price_to = map(float, price_range.replace("+", "").split("-"))
-                    else:
-                        price_from = 0.0 if price_range == "0.00+" else 15000.0
-                        price_to = 10_000_000.0
-
-                    fee = FeeModel(
-                        auction="copart",
-                        fee_type=fee_type,
-                        amount=amount,
-                        percent=is_percent,
-                        price_from=price_from,
-                        price_to=price_to,
-                    )
-                    db.add(fee)
+            # --- Environmental fee ---
+            env = fees_data.get("environmental_fee", {})
+            if isinstance(env, dict) and "amount" in env:
+                db.add(FeeModel(
+                    auction="copart",
+                    fee_type="environmental_fee",
+                    amount=float(env["amount"]),
+                    percent=False,
+                    price_from=0.0,
+                    price_to=_MAX_PRICE,
+                ))
 
             db.commit()
             logger.info("update_car_fees: OK")
-            return {"status": "success", "count": 4}
+            return {"status": "success"}
 
-        except httpx.HTTPStatusError as e:
+        except Exception:
             db.rollback()
-            logger.error(f"update_car_fees HTTP error: {e}", exc_info=True)
+            logger.exception("update_car_fees failed")
             raise
-        except Exception as e:
-            db.rollback()
-            logger.error(f"update_car_fees failed: {e}", exc_info=True)
-            raise
+
+
+
 
 
 # --- kickoff for filter: sync + gevent ---

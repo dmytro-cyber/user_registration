@@ -64,7 +64,7 @@ class CarModel(Base):
     fuel_type = Column(String, nullable=True)
 
     # Additional
-    attempts = Column(Integer, default=0)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
     is_checked = Column(Boolean, default=False)
 
     # Additional costs

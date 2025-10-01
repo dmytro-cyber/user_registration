@@ -10,9 +10,9 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 from sqlalchemy import text
-from sqlalchemy.orm import registry
+from sqlalchemy.orm import registry, sessionmaker
 import pytest
-from sqlalchemy import insert, select
+from sqlalchemy import insert, select, create_engine
 from sqlalchemy.ext.asyncio import AsyncSession
 from models.user import UserRoleModel, UserRoleEnum, UserModel
 
@@ -23,6 +23,7 @@ from main import app
 from core.dependencies import get_settings
 from db.session import POSTGRESQL_DATABASE_URL  # just to ensure module import side-effects don't break
 from core.security.token_manager import JWTAuthManager
+import tasks.task as task_module
 
 # ========= Logging (quieter tests) =========
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -311,3 +312,125 @@ async def create_user_with_role(db_session: AsyncSession, email: str, password: 
     await db_session.commit()
     await db_session.refresh(u)
     return u
+
+
+@pytest.fixture(scope="session")
+def engine_sync(_test_db_file):
+    """
+    Sync engine поверх того ж самого SQLite-файлу, що й async engine.
+    Так таблиці/дані спільні для обох стеків.
+    """
+    url = f"sqlite:///{_test_db_file}"
+    eng = create_engine(url, echo=False, future=True)
+    # Створити схему, якщо async-частина ще не встигла
+    from models import Base
+    Base.metadata.create_all(bind=eng)
+    try:
+        yield eng
+    finally:
+        eng.dispose()
+
+
+@pytest.fixture(scope="function")
+def db_session_sync(engine_sync):
+    """
+    Окремий sync Session на кожен тест таски.
+    """
+    Session = sessionmaker(bind=engine_sync, autoflush=False, autocommit=False)
+    sess = Session()
+    try:
+        yield sess
+    finally:
+        # чистий rollback на випадок незакритих транзакцій
+        try:
+            sess.rollback()
+        except Exception:
+            pass
+        sess.close()
+
+
+@pytest.fixture(autouse=False)
+def patch_task_sessionlocal(monkeypatch, db_session_sync):
+    """
+    Патчить task_module.SessionLocal на контекстний менеджер,
+    який повертає наш sync db_session_sync.
+    УВАГА: вмикай цю фікстуру ТІЛЬКИ в тестах таски (через параметр фікстури).
+    """
+    class _CM:
+        def __enter__(self): return db_session_sync
+        def __exit__(self, exc_type, exc, tb): pass
+
+    class _SessionLocal:
+        def __call__(self): return _CM()
+
+    monkeypatch.setattr(task_module, "SessionLocal", _SessionLocal())
+
+
+# ==== TestSettings -> task module (settings) ====
+@pytest.fixture(autouse=False)
+def patch_task_settings(monkeypatch):
+    """
+    Підсовує settings у модуль таски з TestSettings (твій клас вище).
+    """
+    s = TestSettings()
+    monkeypatch.setattr(task_module, "settings", s)
+    return s
+
+
+# ==== Mock S3 client for task ====
+from io import BytesIO
+
+@pytest.fixture(autouse=False)
+def mock_s3_for_task(monkeypatch):
+    """
+    Мокає S3StorageClient в модулі таски.
+    Повертає список викликів для перевірок.
+    """
+    calls = []
+
+    class _DummyS3:
+        def __init__(self, **kwargs): pass
+        def upload_fileobj_sync(self, key, fileobj: BytesIO):
+            data = fileobj.read().decode("utf-8")
+            calls.append((key, data))
+
+    monkeypatch.setattr(task_module, "S3StorageClient", _DummyS3)
+    return calls
+
+
+# ==== ROI / fees helpers (детерміновані) ====
+@pytest.fixture(autouse=False)
+def mock_roi_and_fees(monkeypatch):
+    class _ROI:
+        roi = 25.0          # => investments = avg / 1.25
+        profit_margin = 10.0  # => margin_amount = avg * 0.10
+
+    def _load_default_roi(db): return _ROI()
+    def _load_fees(db, auction, base): return {"stub": True}
+    def _apply_fees(base, fees): return round((base or 0.0) * 0.05, 2)  # 5%
+
+    monkeypatch.setattr(task_module, "_load_default_roi", _load_default_roi)
+    monkeypatch.setattr(task_module, "_load_fees", _load_fees)
+    monkeypatch.setattr(task_module, "_apply_fees", _apply_fees)
+
+
+# ==== HTTP router mock for task ====
+@pytest.fixture(autouse=False)
+def http_router_mock(monkeypatch):
+    """
+    Дає функцію-роутер для http_get_with_retries:
+    - ти зможеш передати 2 обробники: для /apicar/get/ (історія) і для /parsers/scrape/dc (парсер)
+    """
+    handlers = {"history": None, "parser": None}
+
+    def set_handlers(history_resp_callable, parser_resp_callable):
+        handlers["history"] = history_resp_callable
+        handlers["parser"] = parser_resp_callable
+
+    def _router(url, headers, timeout):
+        if "/apicar/get/" in url:
+            return handlers["history"]()
+        return handlers["parser"]()
+
+    monkeypatch.setattr(task_module, "http_get_with_retries", _router)
+    return set_handlers
