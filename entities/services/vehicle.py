@@ -54,7 +54,7 @@ async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings
         logger.warning(f"Vehicle with VIN {vin} already exists in DB")
         raise HTTPException(status_code=409, detail=f"Vehicle with VIN {vin} already exists")
 
-    vehicle = await get_vehicle_by_vin(db, vin)
+    vehicle = await get_vehicle_by_vin(db, vin, 1)
     if not vehicle:
         logger.error(f"Failed to retrieve saved vehicle with VIN {vin}")
         raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")

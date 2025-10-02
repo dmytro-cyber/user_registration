@@ -84,7 +84,7 @@ def event_loop():
 # ========= async test DB (SQLite aiosqlite) =========
 @pytest.fixture(scope="session")
 def _test_db_file(tmp_path_factory):
-    # persistent for the whole test session
+    # Persistent across the whole test session
     tmpdir = tmp_path_factory.mktemp("db")
     return tmpdir / "test.db"
 
@@ -94,7 +94,7 @@ async def engine(_test_db_file):
     url = f"sqlite+aiosqlite:///{_test_db_file}"
     eng = create_async_engine(url, echo=False, future=True)
 
-    from models import Base  # <-- імпорт правильного Base
+    from models import Base  # <-- import the correct Base
 
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
@@ -102,7 +102,7 @@ async def engine(_test_db_file):
     try:
         yield eng
     finally:
-        # drop tables and close engine so Windows дозволив видалити файл
+        # Drop tables and close engine so Windows allows removing the file
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.drop_all)
         await eng.dispose()
@@ -130,7 +130,7 @@ async def db_session(engine):
     SessionTest = async_sessionmaker(bind=engine, expire_on_commit=False)
     async with SessionTest() as session:
         yield session
-        # явний rollback на випадок незакритих транзакцій
+        # Explicit rollback in case there are unclosed transactions
         await session.rollback()
 
 
@@ -149,7 +149,7 @@ def override_settings_dependency():
 @pytest.fixture(scope="function", autouse=True)
 def override_db_dependency(db_session: AsyncSession):
     """
-    Override get_db dependency to use the test SQLite session.
+    Override the get_db dependency to use the test SQLite session.
     """
     from db.session import get_db as real_get_db  # for key
 
@@ -167,7 +167,7 @@ def isolate_celery(monkeypatch):
     """
     Prevent any real Celery communication:
     - Patch celery app.send_task to a no-op stub.
-    - If code sometimes calls .delay on tasks, we patch those too (best-effort).
+    - If code sometimes calls .delay on tasks, we patch those too (best effort).
     """
     try:
         from core.celery_config import app as celery_app
@@ -223,7 +223,7 @@ async def reset_db(db_session: AsyncSession):
         try:
             await db_session.execute(text(f"DELETE FROM {tbl};"))
         except Exception:
-            # ignore if table doesn't exist in current test context
+            # Ignore if the table does not exist in the current test context
             pass
     await db_session.commit()
     await db_session.execute(text("PRAGMA foreign_keys = ON;"))
@@ -275,10 +275,10 @@ async def test_user(db_session: AsyncSession, setup_roles):
 @pytest.fixture
 def patch_verify_invite(monkeypatch):
     def _fake_verify_invite(user_data, jwt_manager):
-        # Повертаємо мінімум того, що очікує роутер
+        # Return the minimum payload expected by the router
         return {
             "user_email": user_data.email,
-            "role_id": 1,  # існуюча роль у тестовій БД (див. п.3 нижче)
+            "role_id": 1,  # Existing role in the test DB (see setup above)
         }
     monkeypatch.setattr("services.auth.verify_invite", _fake_verify_invite)
     return _fake_verify_invite
@@ -286,7 +286,7 @@ def patch_verify_invite(monkeypatch):
 
 @pytest.fixture(scope="session")
 async def seed_roles(engine):
-    # створюємо ролі один раз за сесію
+    # Create roles once per session
     async with engine.begin() as conn:
         await conn.execute(
             insert(UserRoleModel),
@@ -317,12 +317,12 @@ async def create_user_with_role(db_session: AsyncSession, email: str, password: 
 @pytest.fixture(scope="session")
 def engine_sync(_test_db_file):
     """
-    Sync engine поверх того ж самого SQLite-файлу, що й async engine.
-    Так таблиці/дані спільні для обох стеків.
+    Sync engine over the same SQLite file as the async engine.
+    This way, tables/data are shared for both stacks.
     """
     url = f"sqlite:///{_test_db_file}"
     eng = create_engine(url, echo=False, future=True)
-    # Створити схему, якщо async-частина ще не встигла
+    # Create schema if the async part hasn't done it yet
     from models import Base
     Base.metadata.create_all(bind=eng)
     try:
@@ -334,14 +334,14 @@ def engine_sync(_test_db_file):
 @pytest.fixture(scope="function")
 def db_session_sync(engine_sync):
     """
-    Окремий sync Session на кожен тест таски.
+    Separate sync Session per task test.
     """
     Session = sessionmaker(bind=engine_sync, autoflush=False, autocommit=False)
     sess = Session()
     try:
         yield sess
     finally:
-        # чистий rollback на випадок незакритих транзакцій
+        # Clean rollback in case of unclosed transactions
         try:
             sess.rollback()
         except Exception:
@@ -352,9 +352,8 @@ def db_session_sync(engine_sync):
 @pytest.fixture(autouse=False)
 def patch_task_sessionlocal(monkeypatch, db_session_sync):
     """
-    Патчить task_module.SessionLocal на контекстний менеджер,
-    який повертає наш sync db_session_sync.
-    УВАГА: вмикай цю фікстуру ТІЛЬКИ в тестах таски (через параметр фікстури).
+    Patch task_module.SessionLocal with a context manager returning our sync db_session_sync.
+    NOTE: enable this fixture ONLY in task tests (via explicit fixture usage).
     """
     class _CM:
         def __enter__(self): return db_session_sync
@@ -370,7 +369,7 @@ def patch_task_sessionlocal(monkeypatch, db_session_sync):
 @pytest.fixture(autouse=False)
 def patch_task_settings(monkeypatch):
     """
-    Підсовує settings у модуль таски з TestSettings (твій клас вище).
+    Inject TestSettings into the task module (your class above).
     """
     s = TestSettings()
     monkeypatch.setattr(task_module, "settings", s)
@@ -383,8 +382,8 @@ from io import BytesIO
 @pytest.fixture(autouse=False)
 def mock_s3_for_task(monkeypatch):
     """
-    Мокає S3StorageClient в модулі таски.
-    Повертає список викликів для перевірок.
+    Mock S3StorageClient in the task module.
+    Returns a list of calls for assertions.
     """
     calls = []
 
@@ -398,7 +397,7 @@ def mock_s3_for_task(monkeypatch):
     return calls
 
 
-# ==== ROI / fees helpers (детерміновані) ====
+# ==== ROI / fees helpers (deterministic) ====
 @pytest.fixture(autouse=False)
 def mock_roi_and_fees(monkeypatch):
     class _ROI:
@@ -418,8 +417,8 @@ def mock_roi_and_fees(monkeypatch):
 @pytest.fixture(autouse=False)
 def http_router_mock(monkeypatch):
     """
-    Дає функцію-роутер для http_get_with_retries:
-    - ти зможеш передати 2 обробники: для /apicar/get/ (історія) і для /parsers/scrape/dc (парсер)
+    Provide a router function for http_get_with_retries:
+    - you can pass 2 handlers: for /apicar/get/ (history) and for /parsers/scrape/dc (parser)
     """
     handlers = {"history": None, "parser": None}
 
@@ -434,3 +433,21 @@ def http_router_mock(monkeypatch):
 
     monkeypatch.setattr(task_module, "http_get_with_retries", _router)
     return set_handlers
+
+@pytest.fixture(scope="session", autouse=True)
+def silence_app_loggers_for_tests():
+    """
+    During tests, strip console handlers from noisy app loggers and
+    raise their levels to WARNING. Pytest will still capture logs and
+    show them only for failing tests.
+    """
+    noisy = ("vehicles_router", "auth_router", "admin_router")
+    for name in noisy:
+        logger = logging.getLogger(name)
+        logger.handlers = []
+        logger.propagate = True
+        logger.setLevel(logging.WARNING)
+
+    root = logging.getLogger()
+    if os.environ.get("PYTEST_FORCE_ROOT_WARNING", "1") == "1":
+        root.setLevel(logging.WARNING)

@@ -778,30 +778,36 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
 def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
     """
     Synchronous task:
-    - selects ACTIVE vehicles with CarModel.date <= utc_now
-    - pulls data from the parser
-      - 404 -> relevance = ARCHIVAL
-      - 200 -> updates the existing vehicle from payload (no creation)
+    - Selects ACTIVE vehicles with CarModel.date <= now()
+    - Pulls fresh data from parser:
+        - 404 -> relevance = ARCHIVAL
+        - 200 -> updates the existing vehicle from payload (no creation)
+    - Finally performs a transactional hard cleanup:
+        - delete dependent rows (user_likes, auto_checks) for cars with relevance=IRRELEVANT and past date
+        - delete the cars themselves
     """
-    stats = {"checked": 0, "archived": 0, "updated": 0, "errors": 0}
+    stats = {"checked": 0, "archived": 0, "updated": 0, "errors": 0, "cleanup": {"likes": 0, "auto_checks": 0, "cars": 0}}
 
-    def _apply_update_from_schema(db, existing_vehicle: CarModel, vehicle_info: CarCreateSchema) -> None:
+    def _apply_update_from_schema(db: Session, existing_vehicle: CarModel, vehicle_info: CarCreateSchema) -> None:
         """
-        Updates an existing CarModel based on CarCreateSchema.
-        Reproduces business rules from the async variant: fuel_type / transmision / risk assessments / bids / history / photos.
+        Update an existing CarModel from CarCreateSchema.
+        Mirrors business rules: fuel_type / transmision / risk assessments / bids / history / photos.
         """
-        # 1) Simple fields (no lists)
+        # 1) Simple scalar fields
         for field, value in vehicle_info.dict(
             exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
         ).items():
             if (value is not None) or (field == "date"):
                 setattr(existing_vehicle, field, value)
+
+                # business rules
                 if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not existing_vehicle.recommendation_status_reasons:
                         existing_vehicle.recommendation_status_reasons = f"{value};"
                     elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
                         existing_vehicle.recommendation_status_reasons += f"{value};"
+
                 if field == "transmision" and value != "Automatic":
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     if not existing_vehicle.recommendation_status_reasons:
@@ -809,7 +815,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                     elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
                         existing_vehicle.recommendation_status_reasons += f"{value};"
 
-        # 2) Photos — only add new URLs
+        # 2) Photos — only add missing URLs
         existing_photo_urls = {p.url for p in existing_vehicle.photos}
         new_photos = []
         if vehicle_info.photos:
@@ -824,9 +830,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
             db.add_all(new_photos)
 
         # 3) Condition assessments — full replacement
-        db.execute(
-            delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
-        )
+        db.execute(delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id))
         if vehicle_info.condition_assessments:
             for a in vehicle_info.condition_assessments:
                 db.add(ConditionAssessmentModel(
@@ -835,15 +839,8 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                     car_id=existing_vehicle.id,
                 ))
                 if a.issue_description in [
-                    "Rejected Repair",
-                    "Burn Engine",
-                    "Mechanical",
-                    "Replaced Vin",
-                    "Burn",
-                    "Undercarriage",
-                    "Water/Flood",
-                    "Burn Interior",
-                    "Rollover",
+                    "Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn",
+                    "Undercarriage", "Water/Flood", "Burn Interior", "Rollover",
                 ]:
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                     reason = f"{a.issue_description};"
@@ -882,6 +879,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
         db.add(existing_vehicle)
 
     with SessionLocal() as db:
+        # Select candidate VINs (ACTIVE with past date)
         vin_rows = db.execute(
             select(CarModel.vin).where(
                 and_(
@@ -895,7 +893,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
         for vin in vin_rows:
             stats["checked"] += 1
 
-            # 1) Get parser response
+            # 1) Query parser
             try:
                 resp = httpx.get(f"http://parsers:8001/api/v1/apicar/{vin}", timeout=30.0)
             except Exception as e:
@@ -940,7 +938,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 stats["errors"] += 1
                 continue
 
-            # 5) Fetch existing vehicle and UPDATE (no creation)
+            # 5) Update existing vehicle (no creation)
             try:
                 existing_vehicle = db.execute(
                     select(CarModel)
@@ -957,6 +955,8 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                     continue
 
                 _apply_update_from_schema(db, existing_vehicle, vehicle_info)
+
+                # If still past date and not BuyNow -> archive
                 if (
                     existing_vehicle.auction_name
                     and existing_vehicle.auction_name.lower() != "buynow"
@@ -967,6 +967,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 ):
                     existing_vehicle.relevance = RelevanceStatus.ARCHIVAL
                     logger.info("VIN %s archived after update (date still in the past)", vin)
+
                 db.commit()
                 stats["updated"] += 1
 
@@ -979,23 +980,46 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 logger.exception("VIN %s: update failed: %s", vin, e)
                 stats["errors"] += 1
 
-        # === NEW: hard delete all IRRELEVANT with past date ===
+        # === Transactional hard cleanup (dependents -> cars) ===
         try:
-            # Hard-delete cars where relevance == IRRELEVANT and date < now
-            del_stmt = (
-                delete(CarModel)
-                .where(
-                    and_(
-                        CarModel.relevance == RelevanceStatus.IRRELEVANT,
-                        CarModel.date < func.now(),
-                    )
-                )
-                .execution_options(synchronize_session=False)
+            # Use one atomic transaction to avoid FK errors and partial states
+            with db.begin():
+                # 1) Delete user_likes referencing IRRELEVANT + past-date cars
+                del_likes = db.execute(text("""
+                    DELETE FROM user_likes ul
+                    USING cars c
+                    WHERE ul.car_id = c.id
+                      AND c.date < NOW()
+                      AND c.relevance = 'IRRELEVANT'
+                """))
+
+                # 2) Delete auto_checks referencing those cars (if you store screenshots/logs)
+                del_checks = db.execute(text("""
+                    DELETE FROM auto_checks ac
+                    USING cars c
+                    WHERE ac.car_id = c.id
+                      AND c.date < NOW()
+                      AND c.relevance = 'IRRELEVANT'
+                """))
+
+                # 3) Delete cars themselves
+                del_cars = db.execute(text("""
+                    DELETE FROM cars
+                    WHERE date < NOW()
+                      AND relevance = 'IRRELEVANT'
+                """))
+
+            stats["cleanup"]["likes"] = del_likes.rowcount or 0
+            stats["cleanup"]["auto_checks"] = del_checks.rowcount or 0
+            stats["cleanup"]["cars"] = del_cars.rowcount or 0
+
+            logger.info(
+                "Cleanup done: likes=%d, auto_checks=%d, cars=%d",
+                stats["cleanup"]["likes"],
+                stats["cleanup"]["auto_checks"],
+                stats["cleanup"]["cars"],
             )
-            result = db.execute(del_stmt)
-            db.commit()
-            deleted = result.rowcount or 0
-            logger.info("Cleanup: deleted %d IRRELEVANT cars with past date", deleted)
+
         except Exception as e:
             db.rollback()
             logger.exception("Cleanup delete failed: %s", e)

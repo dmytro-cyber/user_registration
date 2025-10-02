@@ -127,14 +127,13 @@ async def get_autocheck(
     extra = {"request_id": request_id, "user_id": "N/A"}  # UserID is N/A for now
     logger.info(f"Fetching AutoCheck data for ID: {vehicle_id}", extra=extra)
     try:
-        async with db.begin():
-            result = await db.execute(select(AutoCheckModel).where(AutoCheckModel.car_id == vehicle_id))
-            autocheck = result.scalars().first()
-            if not autocheck:
-                logger.warning(f"AutoCheck data with ID {vehicle_id} not found", extra=extra)
-                raise HTTPException(status_code=404, detail="AutoCheck data not found")
-            logger.info(f"AutoCheck data fetched successfully for ID: {vehicle_id}", extra=extra)
-            return autocheck.screenshot_url
+        result = await db.execute(select(AutoCheckModel).where(AutoCheckModel.car_id == vehicle_id))
+        autocheck = result.scalars().first()
+        if not autocheck:
+            logger.warning(f"AutoCheck data with ID {vehicle_id} not found", extra=extra)
+            raise HTTPException(status_code=404, detail="AutoCheck data not found")
+        logger.info(f"AutoCheck data fetched successfully for ID: {vehicle_id}", extra=extra)
+        return autocheck.screenshot_url
     except Exception as e:
         logger.error(f"Error fetching AutoCheck data for ID {vehicle_id}: {str(e)}", extra=extra)
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=str(e))
@@ -373,24 +372,23 @@ async def get_cars(
     if vin and len(vin.replace(" ", "")) == 17:
         vin = vin.replace(" ", "")
         logger.info(f"Searching for vehicle with VIN: {vin}", extra=extra)
-        async with db.begin():
+        vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
+        if vehicle:
+            logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
+            vehicle_data = car_to_dict(vehicle)
+            vehicle_data["liked"] = vehicle.liked
+            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+            return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
+        else:
+            logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
+            validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
             vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
-            if vehicle:
-                logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
-                vehicle_data = car_to_dict(vehicle)
-                vehicle_data["liked"] = vehicle.liked
-                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
-            else:
-                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
-                validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
-                vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
-                await db.commit()
-                vehicle_data = car_to_dict(vehicle)
-                vehicle_data["liked"] = vehicle.liked
-                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-                logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
-                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
+            await db.commit()
+            vehicle_data = car_to_dict(vehicle)
+            vehicle_data["liked"] = vehicle.liked
+            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+            logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
+            return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
     vehicles, total_count, total_pages, additional = await get_filtered_vehicles(
         db=db, filters=filters, ordering=ordering, page=page, page_size=page_size
