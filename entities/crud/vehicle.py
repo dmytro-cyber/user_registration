@@ -7,7 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select, bindparam, update, exists
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload, with_loader_criteria
+from sqlalchemy.orm import aliased, selectinload, with_loader_criteria, noload
 from sqlalchemy.sql import over
 
 from core.setup import match_and_update_location
@@ -319,26 +319,54 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
         return False
 
 
-async def get_vehicle_by_vin(db: AsyncSession, vin: str, current_user_id: int) -> Optional[CarModel]:
-    """Get a vehicle by VIN from the database and mark if liked by current user."""
-    liked_expr = case((user_likes.c.user_id == current_user_id, True), else_=False).label("liked")
-
+async def get_vehicle_by_vin(
+    db: AsyncSession,
+    vin: str,
+    current_user_id: Optional[int] = None,
+) -> Optional[CarModel]:
+    """
+    Fetch a car by VIN with safe loader strategy:
+    - noload('*') disables any accidental lazy loading for ALL relationships.
+    - selectinload(...) eagerly loads only the relationships we plan to touch.
+    - 'liked' is computed via EXISTS on the association table, not via lazy M2M.
+    - finally, the entity is expunged (detached) to make accidental lazy loads impossible.
+    """
     stmt = (
-        select(CarModel, liked_expr)
-        .outerjoin(user_likes, (CarModel.id == user_likes.c.car_id) & (user_likes.c.user_id == current_user_id))
-        .options(selectinload(CarModel.photos), selectinload(CarModel.sales_history))
-        .filter(CarModel.vin == vin)
+        select(CarModel)
+        .options(
+            # disable any other relationships (no SQL will be emitted when accessed)
+            noload('*'),
+            # explicitly load only what serializer will read
+            selectinload(CarModel.photos),
+            selectinload(CarModel.photos_hd),
+            selectinload(CarModel.condition_assessments),
+            selectinload(CarModel.sales_history),
+        )
+        .where(CarModel.vin == vin)
+        .limit(1)
     )
+    res = await db.execute(stmt)
+    car = res.scalars().first()
+    if not car:
+        return None
 
-    result = await db.execute(stmt)
-    row = result.first()
-
-    if row:
-        car, liked = row
+    # Compute 'liked' via EXISTS on the link table
+    if current_user_id:
+        liked_q = select(
+            exists().where(
+                (user_likes.c.user_id == current_user_id) &
+                (user_likes.c.car_id == car.id)
+            )
+        )
+        liked = (await db.execute(liked_q)).scalar()
         car.liked = bool(liked)
-        return car
+    else:
+        car.liked = False
 
-    return None
+    # Detach the instance to prevent *any* chance of further lazy loads
+    # (safe to call on AsyncSession)
+    db.expunge(car)
+    return car
 
 
 async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optional[CarModel]:

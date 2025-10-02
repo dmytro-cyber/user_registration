@@ -4,6 +4,7 @@ import os
 import time
 from datetime import datetime
 from itertools import islice
+from typing import Optional
 from urllib.parse import urlencode
 from zoneinfo import ZoneInfo
 
@@ -65,6 +66,10 @@ def generate_car_api_url(page: int = 1, size: int = 1000, base_url: str = "https
     query_string = urlencode(all_params, safe="&")
     return f"{base_url}?{query_string}"
 
+def _ts() -> str:
+    """Compact timestamp for folder names: YYYYMMDD_HHMMSS_mmm."""
+    now = datetime.now()
+    return f"{now.strftime('%Y%m%d_%H%M%S')}_{int(now.microsecond/1000):03d}"
 
 def chunked(iterable, size):
     """Yield successive chunks of a given size from iterable."""
@@ -73,40 +78,112 @@ def chunked(iterable, size):
         yield [first, *islice(it, size - 1)]
 
 @app.task
-def fetch_api_data(size: int = None, base_url: str = None):
+def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
     """
-    Fetches car data from the API for each filter, paginates through results, 
-    and sends them in batches of 100 to the bulk endpoint.
+    Fetch pages from APICAR one-by-one, save raw JSON responses to disk,
+    then read those saved files and forward vehicles to Entities in batches.
+
+    IMPORTANT:
+    - We do NOT modify data processing: format_car_data() + the existing mapping
+      remain exactly as before.
+    - The only change is the source of truth: we read from saved files instead
+      of the live APICAR response.
     """
+    # Defaults (kept from your original task)
     if not base_url:
         base_url = "https://api.apicar.store/api/cars/db/update"
     if not size:
         size = 1000
 
-    headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
+    # Where to keep APICAR raw responses for this run
+    root_dir = os.path.abspath("./apicar_runs")
+    run_dir = os.path.join(root_dir, f"run_{_ts()}")
+    pages_dir = os.path.join(run_dir, "pages")
+    os.makedirs(pages_dir, exist_ok=True)
+
+    # Headers for Entities and APICAR (unchanged)
+    headers_entities = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
+    apicar_headers = {"api-key": os.getenv("APICAR_KEY")}
+
     page = 1
+    logger.info(f"[APICAR] Start fetching to {pages_dir}. base_url={base_url} size={size}")
 
-    while True:
-        url = generate_car_api_url(page=page, size=size, base_url=base_url)
-        logger.info(f"Fetching data from API (page {page}): {url}")
+    # -----------------------------
+    # Phase 1: Fetch & save pages
+    # -----------------------------
+    with httpx.Client(timeout=10) as client:
+        while True:
+            url = generate_car_api_url(page=page, size=size, base_url=base_url)
+            logger.info(f"[APICAR] Fetch page {page}: {url}")
 
+            try:
+                resp = client.get(url, headers=apicar_headers)
+                resp.raise_for_status()
+                api_response = resp.json()
+                data = api_response.get("data", [])
+            except httpx.HTTPError as e:
+                logger.error(f"[APICAR] Failed to fetch page {page}: {e}")
+                # зберігаємо файл-помилку для спостережуваності і переходимо до наступної сторінки
+                err_path = os.path.join(pages_dir, f"page_{page:05d}_ERROR.json")
+                try:
+                    with open(err_path, "w", encoding="utf-8") as fh:
+                        json.dump({"error": str(e), "url": url}, fh, ensure_ascii=False, indent=2)
+                except Exception:
+                    pass
+                # переходимо до наступної спроби сторінки
+                page += 1
+                continue
+
+            # Save the successful page response as-is
+            out_path = os.path.join(pages_dir, f"page_{page:05d}.json")
+            try:
+                with open(out_path, "w", encoding="utf-8") as fh:
+                    json.dump(api_response, fh, ensure_ascii=False)
+                logger.info(f"[APICAR] Saved page {page} with {len(data)} records -> {out_path}")
+            except Exception as e:
+                logger.error(f"[APICAR] Failed to write page {page} to disk: {e}")
+                break
+
+            # Stop condition: empty page
+            if not data:
+                logger.info(f"[APICAR] Empty page at {page}. Stop fetching.")
+                break
+
+            page += 1
+
+    # -----------------------------------------
+    # Phase 2: Read saved pages & forward data
+    # -----------------------------------------
+    save_url = "http://entities:8000/api/v1/vehicles/bulk"
+    # зчитуємо лише успішні сторінки
+    page_files = sorted(
+        f for f in os.listdir(pages_dir)
+        if f.startswith("page_") and f.endswith(".json") and "_ERROR" not in f
+    )
+
+    if not page_files:
+        logger.info("[APICAR] No saved pages to forward. Done.")
+        return {"message": "No pages processed", "run_dir": run_dir}
+
+    for fname in page_files:
+        fpath = os.path.join(pages_dir, fname)
         try:
-            response = httpx.get(url, timeout=10, headers={"api-key": os.getenv("APICAR_KEY")})
-            response.raise_for_status()
-            api_response = response.json()
-            data = api_response.get("data", [])
-        except httpx.HTTPError as e:
-            logger.error(f"Failed to fetch API data on page {page}: {e}")
+            with open(fpath, "r", encoding="utf-8") as fh:
+                page_payload = json.load(fh)
+        except Exception as e:
+            logger.error(f"[FORWARD] Failed to read {fpath}: {e}")
             continue
 
+        data = page_payload.get("data", [])
         if not data:
-            logger.info(f"No more data on page {page}.")
-            break
+            # nothing to push for this page
+            continue
 
+        # === your original processing stays intact ===
         processed_vehicles = []
         for vehicle in data:
             try:
-                formatted_vehicle = format_car_data(vehicle)
+                formatted_vehicle = format_car_data(vehicle)  # <--- as before
                 adapted_vehicle = {
                     "vin": formatted_vehicle["vin"],
                     "vehicle": formatted_vehicle["vehicle"],
@@ -141,26 +218,26 @@ def fetch_api_data(size: int = None, base_url: str = None):
                 }
                 processed_vehicles.append(adapted_vehicle)
             except Exception:
+                # keep prior “silently skip broken record” behavior
                 pass
 
-        if processed_vehicles:
-            save_url = "http://entities:8000/api/v1/vehicles/bulk"
-            for batch in chunked(processed_vehicles, 25):
-                payload = {
-                    "ivent": "created" if base_url else "updated",
-                    "vehicles": batch
-                }
-                try:
-                    save_response = httpx.post(save_url, json=payload, headers=headers, timeout=3600)
-                    save_response.raise_for_status()
-                    logger.info(f"Successfully saved {len(batch)} vehicles (page {page} batch).")
-                except httpx.HTTPError as e:
-                    logger.error(f"Failed to save vehicles (page {page} batch): {e}")
+        if not processed_vehicles:
+            continue
 
-        page += 1
+        for batch in chunked(processed_vehicles, 25):
+            payload = {
+                "ivent": "created" if base_url else "updated",
+                "vehicles": batch,
+            }
+            try:
+                save_response = httpx.post(save_url, json=payload, headers=headers_entities, timeout=3600)
+                save_response.raise_for_status()
+                logger.info(f"[FORWARD] Sent {len(batch)} vehicles from {fname} to entities.")
+            except httpx.HTTPError as e:
+                logger.error(f"[FORWARD] Failed to save vehicles from {fname}: {e}")
 
-    logger.info("Finished processing all pages.")
-    return "Finished processing all pages."
+    logger.info(f"[DONE] Finished forwarding. Run folder: {run_dir}")
+    return {"message": "Finished processing all saved pages", "run_dir": run_dir}
 
 
 @app.task
