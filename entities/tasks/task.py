@@ -16,7 +16,7 @@ from typing import Any, Dict, Optional, List, Callable, Union
 
 import httpx
 import redis
-from sqlalchemy import and_, delete, func, select, create_engine, or_
+from sqlalchemy import and_, delete, func, select, create_engine, or_, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker, Session, selectinload
 
