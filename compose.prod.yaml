@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   redis:
-    image: 'redis:latest'
+    image: "redis:latest"
     container_name: redis_cars_and_beyond
     ports:
       - "6379:6379"
@@ -13,7 +13,7 @@ services:
     mem_limit: 1g
     cpus: 0.5
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -21,6 +21,8 @@ services:
     dns:
       - 8.8.8.8
     restart: always
+    sysctls:
+      vm.overcommit_memory: "1"
     logging:
       driver: "json-file"
       options:
@@ -28,7 +30,7 @@ services:
         max-file: "3"
 
   redis_1:
-    image: 'redis:latest'
+    image: "redis:latest"
     container_name: redis_1_cars_and_beyond
     ports:
       - "6380:6380"
@@ -48,6 +50,8 @@ services:
     dns:
       - 8.8.8.8
     restart: always
+    sysctls:
+      vm.overcommit_memory: "1"
     logging:
       driver: "json-file"
       options:
@@ -59,7 +63,7 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: backend_cars_and_beyond
-    command: [ "/bin/bash", "/commands/run_entities_server_dev.sh" ]
+    command: ["/bin/bash", "/commands/run_entities_server_dev.sh"]
     env_file:
       - ./entities/.env
     environment:
@@ -91,7 +95,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: parser_cars_and_beyond
-    command: [ "/bin/bash", "/commands/run_parsers_server_dev.sh" ]
+    command: ["/bin/bash", "/commands/run_parsers_server_dev.sh"]
     env_file:
       - ./parsers/.env
     environment:
@@ -136,7 +140,7 @@ services:
       - 8.8.8.8
     mem_limit: 512m
     cpus: 0.3
-    restart: "no"   # one-shot migrator
+    restart: "no"
     logging:
       driver: "json-file"
       options:
@@ -144,7 +148,7 @@ services:
         max-file: "3"
 
   celery:
-    build: 
+    build:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
@@ -174,7 +178,7 @@ services:
         max-file: "3"
 
   celery_worker:
-    build: 
+    build:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_worker_cars_and_beyond
@@ -204,7 +208,7 @@ services:
         max-file: "3"
 
   celery_beat:
-    build: 
+    build:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_beat_cars_and_beyond
@@ -234,7 +238,7 @@ services:
         max-file: "3"
 
   celery_beat_entities:
-    build: 
+    build:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_beat_entities_cars_and_beyond

@@ -195,55 +195,58 @@ async def update_actual_bid(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     extra = {"request_id": "N/A", "user_id": getattr(current_user, "id", "N/A")}
-    logger.info(f"Updating current bid for car_id={car_id} to {data.actual_bid} by user_id={current_user.id}", extra=extra)
+    logger.info(
+        "Updating current bid for car_id=%s to %s by user_id=%s",
+        car_id, data.actual_bid, getattr(current_user, "id", "N/A"),
+        extra=extra,
+    )
 
     try:
-        async with db.begin():  # <— керує транзакцією сам
-            vehicle = await get_vehicle_by_id(db, car_id)
-            if not vehicle:
-                raise HTTPException(status_code=404, detail="Vehicle not found")
+        vehicle = await get_vehicle_by_id(db, car_id)
+        if not vehicle:
+            raise HTTPException(status_code=404, detail="Vehicle not found")
 
-            fees = (
-                await db.execute(
-                    select(FeeModel).where(
-                        FeeModel.auction == vehicle.auction,
-                        FeeModel.price_from <= data.actual_bid,
-                        FeeModel.price_to >= data.actual_bid,
-                    )
+        fees = (
+            await db.execute(
+                select(FeeModel).where(
+                    FeeModel.auction == vehicle.auction,
+                    FeeModel.price_from <= data.actual_bid,
+                    FeeModel.price_to >= data.actual_bid,
                 )
-            ).scalars().all()
+            )
+        ).scalars().all()
 
-            total_fees = 0
-            for fee in fees:
-                total_fees += (fee.amount / 100) * data.actual_bid if fee.percent else fee.amount
-            vehicle.auction_fee = total_fees
 
-            vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
-            total_investments = vehicle.sum_of_investments + data.actual_bid
-            vehicle.roi = ((vehicle.avg_market_price - total_investments) / total_investments) * 100
-            vehicle.profit_margin = vehicle.avg_market_price - total_investments
+        total_fees = 0.0
+        bid_amount = float(data.actual_bid)
+        for fee in fees:
+            total_fees += (float(fee.amount) / 100.0) * bid_amount if fee.percent else float(fee.amount)
+        vehicle.auction_fee = total_fees
 
-            db.add(HistoryModel(
-                car_id=car_id,
-                action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
-                user_id=current_user.id,
-                comment=data.comment,
-            ))
-            vehicle.actual_bid = data.actual_bid
-            db.add(vehicle)
+        db.add(HistoryModel(
+            car_id=car_id,
+            action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
+            user_id=current_user.id,
+            comment=data.comment,
+        ))
 
-        logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
+        vehicle.actual_bid = data.actual_bid
+        db.add(vehicle)
+
+        await db.commit()
+
+        logger.info("Successfully updated current bid for car_id=%s", car_id, extra=extra)
         return {"message": "Current bid updated successfully"}
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error updating current bid for car_id={car_id}: {e}", extra=extra)
-        # НІЯКИХ rollback тут — контекст сам відкотив
+        logger.error("Error updating current bid for car_id=%s: %s", car_id, e, extra=extra)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
         raise HTTPException(status_code=500, detail="Error updating current bid")
-
-
-    return {"message": "Current bid updated successfully"}
 
 
 @router.get(
