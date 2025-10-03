@@ -222,50 +222,51 @@ async def update_actual_bid(
     )
 
     try:
-        vehicle = await get_vehicle_by_id(db, car_id)
-        if not vehicle:
-            logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
-        
-        fees_result = await db.execute(
-            select(FeeModel).where(
-                FeeModel.auction == vehicle.auction,
-                FeeModel.price_from <= data.actual_bid,
-                FeeModel.price_to >= data.actual_bid,
+        async with db.begin():
+            vehicle = await get_vehicle_by_id(db, car_id)
+            if not vehicle:
+                logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
+            
+            fees_result = await db.execute(
+                select(FeeModel).where(
+                    FeeModel.auction == vehicle.auction,
+                    FeeModel.price_from <= data.actual_bid,
+                    FeeModel.price_to >= data.actual_bid,
+                )
             )
-        )
-        fees = fees_result.scalars().all()
+            fees = fees_result.scalars().all()
 
-        # Calculate auction_fee considering percentage-based fees
-        total_fees = 0
-        for fee in fees:
-            if fee.percent:
-                # Calculate percentage-based fee
-                total_fees += (fee.amount / 100) * data.actual_bid
-            else:
-                # Add fixed fee
-                total_fees += fee.amount
-        vehicle.auction_fee = total_fees
-        
-        vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
-        total_investments = vehicle.sum_of_investments + data.actual_bid
-        vehicle.roi = ((vehicle.avg_market_price - total_investments) / total_investments) * 100
-        vehicle.profit_margin = vehicle.avg_market_price - total_investments
+            # Calculate auction_fee considering percentage-based fees
+            total_fees = 0
+            for fee in fees:
+                if fee.percent:
+                    # Calculate percentage-based fee
+                    total_fees += (fee.amount / 100) * data.actual_bid
+                else:
+                    # Add fixed fee
+                    total_fees += fee.amount
+            vehicle.auction_fee = total_fees
+            
+            vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
+            total_investments = vehicle.sum_of_investments + data.actual_bid
+            vehicle.roi = ((vehicle.avg_market_price - total_investments) / total_investments) * 100
+            vehicle.profit_margin = vehicle.avg_market_price - total_investments
 
-        hub_history = HistoryModel(
-            car_id=car_id,
-            action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
-            user_id=current_user.id,
-            comment=data.comment,
-        )
-        db.add(hub_history)
-        vehicle.actual_bid = data.actual_bid
-        # vehicle.roi = data.roi
-        # vehicle.profit_margin = data.profit_margin
-        db.add(vehicle)
-        await db.commit()
-        # await db.refresh(vehicle)
-        logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
+            hub_history = HistoryModel(
+                car_id=car_id,
+                action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
+                user_id=current_user.id,
+                comment=data.comment,
+            )
+            db.add(hub_history)
+            vehicle.actual_bid = data.actual_bid
+            # vehicle.roi = data.roi
+            # vehicle.profit_margin = data.profit_margin
+            db.add(vehicle)
+            await db.commit()
+            # await db.refresh(vehicle)
+            logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
     except Exception as e:
         logger.error(f"Error updating current bid for car_id={car_id}: {str(e)}", extra=extra)
         await db.rollback()
