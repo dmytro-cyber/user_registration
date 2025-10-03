@@ -237,14 +237,15 @@ async def update_actual_bid(
         fees = fees_result.scalars().all()
 
         # Calculate auction_fee considering percentage-based fees
-        vehicle.auction_fee = 0
+        total_fees = 0
         for fee in fees:
             if fee.percent:
                 # Calculate percentage-based fee
-                vehicle.auction_fee += (fee.amount / 100) * data.actual_bid
+                total_fees += (fee.amount / 100) * data.actual_bid
             else:
                 # Add fixed fee
-                vehicle.auction_fee += fee.amount
+                total_fees += fee.amount
+        vehicle.auction_fee = total_fees
         
         vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
         total_investments = vehicle.sum_of_investments + data.actual_bid

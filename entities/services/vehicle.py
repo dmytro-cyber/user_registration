@@ -27,10 +27,38 @@ from schemas.vehicle import (
 logger = getLogger(__name__)
 
 
-def car_to_dict(vehicle: CarModel) -> Dict[str, Any]:
-    """Convert a CarModel to a dictionary."""
-    photos_data = [photo.url for photo in vehicle.photos] if vehicle.photos else []
-    return {**vehicle.__dict__, "photos": photos_data}
+def car_to_dict(vehicle: "CarModel") -> dict:
+    """Convert a CarModel to a plain dict without touching SQLAlchemy internals."""
+    return {
+        "id": vehicle.id,
+        "vin": vehicle.vin,
+        "vehicle": vehicle.vehicle,
+        "year": vehicle.year,
+        "mileage": vehicle.mileage,
+        "auction": vehicle.auction,
+        "auction_name": vehicle.auction_name,
+        "date": vehicle.date,
+        "lot": vehicle.lot,
+        "seller": vehicle.seller,
+        "owners": vehicle.owners,
+        "accident_count": vehicle.accident_count,
+        "engine": vehicle.engine,
+        "has_keys": vehicle.has_keys,
+        "predicted_roi": vehicle.predicted_roi,
+        "predicted_profit_margin": vehicle.predicted_profit_margin,
+        "roi": vehicle.roi,
+        "profit_margin": vehicle.profit_margin,
+        "current_bid": vehicle.current_bid,
+        "suggested_bid": vehicle.suggested_bid,
+        "location": vehicle.location,
+        "has_correct_mileage": vehicle.has_correct_mileage,
+        "has_correct_vin": vehicle.has_correct_vin,
+        "has_correct_accidents": vehicle.has_correct_accidents,
+        "liked": bool(getattr(vehicle, "liked", False)),
+        "recommendation_status": vehicle.recommendation_status,
+        "recommendation_status_reasons": vehicle.recommendation_status_reasons,
+        "photos": [p.url for p in (vehicle.photos or [])],
+    }
 
 
 async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings) -> CarBaseSchema:
