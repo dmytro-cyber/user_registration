@@ -209,7 +209,7 @@ async def update_actual_bid(
         fees = (
             await db.execute(
                 select(FeeModel).where(
-                    FeeModel.auction == vehicle.auction,
+                    FeeModel.auction.ilike(vehicle.auction),
                     FeeModel.price_from <= data.actual_bid,
                     FeeModel.price_to >= data.actual_bid,
                 )
