@@ -187,93 +187,61 @@ async def delete_vehicle(
         )
 
 
-@router.post(
-    "/actual-bid/{car_id}",
-    status_code=status.HTTP_200_OK,
-    summary="Update current bid for a vehicle",
-    description="Update the current bid for a vehicle in the bidding hub and log the action in history.",
-)
+@router.post("/actual-bid/{car_id}", status_code=status.HTTP_200_OK)
 async def update_actual_bid(
     car_id: int,
     data: UpdateActualBidSchema,
     current_user: Settings = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    """
-    Update the current bid for a vehicle in the bidding hub.
-
-    Args:
-        car_id (int): The ID of the vehicle to update.
-        data (UpdateCurrentBidSchema): The data containing the new bid and optional comment.
-        current_user (Settings): The currently authenticated user.
-        db (AsyncSession): The database session dependency.
-
-    Returns:
-        dict: Confirmation message of the bid update.
-
-    Raises:
-        HTTPException: 404 if the vehicle is not found.
-        HTTPException: 500 if an error occurs during the update.
-    """
-    request_id = "N/A"  # No request object available here
-    extra = {"request_id": request_id, "user_id": getattr(current_user, "id", "N/A")}
-    logger.info(
-        f"Updating current bid for car_id={car_id} to {data.actual_bid} by user_id={current_user.id}", extra=extra
-    )
+    extra = {"request_id": "N/A", "user_id": getattr(current_user, "id", "N/A")}
+    logger.info(f"Updating current bid for car_id={car_id} to {data.actual_bid} by user_id={current_user.id}", extra=extra)
 
     try:
-        async with db.begin():
+        async with db.begin():  # <— керує транзакцією сам
             vehicle = await get_vehicle_by_id(db, car_id)
             if not vehicle:
-                logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
-            
-            fees_result = await db.execute(
-                select(FeeModel).where(
-                    FeeModel.auction == vehicle.auction,
-                    FeeModel.price_from <= data.actual_bid,
-                    FeeModel.price_to >= data.actual_bid,
-                )
-            )
-            fees = fees_result.scalars().all()
+                raise HTTPException(status_code=404, detail="Vehicle not found")
 
-            # Calculate auction_fee considering percentage-based fees
+            fees = (
+                await db.execute(
+                    select(FeeModel).where(
+                        FeeModel.auction == vehicle.auction,
+                        FeeModel.price_from <= data.actual_bid,
+                        FeeModel.price_to >= data.actual_bid,
+                    )
+                )
+            ).scalars().all()
+
             total_fees = 0
             for fee in fees:
-                if fee.percent:
-                    # Calculate percentage-based fee
-                    total_fees += (fee.amount / 100) * data.actual_bid
-                else:
-                    # Add fixed fee
-                    total_fees += fee.amount
+                total_fees += (fee.amount / 100) * data.actual_bid if fee.percent else fee.amount
             vehicle.auction_fee = total_fees
-            
+
             vehicle.suggested_bid = vehicle.predicted_total_investments - vehicle.sum_of_investments
             total_investments = vehicle.sum_of_investments + data.actual_bid
             vehicle.roi = ((vehicle.avg_market_price - total_investments) / total_investments) * 100
             vehicle.profit_margin = vehicle.avg_market_price - total_investments
 
-            hub_history = HistoryModel(
+            db.add(HistoryModel(
                 car_id=car_id,
                 action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
                 user_id=current_user.id,
                 comment=data.comment,
-            )
-            db.add(hub_history)
+            ))
             vehicle.actual_bid = data.actual_bid
-            # vehicle.roi = data.roi
-            # vehicle.profit_margin = data.profit_margin
             db.add(vehicle)
-            await db.commit()
-            # await db.refresh(vehicle)
-            logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
+
+        logger.info(f"Successfully updated current bid for car_id={car_id} and logged history", extra=extra)
+        return {"message": "Current bid updated successfully"}
+
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Error updating current bid for car_id={car_id}: {str(e)}", extra=extra)
-        await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error updating current bid",
-        )
+        logger.error(f"Error updating current bid for car_id={car_id}: {e}", extra=extra)
+        # НІЯКИХ rollback тут — контекст сам відкотив
+        raise HTTPException(status_code=500, detail="Error updating current bid")
+
 
     return {"message": "Current bid updated successfully"}
 

@@ -83,7 +83,7 @@ REDIS_DB   = 1
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
 LOCK_KEY = "kickoff_task_lock"
-LOCK_TTL_SEC = 60 * 60 * 2
+LOCK_TTL_SEC = 60 * 60
 
 def is_kickoff_busy() -> bool:
     task_id = r.get(LOCK_KEY)
