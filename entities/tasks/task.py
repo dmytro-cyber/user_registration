@@ -314,7 +314,7 @@ def parse_and_update_car(
             # --------------------------
             car.owners = data.get("owners")
             car.has_correct_vin = True
-            car.relevance = RelevanceStatus.ACTIVE
+            
 
             # mileage correctness: True лише якщо обидва наявні та рівні
             incoming_mileage = data.get("mileage")
@@ -399,6 +399,7 @@ def parse_and_update_car(
 
             # success marker
             car.is_checked = True
+            car.relevance = RelevanceStatus.ACTIVE
 
             db.add(car)
             db.commit()
