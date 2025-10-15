@@ -28,7 +28,8 @@ logger = getLogger(__name__)
 
 
 def car_to_dict(vehicle: "CarModel") -> dict:
-    """Convert a CarModel to a plain dict without touching SQLAlchemy internals."""
+    """Return plain dict using only eagerly-loaded attributes."""
+    photos = getattr(vehicle, "photos", []) or []
     return {
         "id": vehicle.id,
         "vin": vehicle.vin,
@@ -57,7 +58,7 @@ def car_to_dict(vehicle: "CarModel") -> dict:
         "liked": bool(getattr(vehicle, "liked", False)),
         "recommendation_status": vehicle.recommendation_status,
         "recommendation_status_reasons": vehicle.recommendation_status_reasons,
-        "photos": [p.url for p in (vehicle.photos or [])],
+        "photos": [getattr(p, "url", None) for p in photos],
     }
 
 

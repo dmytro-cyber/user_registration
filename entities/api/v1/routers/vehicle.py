@@ -373,24 +373,26 @@ async def get_cars(
     if vin and len(vin.replace(" ", "")) == 17:
         vin = vin.replace(" ", "")
         logger.info(f"Searching for vehicle with VIN: {vin}", extra=extra)
-        async with db.begin():
-            vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
-            if vehicle:
-                logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
-                vehicle_data = car_to_dict(vehicle)
-                vehicle_data["liked"] = vehicle.liked
-                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
-            else:
-                logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
-                validated_vehicle = await scrape_and_save_vehicle(vin, db, settings)
-                vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
-                await db.commit()
-                vehicle_data = car_to_dict(vehicle)
-                vehicle_data["liked"] = vehicle.liked
-                validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
-                logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
-                return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
+
+        vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
+        if vehicle:
+            logger.info(f"Found vehicle with VIN: {vin}", extra=extra)
+            vehicle_data = car_to_dict(vehicle)
+            validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+            return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
+
+        logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
+        await scrape_and_save_vehicle(vin, db, settings)
+        await db.commit()
+
+        vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
+        if not vehicle:
+            raise HTTPException(status_code=502, detail="Parser did not return a vehicle")
+
+        vehicle_data = car_to_dict(vehicle)
+        validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
+        logger.info(f"Scraped and saved data for VIN {vin}, returning response", extra=extra)
+        return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
     vehicles, total_count, total_pages, additional = await get_filtered_vehicles(
         db=db, filters=filters, ordering=ordering, page=page, page_size=page_size

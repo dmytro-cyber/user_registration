@@ -331,9 +331,9 @@ class CarFilterOptionsSchema(BaseModel):
 
 
 class UpdateActualBidSchema(BaseModel):
-    actual_bid: float
-    roi: float
-    profit_margin: float
+    actual_bid: float | None = None
+    roi: float | None = None
+    profit_margin: float | None = None
     comment: str | None = None
 
 

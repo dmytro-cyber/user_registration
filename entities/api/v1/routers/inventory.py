@@ -542,7 +542,7 @@ async def get_car_inventory_history(
 
 
 @router.get(
-    "vehicles/history/{part_inventory_id}",
+    "parts/history/{part_inventory_id}",
     response_model=BiddingHubHistoryListResponseSchema,
     summary="Get bidding hub history for a vehicle",
     description="Retrieve the bidding hub history for a vehicle by its ID, including full user details, ordered by creation date (descending).",

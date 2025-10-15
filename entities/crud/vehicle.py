@@ -37,27 +37,6 @@ logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: int, db: AsyncSession) -> None:
-    """Save sales history for a vehicle."""
-    if len(sale_history_data) >= 4:
-        logger.debug(
-            f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase."
-        )
-        car = await get_vehicle_by_id(db, car_id)
-        car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-        if not car.recommendation_status_reasons:
-            car.recommendation_status_reasons = f"sales at auction in the last 3 years: {len(sale_history_data)};"
-        else:
-            car.recommendation_status_reasons += f"sales at auction in the last 3 years: {len(sale_history_data)};"
-        db.add(car)
-        await db.flush()
-    for history_data in sale_history_data:
-        sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
-        if not sales_history.source:
-            sales_history.source = "Unknown"
-        db.add(sales_history)
-        await db.commit()
-
 SITE_MAP = {
     1: "Copart",
     2: "IAAI",
@@ -123,6 +102,28 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
     await db.commit()
 
 
+async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: int, db: AsyncSession) -> None:
+    """Save sales history for a vehicle."""
+    if len(sale_history_data) >= 4:
+        logger.debug(
+            f"More than 3 sales history records provided for car ID {car_id}. Car will not be recomendet for purchase."
+        )
+        car = await get_vehicle_by_id(db, car_id)
+        car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        if not car.recommendation_status_reasons:
+            car.recommendation_status_reasons = f"sales at auction in the last 3 years: {len(sale_history_data)};"
+        else:
+            car.recommendation_status_reasons += f"sales at auction in the last 3 years: {len(sale_history_data)};"
+        db.add(car)
+        await db.flush()
+    for history_data in sale_history_data:
+        sales_history = CarSaleHistoryModel(**history_data.dict(), car_id=car_id)
+        if not sales_history.source:
+            sales_history.source = "Unknown"
+        db.add(sales_history)
+        await db.commit()
+
+
 async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db: AsyncSession) -> bool:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
@@ -146,6 +147,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     existing_vehicle.relevance = RelevanceStatus.ACTIVE
                     existing_vehicle.attempts = 0
                     existing_vehicle.is_checked = False
+
+                    db.add(existing_vehicle)
+
                     to_parse = True
                 else:
                     existing_vehicle.relevance = RelevanceStatus.IRRELEVANT

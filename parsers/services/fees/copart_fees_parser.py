@@ -235,10 +235,10 @@ class FeeScraper:
             try:
                 clean_title_element = WebDriverWait(driver, 10).until(
                     EC.presence_of_element_located(
-                        (By.XPATH, "//*[contains(normalize-space(text()), 'Clean Title Vehicles')]")
+                        (By.XPATH, "//*[contains(normalize-space(text()), 'Non-Clean Title Vehicles')]")
                     )
                 )
-                logger.info("Found 'Clean Title Vehicles' element in main content.")
+                logger.info("Found 'Non-Clean Title Vehicles' element in main content.")
             except Exception as e:
                 logger.warning("Element not found in main content: %s. Checking iframe.", str(e))
 
@@ -252,17 +252,17 @@ class FeeScraper:
                         logger.info("Switched to iframe 0.")
                         clean_title_element = WebDriverWait(driver, 10).until(
                             EC.presence_of_element_located(
-                                (By.XPATH, "//*[contains(normalize-space(text()), 'Clean Title Vehicles')]")
+                                (By.XPATH, "//*[contains(normalize-space(text()), 'Non-Clean Title Vehicles')]")
                             )
                         )
-                        logger.info("Found 'Clean Title Vehicles' element in iframe 0.")
+                        logger.info("Found 'Non-Clean Title Vehicles' element in iframe 0.")
                     except Exception as e:
                         logger.warning("Element not found in iframe 0: %s.", str(e))
                         driver.switch_to.default_content()
-                        raise Exception("Could not find 'Clean Title Vehicles' element in main content or iframe 0.")
+                        raise Exception("Could not find 'Non-Clean Title Vehicles' element in main content or iframe 0.")
 
             if clean_title_element is None:
-                raise Exception("Could not find 'Clean Title Vehicles' element.")
+                raise Exception("Could not find 'Non-Clean Title Vehicles' element.")
 
             # Force the element to be clickable by modifying its properties
             driver.execute_script(
@@ -280,7 +280,7 @@ class FeeScraper:
             """,
                 clean_title_element,
             )
-            logger.info("Forced 'Clean Title Vehicles' element to be clickable and triggered mouse events.")
+            logger.info("Forced 'Non-Clean Title Vehicles' element to be clickable and triggered mouse events.")
 
             # Wait for the element to become clickable
             def is_element_clickable(driver):
@@ -295,7 +295,7 @@ class FeeScraper:
                     return False
 
             WebDriverWait(driver, 10).until(lambda d: is_element_clickable(d))
-            logger.info("'Clean Title Vehicles' element is now clickable.")
+            logger.info("'Non-Clean Title Vehicles' element is now clickable.")
 
             # Additional delay to ensure stability
             time.sleep(2)
@@ -303,7 +303,7 @@ class FeeScraper:
 
             # Click the element using JavaScript as a fallback
             driver.execute_script("arguments[0].click();", clean_title_element)
-            logger.info("Clicked on 'Clean Title Vehicles' button using JavaScript.")
+            logger.info("Clicked on 'Non-Clean Title Vehicles' button using JavaScript.")
 
             # Wait for the Secured Payment Methods section
             WebDriverWait(driver, 10).until(

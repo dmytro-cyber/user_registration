@@ -25,6 +25,9 @@ dependencies = [
     "2captcha-python (>=1.5.1,<2.0.0)",
     "httpx[socks] (>=0.28.1,<0.29.0)",
     "ruff (>=0.12.4,<0.13.0)",
+    "pytest (>=8.4.2,<9.0.0)",
+    "pytest-asyncio (>=1.2.0,<2.0.0)",
+    "python-dotenv (>=1.1.1,<2.0.0)",
 ]
 
 [tool.ruff]

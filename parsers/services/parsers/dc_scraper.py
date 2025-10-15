@@ -573,7 +573,6 @@ if __name__ == "__main__":
             if k == "html_data":
                 print(f"{k}: {len(str(v))}")
     except AuthRefreshedError:
-        # External retry simulation (your FastAPI route should do this automatically)
         logging.info("Retrying after auth refresh...")
         result = asyncio.run(dc.get_history_and_market_data_async())
         for k, v in result.items():
