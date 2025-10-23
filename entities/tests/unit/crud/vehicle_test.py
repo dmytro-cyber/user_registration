@@ -1,26 +1,26 @@
-from datetime import datetime, timedelta
 import asyncio
-import pytest
+from datetime import datetime, timedelta
 
-from sqlalchemy import insert, desc, select
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+import pytest
+from sqlalchemy import desc, insert, select
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from crud.vehicle import get_filtered_vehicles, save_vehicle_with_photos
 from models import Base
 from models.admin import FilterModel
 from models.vehicle import (
     CarModel,
-    PhotoModel,
-    ConditionAssessmentModel,
     CarSaleHistoryModel,
-    RelevanceStatus,
+    ConditionAssessmentModel,
+    PhotoModel,
     RecommendationStatus,
+    RelevanceStatus,
     user_likes,
 )
 from schemas.vehicle import (
     CarCreateSchema,
-    PhotoSchema,
     ConditionAssessmentResponseSchema,
+    PhotoSchema,
     SalesHistoryBaseSchema,
 )
 

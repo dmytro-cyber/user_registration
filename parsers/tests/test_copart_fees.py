@@ -1,16 +1,16 @@
 # tests/test_copart_fees.py
-from bs4 import BeautifulSoup
-from unittest.mock import patch, MagicMock
-
 import os
+from unittest.mock import MagicMock, patch
+
 import pytest
+from bs4 import BeautifulSoup
 
 from services.fees.copart_fees_parser import (
     BiddingFeeScraper,
-    GateFeeScraper,
-    VirtualBidFeeScraper,
     EnvironmentalFeeScraper,
     FeeScraper,
+    GateFeeScraper,
+    VirtualBidFeeScraper,
     scrape_copart_fees,
 )
 

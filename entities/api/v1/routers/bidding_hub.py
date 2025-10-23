@@ -14,7 +14,7 @@ from core.dependencies import get_current_user
 from crud.vehicle import get_bidding_hub_vehicles, get_vehicle_by_id, update_vehicle_status
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import CarStatus, HistoryModel, FeeModel
+from models.vehicle import CarStatus, FeeModel, HistoryModel
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,

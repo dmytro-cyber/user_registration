@@ -1,18 +1,19 @@
 import logging
 from datetime import datetime, time, timezone
 from math import asin, cos, radians, sin, sqrt
-from typing import Any, Dict, List, Optional, Tuple, Iterable
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import and_, asc, case, delete, desc, func, literal_column, or_, select, bindparam, update, exists
+from sqlalchemy import and_, asc, bindparam, case, delete, desc, exists, func, literal_column, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, selectinload, with_loader_criteria, noload
+from sqlalchemy.orm import aliased, noload, selectinload, with_loader_criteria
 from sqlalchemy.sql import over
 
+from core.dependencies import get_s3_storage_client
 from core.setup import match_and_update_location
-from models.user import UserModel, UserRoleEnum, user_likes
 from models.admin import FilterModel
+from models.user import UserModel, UserRoleEnum, user_likes
 from models.vehicle import (
     AutoCheckModel,
     CarInventoryModel,
@@ -31,7 +32,6 @@ from models.vehicle import (
 )
 from ordering_constr import ORDERING_MAP
 from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema
-from core.dependencies import get_s3_storage_client
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")

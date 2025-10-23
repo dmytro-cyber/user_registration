@@ -1,7 +1,10 @@
 # entities/tests/unit/tasks/tasks_test.py
-import pytest
 from datetime import datetime
-from models.vehicle import CarModel, RelevanceStatus, AutoCheckModel, RecommendationStatus
+
+import pytest
+
+from models.vehicle import AutoCheckModel, CarModel, RecommendationStatus, RelevanceStatus
+
 
 class _RespBase:
     status_code = 200

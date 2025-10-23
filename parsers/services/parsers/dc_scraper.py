@@ -6,7 +6,7 @@ import logging
 import os
 import re
 import time
-from typing import Optional, Tuple, Dict, Any
+from typing import Any, Dict, Optional, Tuple
 
 import httpx
 from bs4 import BeautifulSoup

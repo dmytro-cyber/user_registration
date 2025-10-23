@@ -1,10 +1,11 @@
-import pytest
-from types import SimpleNamespace
 from datetime import datetime
+from types import SimpleNamespace
+
+import pytest
 from sqlalchemy import text
 
-from models.vehicle import HistoryModel
 import api.v1.routers.bidding_hub as bidding_hub_router
+from models.vehicle import HistoryModel
 
 pytestmark = pytest.mark.anyio
 

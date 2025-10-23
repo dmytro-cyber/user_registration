@@ -3,12 +3,12 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from sqlalchemy import select, delete
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.routers.vehicle import router as vehicles_router
 from models.admin import ROIModel
 from models.vehicle import AutoCheckModel, CarModel, FeeModel, RelevanceStatus
-from api.v1.routers.vehicle import router as vehicles_router
 
 API_PREFIX = "/api/v1/vehicles"
 

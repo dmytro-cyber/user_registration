@@ -6,21 +6,19 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 import httpx
+import redis
+from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import delete, and_, update
+from sqlalchemy import and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
-from celery.result import AsyncResult
-import redis
 from core.celery_config import app as celery_app
-from core.dependencies import get_current_user, get_token
+from core.dependencies import get_current_user, get_settings, get_token
 from db.session import get_db
 from models.admin import FilterModel, ROIModel
-from models.vehicle import FeeModel, CarModel, RelevanceStatus
-from core.dependencies import get_settings
-from services.vehicle import scrape_and_save_sales_history,build_car_filter_query
+from models.vehicle import CarModel, FeeModel, RelevanceStatus
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -30,6 +28,8 @@ from schemas.admin import (
     ROIListResponseSchema,
     ROIResponseSchema,
 )
+from services.vehicle import build_car_filter_query, scrape_and_save_sales_history
+
 # from tasks.task import parse_and_update_car
 
 # Configure logging for production environment

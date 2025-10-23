@@ -1,16 +1,17 @@
 # parsers/services/fees/iaai_image_parser.py
 from __future__ import annotations
-from typing import Dict, List, Tuple, Optional
-from itertools import zip_longest
+
+import logging
+import os
 import re
 import statistics
 from io import BytesIO
-import os
-import logging
+from itertools import zip_longest
+from typing import Dict, List, Optional, Tuple
 
-from PIL import Image
 import pytesseract
 from cairosvg import svg2png
+from PIL import Image
 
 logger = logging.getLogger(__name__)
 

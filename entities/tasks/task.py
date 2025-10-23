@@ -1,42 +1,40 @@
 # tasks.py — synchronous Celery tasks for gevent pool
 # --------------------------------------------------
-import os
+import asyncio
+
 # if os.environ.get("CELERY_GEVENT", "0") == "1":
 #     from gevent import monkey
 #     monkey.patch_all()
-
 import logging
 import os
 import time
-import asyncio
-import anyio
 from datetime import datetime, timezone
 from io import BytesIO
-from typing import Any, Dict, Optional, List, Callable, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
+import anyio
 import httpx
 import redis
-from sqlalchemy import and_, delete, func, select, create_engine, or_, text
+from sqlalchemy import and_, create_engine, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.orm import sessionmaker, Session, selectinload
+from sqlalchemy.orm import Session, selectinload, sessionmaker
 
 from core.celery_config import app
 from core.config import settings
 from db.session import POSTGRESQL_DATABASE_URL
-from models.admin import ROIModel, FilterModel
+from models.admin import FilterModel, ROIModel
 from models.vehicle import (
     AutoCheckModel,
     CarModel,
     CarSaleHistoryModel,
+    ConditionAssessmentModel,
     FeeModel,
+    PhotoModel,
     RecommendationStatus,
     RelevanceStatus,
-    PhotoModel,
-    ConditionAssessmentModel
 )
 from schemas.vehicle import CarCreateSchema
 from storages import S3StorageClient
-
 
 # =========================
 # Logging

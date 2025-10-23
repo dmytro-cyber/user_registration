@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.dependencies import get_token
 from schemas.schemas import DCResponseSchema

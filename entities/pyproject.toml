@@ -39,6 +39,8 @@ dependencies = [
 [tool.ruff]
 line-length = 119
 target-version = "py312"
+
+[tool.ruff.lint]
 select = ["I"]
 fixable = ["I"]
 unfixable = ["F401", "F841"]

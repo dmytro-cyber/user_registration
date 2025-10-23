@@ -12,6 +12,7 @@ from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
 from core.celery_config import app as celery_app
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
+
 # from tasks.task import update_car_fees
 
 app = FastAPI(

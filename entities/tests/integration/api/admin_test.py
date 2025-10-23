@@ -1,9 +1,10 @@
-import pytest
 from types import SimpleNamespace
+
+import pytest
+from fastapi import status
 from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
-from fastapi import status
 
 from models.admin import FilterModel, ROIModel
 from models.vehicle import FeeModel
@@ -176,8 +177,9 @@ async def test_load_db(client: AsyncClient, monkeypatch):
     """
     Load-db endpoint responds with a success code when the scraper stub is used.
     """
-    import api.v1.routers.admin as admin_router_mod
     import httpx
+
+    import api.v1.routers.admin as admin_router_mod
 
     class _CtxAsyncClient:
         def __init__(self, *args, **kwargs): ...

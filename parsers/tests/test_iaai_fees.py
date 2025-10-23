@@ -1,9 +1,10 @@
 # tests/test_iaai_fees.py
 from __future__ import annotations
 
+import re
 import sys
 import types
-import re
+
 import pytest
 
 # --------------------------------------------------------------------------------------
@@ -26,16 +27,16 @@ try:
     from services.fees.iaai_fees_image_parser import (
         OPEN_CAP,
         _normalize_price_cell,
-        _parse_fee_cell,
         _pair_rows,
+        _parse_fee_cell,
     )
 except ModuleNotFoundError:
     # Fallback if the file is named differently in the repo
     from services.fees.iaai_image_parser import (  # type: ignore
         OPEN_CAP,
         _normalize_price_cell,
-        _parse_fee_cell,
         _pair_rows,
+        _parse_fee_cell,
     )
 
 

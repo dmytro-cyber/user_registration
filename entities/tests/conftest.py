@@ -1,26 +1,26 @@
 # conftest.py
 import asyncio
+import itertools
+import logging
 import os
 import types
-from types import SimpleNamespace
-import logging
-import itertools
 from datetime import date
 from io import BytesIO
+from types import SimpleNamespace
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
-from sqlalchemy import text, insert, select, create_engine
+from sqlalchemy import create_engine, insert, select, text
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
+
+import tasks.task as task_module
+from core.dependencies import get_settings
+from core.security.token_manager import JWTAuthManager
+from db.session import POSTGRESQL_DATABASE_URL  # noqa: F401
 from db.session import get_db as real_get_db
 from main import app
-from core.dependencies import get_settings
-from db.session import POSTGRESQL_DATABASE_URL  # noqa: F401
-from core.security.token_manager import JWTAuthManager
-import tasks.task as task_module
-from models.user import UserRoleModel, UserRoleEnum, UserModel
+from models.user import UserModel, UserRoleEnum, UserRoleModel
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 for logger_name in ("sqlalchemy.engine", "sqlalchemy.pool"):
@@ -439,8 +439,8 @@ def override_bidding_hub_user(test_user):
     """
     Override user dependency for the bidding_hub router and for global get_current_user.
     """
-    from core.dependencies import get_current_user as core_get_current_user
     import api.v1.routers.bidding_hub as bidding_hub_router_module
+    from core.dependencies import get_current_user as core_get_current_user
 
     dummy_user = types.SimpleNamespace(id=int(test_user.id), email=getattr(test_user, "email", "test@example.com"))
     app.dependency_overrides[core_get_current_user] = lambda: dummy_user
@@ -569,8 +569,9 @@ def patch_admin_httpx_client(monkeypatch):
     """
     Replace httpx.AsyncClient inside admin router with a stub.
     """
-    import api.v1.routers.admin as admin_router_module
     import httpx as real_httpx_module
+
+    import api.v1.routers.admin as admin_router_module
     monkeypatch.setattr(admin_router_module, "httpx", real_httpx_module, raising=False)
     monkeypatch.setattr(admin_router_module.httpx, "AsyncClient", _MockAsyncClient, raising=True)
 
@@ -605,8 +606,8 @@ async def invite_code(jwt_manager, db_session):
     """
     Create a valid invitation code for sign-up flows.
     """
-    from services.user import generate_invite_link
     from schemas.user import UserInvitationRequestSchema
+    from services.user import generate_invite_link
 
     role_id_value = (
         await db_session.execute(
@@ -718,6 +719,7 @@ def create_car(db_session: AsyncSession):
     Return an async factory that inserts a CarModel row with sensible defaults.
     """
     from datetime import datetime, timedelta
+
     from models.vehicle import CarModel, RelevanceStatus
 
     async def factory(

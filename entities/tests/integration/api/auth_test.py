@@ -3,11 +3,11 @@ from httpx import AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
+from core.dependencies import get_current_user
 from main import app
-from models.user import UserModel, UserRoleModel, UserRoleEnum
+from models.user import UserModel, UserRoleEnum, UserRoleModel
 from schemas.user import UserInvitationRequestSchema
 from services.user import generate_invite_link
-from core.dependencies import get_current_user
 
 pytestmark = pytest.mark.anyio
 

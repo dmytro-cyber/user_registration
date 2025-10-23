@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-and-test:
+    name: ${{ matrix.app }} • ruff + tests
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [ "entities", "parsers" ]
+
+    defaults:
+      run:
+        working-directory: ${{ matrix.app }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Poetry 2.x
+        uses: snok/install-poetry@v1
+        with:
+          version: 2.0.1
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache venv
+        uses: actions/cache@v4
+        with:
+          path: ${{ matrix.app }}/.venv
+          key: venv-${{ matrix.app }}-${{ runner.os }}-py312-${{ hashFiles(format('{0}/poetry.lock', matrix.app)) }}
+          restore-keys: |
+            venv-${{ matrix.app }}-${{ runner.os }}-py312-
+
+      - name: Install deps (all groups)
+        run: poetry install --no-interaction --no-ansi
+
+      - name: Ruff check
+        run: poetry run ruff check .
+
+      - name: Run tests
+        run: poetry run pytest -q

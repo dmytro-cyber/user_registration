@@ -1,7 +1,10 @@
 import asyncio
+
 import httpx
 import pytest
-from services.parsers.dc_scraper import DealerCenterScraper, AuthRefreshedError
+
+from services.parsers.dc_scraper import AuthRefreshedError, DealerCenterScraper
+
 
 @pytest.fixture(scope="session")
 def anyio_backend():

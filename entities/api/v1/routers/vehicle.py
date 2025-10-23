@@ -4,7 +4,7 @@ import logging.handlers
 import os
 from collections import defaultdict
 from datetime import date
-from typing import Dict, List, Optional, Any
+from typing import Any, Dict, List, Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
@@ -25,14 +25,14 @@ from crud.vehicle import (
     get_vehicle_by_id,
     get_vehicle_by_vin,
     save_vehicle_with_photos,
+    update_cars_relevance,
     update_part,
     update_vehicle_status,
-    update_cars_relevance,
 )
 from db.session import get_db
+from models.admin import ROIModel
 from models.user import UserModel
 from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus
-from models.admin import ROIModel
 from schemas.vehicle import (
     CarBaseSchema,
     CarBulkCreateSchema,
@@ -53,6 +53,7 @@ from services.vehicle import (
     scrape_and_save_sales_history,
     scrape_and_save_vehicle,
 )
+
 # from tasks.task import parse_and_update_car
 
 # Configure logging for production environment

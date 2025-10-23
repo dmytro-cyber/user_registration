@@ -4,8 +4,8 @@ import json
 import os
 from datetime import date, datetime
 from difflib import SequenceMatcher
-from typing import Dict
 from math import atan2, cos, radians, sin, sqrt
+from typing import Dict
 
 from passlib.context import CryptContext
 from sqlalchemy import and_, distinct, select
