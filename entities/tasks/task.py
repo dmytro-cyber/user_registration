@@ -533,9 +533,9 @@ def parse_and_update_car(
                 None if not car_pre else (car_pre.attempts or 0),
             )
 
-        --------------------------
-        2) Main parsing + updates
-        --------------------------
+        #--------------------------
+        #2) Main parsing + updates
+        #--------------------------
         try:
             parse_url = (
                 "http://parsers:8001/api/v1/parsers/scrape/dc"
