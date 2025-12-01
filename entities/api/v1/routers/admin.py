@@ -135,12 +135,12 @@ async def create_filter(
     await db.commit()
     await db.refresh(db_filter)
 
-    kickoff_result = celery_app.send_task(
-        "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id},
-        queue="car_parsing_queue",
-    )
-    set_kickoff_lock(kickoff_result.id)
+    # kickoff_result = celery_app.send_task(
+    #     "tasks.task.kickoff_parse_for_filter",
+    #     kwargs={"filter_id": db_filter.id},
+    #     queue="car_parsing_queue",
+    # )
+    # set_kickoff_lock(kickoff_result.id)
 
     return db_filter
 
@@ -273,12 +273,12 @@ async def update_filter_and_relevance(
 
     await db.commit()
 
-    kickoff_result = celery_app.send_task(
-        "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id},
-        queue="car_parsing_queue",
-    )
-    set_kickoff_lock(kickoff_result.id)
+    # kickoff_result = celery_app.send_task(
+    #     "tasks.task.kickoff_parse_for_filter",
+    #     kwargs={"filter_id": db_filter.id},
+    #     queue="car_parsing_queue",
+    # )
+    # set_kickoff_lock(kickoff_result.id)
 
     return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 

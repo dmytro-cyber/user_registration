@@ -4,6 +4,10 @@
 from celery import Celery
 from celery.schedules import crontab
 from celery.signals import worker_process_init
+from core.dependencies import get_settings
+
+
+SETTINGS = get_settings()
 
 
 @worker_process_init.connect
@@ -22,8 +26,8 @@ app.conf.task_queues = {
 
 app.conf.task_routes = {
     "tasks.task.parse_and_update_car": {"queue": "car_parsing_queue"},
-    "tasks.task.update_car_bids": {"queue": "car_parsing_queue"},
-    "tasks.task.parse_and_update_cars_with_expired_auction_date": {"queue": "car_parsing_queue"},
+    # "tasks.task.update_car_bids": {"queue": "car_parsing_queue"},
+    # "tasks.task.parse_and_update_cars_with_expired_auction_date": {"queue": "car_parsing_queue"},
 }
 
 app.conf.task_track_started = True
@@ -33,19 +37,19 @@ app.conf.result_serializer = "json"
 app.conf.task_always_eager = False
 
 app.conf.beat_schedule = {
-    "update-car-bids-every-15-minutes": {
-        "task": "tasks.task.update_car_bids",
-        "schedule": crontab(minute="13,30,45", hour="0-2,4-23"),
-    },
+    # "update-car-bids-every-15-minutes": {
+    #     "task": "tasks.task.update_car_bids",
+    #     "schedule": crontab(minute="13,30,45", hour="0-2,4-23"),
+    # },
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
         "schedule": crontab(day_of_month="1", hour=0, minute=0),
     },
-    "expired-auction-daily-3-15am-CT": {
-        "task": "tasks.task.parse_and_update_cars_with_expired_auction_date",
-        "schedule": crontab(hour=3, minute=15),  # 03:15 CT
-        "options": {"queue": "car_parsing_queue"},
-    },
+    # "expired-auction-daily-3-15am-CT": {
+    #     "task": "tasks.task.parse_and_update_cars_with_expired_auction_date",
+    #     "schedule": crontab(hour=3, minute=15),  # 03:15 CT
+    #     "options": {"queue": "car_parsing_queue"},
+    # },
 }
 
 app.autodiscover_tasks(["tasks.task"])

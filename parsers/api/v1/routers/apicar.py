@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 
 from core.dependencies import get_token
 from schemas.schemas import DCResponseSchema
-from services.convert.vehicle import format_car_data
+from services.convert import format_car_data
 from services.parsers.dc_scraper_local import DealerCenterScraper
 
 logging.basicConfig(

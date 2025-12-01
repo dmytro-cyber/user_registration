@@ -25,6 +25,7 @@ class Settings(BaseAppSettings):
     SMTP_USER: str = os.getenv("SMTP_USER")
     SMTP_PASSWORD: str = os.getenv("SMTP_PASSWORD")
     EMAIL_FROM: str = os.getenv("EMAIL_FROM")
+    TASKS_MODE: str = os.getenv("API_SOURCE")
 
     ENVIRON: str = os.getenv("ENVIRON", "prod")
 
