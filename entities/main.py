@@ -21,9 +21,9 @@ app = FastAPI(
 )
 
 
-# @app.on_event("startup")
-# async def on_startup():
-#     await create_roles()
+@app.on_event("startup")
+async def on_startup():
+    await create_roles()
 #     await import_us_zips_from_csv()
 #     celery_app.send_task(
 #         "tasks.task.update_fees",
