@@ -169,7 +169,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     #     else:
                     #         if f"{value};" not in existing_vehicle.recommendation_status_reasons:
                     #             existing_vehicle.recommendation_status_reasons += f"{value};"
-                    if field == "transmision" and value not in ["Automatic", "Automatic", "AUTOMATIC", "automatic"]:
+                    if field == "transmision" and value != "Automatic":
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{value};"
@@ -256,7 +256,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             #         vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
             #     else:
             #         vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
-            if field == "transmision" and value not in ["Automatic", "Automatic", "AUTOMATIC", "automatic"]:
+            if vehicle.transmision != "Automatic":
                 vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                 if not vehicle.recommendation_status_reasons:
                     vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
