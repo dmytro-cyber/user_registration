@@ -65,7 +65,6 @@ class Settings(BaseAppSettings):
     COOKIE_SAMESITE: str = os.getenv("COOKIE_SAMESITE")
 
     PARSERS_AUTH_TOKEN: str = os.getenv("PARSERS_AUTH_TOKEN")
-    API_SOURCE: str = os.getenv("API_SOURCE")
 
     @property
     def S3_STORAGE_ENDPOINT(self) -> str:

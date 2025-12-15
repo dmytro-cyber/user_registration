@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   db:
-    image: "postgres:16"
+    image: "postgres:latest"
     container_name: postgres_cars_and_beyond
     env_file:
       - ./entities/.env
@@ -34,8 +34,6 @@ services:
       - pgadmin_cars_and_beyond_data:/var/lib/pgadmin
     networks:
       - cars_and_beyond_network
-    logging:
-      driver: "none"
 
   redis:
     image: "redis:latest"
@@ -205,7 +203,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_worker_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks_auction_io.app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "worker", "--loglevel=info"]
     env_file:
       - ./parsers/.env
     environment:
@@ -229,7 +227,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_beat_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks_auction_io.app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "beat", "--loglevel=info"]
     env_file:
       - ./parsers/.env
     environment:
@@ -275,6 +273,7 @@ services:
   nginx:
     build:
       context: .
+    #   dockerfile: docker/nginx/Dockerfile
       dockerfile: docker/nginx/Dockerfile
     container_name: nginx
     restart: always
