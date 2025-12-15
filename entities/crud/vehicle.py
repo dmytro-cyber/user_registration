@@ -162,13 +162,13 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             ).items():
                 if (value is not None or field == "date"):
                     setattr(existing_vehicle, field, value)
-                    # if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-                    #     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    #     if not existing_vehicle.recommendation_status_reasons:
-                    #         existing_vehicle.recommendation_status_reasons = f"{value};"
-                    #     else:
-                    #         if f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                    #             existing_vehicle.recommendation_status_reasons += f"{value};"
+                    if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{value};"
+                        else:
+                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{value};"
                     if field == "transmision" and value != "Automatic":
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
@@ -213,12 +213,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                         "Replaced Vin",
                         "Burn",
                         "Undercarriage",
-                        "Undercarriage",
                         "Water/Flood",
-                        "Flood",
                         "Burn Interior",
                         "Rollover",
-                        "Theft",
                     ]:
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
@@ -248,12 +245,12 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             )
             db.add(vehicle)
             await db.flush()
-            # if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-            #     vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-            #     if not vehicle.recommendation_status_reasons:
-            #         vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
-            #     else:
-            #         vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
+            if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                if not vehicle.recommendation_status_reasons:
+                    vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
+                else:
+                    vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
             if vehicle.transmision != "Automatic":
                 vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                 if not vehicle.recommendation_status_reasons:
@@ -295,12 +292,9 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                             "Replaced Vin",
                             "Burn",
                             "Undercarriage",
-                            "Undercarriage",
                             "Water/Flood",
-                            "Flood",
                             "Burn Interior",
                             "Rollover",
-                            "Theft",
                         ]:
                             vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                             if not vehicle.recommendation_status_reasons:
