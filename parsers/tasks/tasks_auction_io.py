@@ -30,7 +30,7 @@ app = Celery(
 app.conf.beat_schedule = {
     "fetch-api-data-every-minute": {
         "task": "tasks.tasks_auction_io.fetch_api_data",
-        "schedule": crontab(minute="*/60"),
+        "schedule": crontab(minute="*/1"),
     },
 }
 
