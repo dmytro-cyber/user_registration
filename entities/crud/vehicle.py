@@ -256,7 +256,7 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             #         vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
             #     else:
             #         vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
-            if vehicle.transmision and vehicle.transmision not in ["Automatic", "AUTOMATIC", "automatic"]:
+            if field == "transmision" and value not in ["Automatic", "Automatic", "AUTOMATIC", "automatic"]:
                 vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                 if not vehicle.recommendation_status_reasons:
                     vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
