@@ -273,8 +273,8 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # - ./cert.pem:/etc/nginx/certs/cert.pem:ro
-      # - ./key.pem:/etc/nginx/certs/key.pem:ro
+      - ./cert.pem:/etc/nginx/certs/cert.pem:ro
+      - ./key.pem:/etc/nginx/certs/key.pem:ro
       - ./configs/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./configs/nginx/static/robots.txt:/usr/share/nginx/html/robots.txt:ro
       - ./certbot/www:/var/www/certbot
