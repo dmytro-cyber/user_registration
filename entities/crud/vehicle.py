@@ -237,8 +237,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
             if not existing_vehicle.sales_history:
                 if vehicle_data.sales_history:
                     await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
-            if not existing_vehicle.recommendation_status_reasons:
-                existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
 
             await db.commit()
 
@@ -318,9 +316,6 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
 
             if vehicle_data.sales_history:
                 await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
-
-            if not vehicle.recommendation_status_reasons:
-                vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
 
             await db.commit()
             return to_parse
