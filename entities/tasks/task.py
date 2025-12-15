@@ -533,153 +533,153 @@ def parse_and_update_car(
                 None if not car_pre else (car_pre.attempts or 0),
             )
 
-        --------------------------
-        2) Main parsing + updates
-        --------------------------
-        try:
-            parse_url = (
-                "http://parsers:8001/api/v1/parsers/scrape/dc"
-                f"?car_vin={vin}"
-                f"&car_mileage={mileage}"
-                f"&car_name={car_name}"
-                f"&car_engine={car_engine}"
-                f"&car_make={car_make}"
-                f"&car_model={car_model}"
-                f"&car_year={car_year}"
-                f"&car_transmison={car_transmison}"
-                f"&only_history=false"
-            )
-            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-            resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
-            data = resp.json()
+        # --------------------------
+        # 2) Main parsing + updates
+        # --------------------------
+        # try:
+        #     parse_url = (
+        #         "http://parsers:8001/api/v1/parsers/scrape/dc"
+        #         f"?car_vin={vin}"
+        #         f"&car_mileage={mileage}"
+        #         f"&car_name={car_name}"
+        #         f"&car_engine={car_engine}"
+        #         f"&car_make={car_make}"
+        #         f"&car_model={car_model}"
+        #         f"&car_year={car_year}"
+        #         f"&car_transmison={car_transmison}"
+        #         f"&only_history=false"
+        #     )
+        #     headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
+        #     resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
+        #     data = resp.json()
 
-            # lock the car row up-front (so we can safely mutate + count attempts on HTTP error)
-            car_q = (
-                select(CarModel)
-                .where(CarModel.vin == vin)
-                .options(selectinload(CarModel.condition_assessments))
-                .with_for_update()
-            )
-            car = db.execute(car_q).scalars().first()
-            if not car:
-                raise ValueError(f"Car with VIN {vin} not found")
+        #     # lock the car row up-front (so we can safely mutate + count attempts on HTTP error)
+        #     car_q = (
+        #         select(CarModel)
+        #         .where(CarModel.vin == vin)
+        #         .options(selectinload(CarModel.condition_assessments))
+        #         .with_for_update()
+        #     )
+        #     car = db.execute(car_q).scalars().first()
+        #     if not car:
+        #         raise ValueError(f"Car with VIN {vin} not found")
 
-            # HTTP status failure -> mark attempt + vin flag + reason, return exception
-            try:
-                resp.raise_for_status()
-            except Exception as e:
-                logger.info(f"Exception: {e} for VIN: {vin}")
-                car.attempts = (car.attempts or 0) + 1
-                car.has_correct_vin = False
-                add_reason(car, "upstream parser error;")
-                db.commit()
-                return {"status": "exception", "vin": vin}
+        #     # HTTP status failure -> mark attempt + vin flag + reason, return exception
+        #     try:
+        #         resp.raise_for_status()
+        #     except Exception as e:
+        #         logger.info(f"Exception: {e} for VIN: {vin}")
+        #         car.attempts = (car.attempts or 0) + 1
+        #         car.has_correct_vin = False
+        #         add_reason(car, "upstream parser error;")
+        #         db.commit()
+        #         return {"status": "exception", "vin": vin}
 
-            # payload-level error
-            if data.get("error"):
-                # let outer except rollback — nothing persisted from this branch
-                raise ValueError(f"Scraping error: {data['error']}")
+        #     # payload-level error
+        #     if data.get("error"):
+        #         # let outer except rollback — nothing persisted from this branch
+        #         raise ValueError(f"Scraping error: {data['error']}")
 
-            # --------------------------
-            # 3) Field updates & flags
-            # --------------------------
-            car.owners = data.get("owners")
-            car.has_correct_vin = True
+        #     # --------------------------
+        #     # 3) Field updates & flags
+        #     # --------------------------
+        #     car.owners = data.get("owners")
+        #     car.has_correct_vin = True
 
-            # mileage correctness: True лише якщо обидва наявні та рівні
-            incoming_mileage = data.get("mileage")
-            if incoming_mileage is not None and car.mileage is not None:
-                try:
-                    car.has_correct_mileage = int(car.mileage) == int(incoming_mileage)
-                except Exception:
-                    car.has_correct_mileage = False
-            else:
-                car.has_correct_mileage = False
+        #     # mileage correctness: True лише якщо обидва наявні та рівні
+        #     incoming_mileage = data.get("mileage")
+        #     if incoming_mileage is not None and car.mileage is not None:
+        #         try:
+        #             car.has_correct_mileage = int(car.mileage) == int(incoming_mileage)
+        #         except Exception:
+        #             car.has_correct_mileage = False
+        #     else:
+        #         car.has_correct_mileage = False
 
-            # accidents vs assessments
-            car.accident_count = data.get("accident_count", 0)
-            if car.condition_assessments and car.accident_count == 0:
-                car.has_correct_accidents = False
-                add_reason(car, "accident count mismatch with assessments;")
-            elif car.accident_count > 0 and not car.condition_assessments:
-                car.has_correct_accidents = False
-                add_reason(car, "accidents present but no assessments;")
-            else:
-                car.has_correct_accidents = True
+        #     # accidents vs assessments
+        #     car.accident_count = data.get("accident_count", 0)
+        #     if car.condition_assessments and car.accident_count == 0:
+        #         car.has_correct_accidents = False
+        #         add_reason(car, "accident count mismatch with assessments;")
+        #     elif car.accident_count > 0 and not car.condition_assessments:
+        #         car.has_correct_accidents = False
+        #         add_reason(car, "accidents present but no assessments;")
+        #     else:
+        #         car.has_correct_accidents = True
 
-            # --------------------------
-            # 4) Avg price / ROI / Fees
-            # --------------------------
-            prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
-            car.avg_market_price = int(sum(prices) / len(prices)) if prices else 0
+        #     # --------------------------
+        #     # 4) Avg price / ROI / Fees
+        #     # --------------------------
+        #     prices = [int(data.get(k)) for k in ("jd", "d_max", "manheim") if data.get(k)]
+        #     car.avg_market_price = int(sum(prices) / len(prices)) if prices else 0
 
-            default_roi = _load_default_roi(db)
-            if default_roi and car.avg_market_price:
-                inv = car.avg_market_price / (1 + default_roi.roi / 100.0)
-                car.predicted_total_investments = inv
-                car.predicted_profit_margin_percent = default_roi.profit_margin
-                car.predicted_profit_margin = car.avg_market_price * (
-                    default_roi.profit_margin / 100.0
-                )
-            else:
-                car.predicted_total_investments = 0.0
-                car.predicted_profit_margin_percent = 0.0
-                car.predicted_profit_margin = 0.0
+        #     default_roi = _load_default_roi(db)
+        #     if default_roi and car.avg_market_price:
+        #         inv = car.avg_market_price / (1 + default_roi.roi / 100.0)
+        #         car.predicted_total_investments = inv
+        #         car.predicted_profit_margin_percent = default_roi.profit_margin
+        #         car.predicted_profit_margin = car.avg_market_price * (
+        #             default_roi.profit_margin / 100.0
+        #         )
+        #     else:
+        #         car.predicted_total_investments = 0.0
+        #         car.predicted_profit_margin_percent = 0.0
+        #         car.predicted_profit_margin = 0.0
 
-            fees = _load_fees(
-                db, car.auction, float(car.predicted_total_investments or 0.0)
-            )
-            car.auction_fee = _apply_fees(
-                float(car.predicted_total_investments or 0.0), fees
-            )
+        #     fees = _load_fees(
+        #         db, car.auction, float(car.predicted_total_investments or 0.0)
+        #     )
+        #     car.auction_fee = _apply_fees(
+        #         float(car.predicted_total_investments or 0.0), fees
+        #     )
 
-            car.suggested_bid = int(
-                (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
-            )
-            car.predicted_roi = (
-                default_roi.roi
-                if (default_roi and (car.predicted_total_investments or 0.0) > 0)
-                else 0.0
-            )
+        #     car.suggested_bid = int(
+        #         (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
+        #     )
+        #     car.predicted_roi = (
+        #         default_roi.roi
+        #         if (default_roi and (car.predicted_total_investments or 0.0) > 0)
+        #         else 0.0
+        #     )
 
-            # --------------------------------
-            # 5) Baseline recommendation logic
-            # --------------------------------
-            if (
-                car.recommendation_status != RecommendationStatus.NOT_RECOMMENDED
-                and (not car.recommendation_status_reasons or car.recommendation_status_reasons == "")
-            ):
-                car.recommendation_status = RecommendationStatus.RECOMMENDED
+        #     # --------------------------------
+        #     # 5) Baseline recommendation logic
+        #     # --------------------------------
+        #     if (
+        #         car.recommendation_status != RecommendationStatus.NOT_RECOMMENDED
+        #         and (not car.recommendation_status_reasons or car.recommendation_status_reasons == "")
+        #     ):
+        #         car.recommendation_status = RecommendationStatus.RECOMMENDED
 
-            # --------------------------
-            # 6) HTML to S3 (optional)
-            # --------------------------
-            html_data = data.get("html_data")
-            if html_data:
-                s3_storage = S3StorageClient(
-                    endpoint_url=settings.S3_STORAGE_ENDPOINT,
-                    access_key=settings.S3_STORAGE_ACCESS_KEY,
-                    secret_key=settings.S3_STORAGE_SECRET_KEY,
-                    bucket_name=settings.S3_BUCKET_NAME,
-                )
-                file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                s3_storage.upload_fileobj_sync(file_key, BytesIO(html_data.encode("utf-8")))
-                screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
-                db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
+        #     # --------------------------
+        #     # 6) HTML to S3 (optional)
+        #     # --------------------------
+        #     html_data = data.get("html_data")
+        #     if html_data:
+        #         s3_storage = S3StorageClient(
+        #             endpoint_url=settings.S3_STORAGE_ENDPOINT,
+        #             access_key=settings.S3_STORAGE_ACCESS_KEY,
+        #             secret_key=settings.S3_STORAGE_SECRET_KEY,
+        #             bucket_name=settings.S3_BUCKET_NAME,
+        #         )
+        #         file_key = f"auto_checks/{vin}/{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
+        #         s3_storage.upload_fileobj_sync(file_key, BytesIO(html_data.encode("utf-8")))
+        #         screenshot_url = f"{settings.S3_STORAGE_ENDPOINT}/{settings.S3_BUCKET_NAME}/{file_key}"
+        #         db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
 
-            # success marker
-            car.is_checked = True
-            car.relevance = RelevanceStatus.ACTIVE
+        #     # success marker
+        #     car.is_checked = True
+        #     car.relevance = RelevanceStatus.ACTIVE
 
-            db.add(car)
-            db.commit()
-            logger.info(f"parse_and_update_car: updated VIN={vin}")
-            return {"status": "success", "vin": vin}
+        #     db.add(car)
+        #     db.commit()
+        #     logger.info(f"parse_and_update_car: updated VIN={vin}")
+        #     return {"status": "success", "vin": vin}
 
-        except Exception as e:
-            db.rollback()
-            logger.error(f"parse_and_update_car failed for VIN {vin}: {e}", exc_info=True)
-            raise
+        # except Exception as e:
+        #     db.rollback()
+        #     logger.error(f"parse_and_update_car failed for VIN {vin}: {e}", exc_info=True)
+        #     raise
 
 
 
