@@ -178,7 +178,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_worker_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks_auction_io.app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "worker", "--loglevel=info"]
     env_file:
       - ./parsers/.env
     environment:
@@ -208,7 +208,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_beat_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks_auction_io.app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "tasks.tasks.app", "beat", "--loglevel=info"]
     env_file:
       - ./parsers/.env
     environment:
