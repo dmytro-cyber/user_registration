@@ -541,12 +541,8 @@ async def get_filtered_vehicles(
         if values:
             base_ids = base_ids.filter(_str_in(column, values))
         elif field_name == "fuel_type":
-            base_ids = base_ids.filter(
-                or_(
-                    CarModel.fuel_type.is_(None),
-                    CarModel.fuel_type != "Hybrid",
-                )
-            )
+            # Default rule from your original code: exclude Hybrids when no explicit fuel_type given
+            base_ids = base_ids.filter(CarModel.fuel_type != "Hybrid")
 
     # ---- Integer IN filters ----
     if filters.get("engine_cylinder"):
