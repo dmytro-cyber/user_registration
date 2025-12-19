@@ -28,6 +28,7 @@ from crud.vehicle import (
     update_cars_relevance,
     update_part,
     update_vehicle_status,
+    is_vehicle_sellable
 )
 from db.session import get_db
 from models.admin import ROIModel
@@ -1021,3 +1022,36 @@ async def update_car_info(
     validated_vehicle = CarBaseSchema.model_validate(vehicle_data)
 
     return CarListResponseSchema(cars=[validated_vehicle], page_links={})
+
+
+@router.get("/is_available/{vin}")
+async def check_available(
+    vin: str,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    result = await db.execute(
+        select(CarModel)
+        .where(CarModel.vin == vin)
+        .options(
+            selectinload(CarModel.condition_assessments)
+        )
+    )
+
+    car: CarModel | None = result.scalar_one_or_none()
+
+    if not car:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vehicle not found",
+        )
+
+    available = is_vehicle_sellable(car)
+
+    return {
+        "vin": vin,
+        "is_available": available,
+        "relevance": car.relevance.value if hasattr(car.relevance, "value") else car.relevance,
+        "auction_name": car.auction_name,
+        "sale_date": car.date,
+    }

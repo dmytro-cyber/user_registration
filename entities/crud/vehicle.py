@@ -952,3 +952,47 @@ async def bulk_save_vehicles(db: AsyncSession, vehicles: CarBulkCreateSchema) ->
         if not success:
             skipped_vins.append(vehicle_data.vin)
     return skipped_vins
+
+
+def is_vehicle_sellable(
+    car: "CarModel",
+    excluded_conditions: Iterable[str] = (
+        "Biohazard/Chemical",
+        "Water/Flood",
+        "Rejected Repair",
+    ),
+) -> bool:
+    """
+    Check whether a car passes base filters.
+    """
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+
+    # ---- Relevance ----
+    if car.relevance != RelevanceStatus.ACTIVE:
+        return False
+
+    # ---- Investments & bid ----
+    if not car.predicted_total_investments or car.predicted_total_investments <= 0:
+        return False
+
+    if not car.suggested_bid or car.suggested_bid <= 0:
+        return False
+
+    # ---- Date / BuyNow logic ----
+    if car.auction_name == "Buynow":
+        pass  # always allowed
+    else:
+        if not car.date:
+            return False
+        if car.date < now:
+            return False
+
+    # ---- Condition assessments (optional, if loaded) ----
+    if getattr(car, "condition_assessments", None):
+        for ca in car.condition_assessments:
+            if ca.issue_description in excluded_conditions:
+                return False
+
+    return True
