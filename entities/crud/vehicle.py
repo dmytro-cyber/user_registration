@@ -966,8 +966,7 @@ def is_vehicle_sellable(
     Check whether a car passes base filters.
     """
 
-    if now is None:
-        now = datetime.now(timezone.utc)
+    now = datetime.now(timezone.utc)
 
     # ---- Relevance ----
     if car.relevance != RelevanceStatus.ACTIVE:
