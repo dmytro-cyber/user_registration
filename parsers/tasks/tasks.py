@@ -1,46 +1,46 @@
-# import json
-# import logging
-# import os
-# import shutil
-# import time
-# from datetime import datetime
-# from itertools import islice
-# from typing import Optional
-# from urllib.parse import urlencode
+import json
+import logging
+import os
+import shutil
+import time
+from datetime import datetime
+from itertools import islice
+from typing import Optional
+from urllib.parse import urlencode
 
-# import httpx
-# from celery import Celery
-# from celery.schedules import crontab
-# from dotenv import load_dotenv
+import httpx
+from celery import Celery
+from celery.schedules import crontab
+from dotenv import load_dotenv
 
-# from services.convert.vehicle import format_car_data
+from services.convert.vehicle import format_car_data
 
-# # Configure logging
-# logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
-# logger = logging.getLogger(__name__)
+# Configure logging
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
-# load_dotenv()
+load_dotenv()
 
-# # Celery configuration
-# app = Celery(
-#     "tasks",
-#     broker="redis://redis:6379/0",
-#     backend="redis://redis:6379/0",
-# )
+# Celery configuration
+app = Celery(
+    "tasks",
+    broker="redis://redis:6379/0",
+    backend="redis://redis:6379/0",
+)
 
-# # Celery beat configuration
-# app.conf.beat_schedule = {
-#     "fetch-api-data-every-hour": {
-#         "task": "tasks.tasks.fetch_api_data",
-#         "schedule": crontab(minute="*/60"),
-#     },
-#     "delete-vehicles-evry-hour-at-0:15": {
-#         "task": "tasks.tasks.delete_vehicle",
-#         "schedule": crontab(minute=15)
-#     }
-# }
+# Celery beat configuration
+app.conf.beat_schedule = {
+    # "fetch-api-data-every-hour": {
+    #     "task": "tasks.tasks.fetch_api_data",
+    #     "schedule": crontab(minute="*/60"),
+    # },
+    # "delete-vehicles-evry-hour-at-0:15": {
+    #     "task": "tasks.tasks.delete_vehicle",
+    #     "schedule": crontab(minute=15)
+    # }
+}
 
-# app.conf.timezone = "UTC"
+app.conf.timezone = "UTC"
 
 
 # def generate_car_api_url(page: int = 1, size: int = 1000, base_url: str = "https://api.apicar.store/api/cars/db/update") -> str:
