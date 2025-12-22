@@ -28,13 +28,15 @@ from crud.vehicle import (
     update_cars_relevance,
     update_part,
     update_vehicle_status,
-    is_vehicle_sellable
+    is_vehicle_sellable,
+    upsert_vehicle
 )
 from db.session import get_db
 from models.admin import ROIModel
 from models.user import UserModel
 from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus
 from schemas.vehicle import (
+    CarUpsertSchema,
     CarBaseSchema,
     CarBulkCreateSchema,
     CarCostsUpdateRequestSchema,
@@ -1055,3 +1057,29 @@ async def check_available(
         "auction_name": car.auction_name,
         "sale_date": car.date,
     }
+
+
+@router.post("/upsert")
+async def upsert(
+    vehicle_data: CarUpsertSchema,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    res, message = await upsert_vehicle(vehicle_data=vehicle_data, db=db)
+    if res:
+        celery_app.send_task(
+        "tasks.task.parse_and_update_car",
+        kwargs={
+            "vin": vehicle_data.vin,
+            "car_name": vehicle_data.vehicle,
+            "car_engine": vehicle_data.engine_title,
+            "mileage": vehicle_data.mileage,
+            "car_make": vehicle_data.make,
+            "car_model": vehicle_data.model,
+            "car_year": vehicle_data.year,
+            "car_transmison": vehicle_data.transmision,
+        },
+        queue="car_parsing_queue",)
+        return
+    else:
+        raise HTTPException(status_code=500, detail=message)

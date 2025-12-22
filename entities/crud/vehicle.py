@@ -31,7 +31,7 @@ from models.vehicle import (
     USZipModel,
 )
 from ordering_constr import ORDERING_MAP
-from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema
+from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema, CarUpsertSchema
 
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
@@ -130,6 +130,18 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
         to_parse = False
         existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
         if existing_vehicle:
+            if existing_vehicle.is_manually_upserted:
+                if vehicle_data.current_bid is not None:
+                    existing_vehicle.current_bid = vehicle_data.current_bid
+                    if (
+                        existing_vehicle.suggested_bid is not None
+                        and vehicle_data.current_bid > existing_vehicle.suggested_bid
+                    ):
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+
+                    await db.commit()
+
+                return False
             if existing_vehicle.relevance == RelevanceStatus.ACTIVE:
                 if existing_vehicle.is_checked == False and existing_vehicle.attempts < 3:
                     to_parse = True
@@ -995,3 +1007,142 @@ def is_vehicle_sellable(
                 return False
 
     return True
+
+
+async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> bool:
+    """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
+    try:
+        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+        if existing_vehicle:
+            existing_vehicle.relevance == RelevanceStatus.ACTIVE
+            existing_vehicle.is_checked = False
+            existing_vehicle.attempts = 0
+
+
+            
+            # logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
+            existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
+            existing_vehicle.recommendation_status_reasons = None
+            existing_vehicle.is_manually_upserted = True
+            for field, value in vehicle_data.dict(
+                exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
+            ).items():
+                if (value is not None or field == "date"):
+                    setattr(existing_vehicle, field, value)
+                    if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{value};"
+                        else:
+                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{value};"
+                    if field == "transmision" and value != "Automatic":
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{value};"
+                        else:
+                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{value};"
+
+
+            await db.execute(
+                delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
+            )
+            if vehicle_data.condition_assessments:
+                for assessment in vehicle_data.condition_assessments:
+                    db.add(
+                        ConditionAssessmentModel(
+                            type_of_damage=assessment.type_of_damage,
+                            issue_description=assessment.issue_description,
+                            car_id=existing_vehicle.id,
+                        )
+                    )
+                    if assessment.issue_description in [
+                        "Rejected Repair",
+                        "Burn Engine",
+                        "Mechanical",
+                        "Replaced Vin",
+                        "Burn",
+                        "Undercarriage",
+                        "Water/Flood",
+                        "Burn Interior",
+                        "Rollover",
+                    ]:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        if not existing_vehicle.recommendation_status_reasons:
+                            existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
+                        else:
+                            if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+
+            await db.commit()
+
+            return True, "success"
+
+        else:
+            vehicle = CarModel(
+                **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
+            )
+            db.add(vehicle)
+            await db.flush()
+            if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                if not vehicle.recommendation_status_reasons:
+                    vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
+                else:
+                    vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
+            if vehicle.transmision != "Automatic":
+                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                if not vehicle.recommendation_status_reasons:
+                    vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
+                else:
+                    vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
+            vehicle.is_manually_upserted = True
+            vehicle.relevance = RelevanceStatus.ACTIVE
+
+            if vehicle_data.condition_assessments:
+                for assessment in vehicle_data.condition_assessments:
+                    if assessment.issue_description != "Unknown":
+                        db.add(
+                            ConditionAssessmentModel(
+                                type_of_damage=assessment.type_of_damage,
+                                issue_description=assessment.issue_description,
+                                car_id=vehicle.id,
+                            )
+                        )
+                        if assessment.issue_description in [
+                            "Rejected Repair",
+                            "Burn Engine",
+                            "Mechanical",
+                            "Replaced Vin",
+                            "Burn",
+                            "Undercarriage",
+                            "Water/Flood",
+                            "Burn Interior",
+                            "Rollover",
+                        ]:
+                            vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                            if not vehicle.recommendation_status_reasons:
+                                vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
+                            else:
+                                vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+
+            if vehicle_data.photos:
+                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
+
+            if vehicle_data.photos_hd:
+                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
+
+            if vehicle_data.sales_history:
+                await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
+
+            await db.commit()
+            return True, "success"
+
+    except IntegrityError as e:
+        if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
+            logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
+            return False, e
+    except Exception as e:
+        logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
+        return False, e

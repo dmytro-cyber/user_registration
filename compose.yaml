@@ -2,7 +2,7 @@ version: "3.9"
 
 services:
   db:
-    image: "postgres:latest"
+    image: "postgres:15.6"
     container_name: postgres_cars_and_beyond
     env_file:
       - ./entities/.env

@@ -66,6 +66,7 @@ class CarModel(Base):
     # Additional
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
     is_checked = Column(Boolean, default=False)
+    is_manually_upserted = Column(Boolean, default=False)
 
     # Additional costs
     parts_cost = Column(Float, nullable=True)

@@ -345,3 +345,186 @@ class InvoiceResponse(BaseModel):
 
     class Config:
         orm_mode = True
+
+
+from datetime import datetime
+from typing import List
+from pydantic import BaseModel, Field
+
+
+class CarUpsertSchema(BaseModel):
+    vin: str = Field(
+        ...,
+        description="Vehicle Identification Number (VIN). Unique identifier of the vehicle."
+    )
+
+    vehicle: str | None = Field(
+        None,
+        description="Full vehicle title (usually combined make, model, and year)."
+    )
+
+    year: int | None = Field(
+        None,
+        description="Manufacturing year of the vehicle."
+    )
+
+    make: str | None = Field(
+        None,
+        description="Vehicle manufacturer (e.g. Toyota, Ford, BMW)."
+    )
+
+    model: str | None = Field(
+        None,
+        description="Vehicle model name."
+    )
+
+    mileage: int | None = Field(
+        None,
+        description="Vehicle mileage in miles."
+    )
+
+    auction: str | None = Field(
+        None,
+        description="Auction platform code or identifier (e.g. Copart, IAA)."
+    )
+
+    auction_name: str | None = Field(
+        None,
+        description="Auction type or name (e.g. BuyNow, Salvage, Insurance)."
+    )
+
+    date: datetime | None = Field(
+        None,
+        description=(
+            "Auction date and time in ISO 8601 format with UTC timezone. "
+            "Timezone-aware datetime is required (e.g. '2025-12-22T11:45:20Z' "
+            "or '2025-12-22T11:45:20+00:00')."
+        )
+    )
+
+    lot: int | None = Field(
+        None,
+        description="Lot number assigned by the auction."
+    )
+
+    seller: str | None = Field(
+        None,
+        description="Seller name or organization."
+    )
+
+    seller_type: str | None = Field(
+        None,
+        description="Seller category (Insurance, Dealer, Private, etc.)."
+    )
+
+    location: str | None = Field(
+        None,
+        description="Auction location (city / state)."
+    )
+
+    engine_title: str | None = Field(
+        None,
+        description="Engine description as provided by auction (e.g. 2.0L I4, 3.5L V6)."
+    )
+
+    fuel_type: str | None = Field(
+        None,
+        description="Fuel type (Gasoline, Diesel, Electric, Hybrid, etc.)."
+    )
+
+    current_bid: float | None = Field(
+        None,
+        description="Current bid price at the auction."
+    )
+
+    link: str | None = Field(
+        None,
+        description="Direct URL to the vehicle auction page."
+    )
+
+    is_salvage: bool = Field(
+        False,
+        description="Indicates whether the vehicle has a salvage title."
+    )
+
+    engine: float | None = Field(
+        None,
+        description="Engine displacement in liters."
+    )
+
+    has_keys: bool | None = Field(
+        False,
+        description="Indicates whether the vehicle is sold with keys."
+    )
+
+    engine_cylinder: int | None = Field(
+        None,
+        description="Number of engine cylinders."
+    )
+
+    drive_type: str | None = Field(
+        None,
+        description="Drivetrain type (FWD, RWD, AWD, 4WD)."
+    )
+
+    interior_color: str | None = Field(
+        None,
+        description="Interior color of the vehicle."
+    )
+
+    exterior_color: str | None = Field(
+        None,
+        description="Exterior color of the vehicle."
+    )
+
+    body_style: str | None = Field(
+        None,
+        description="Body style (Sedan, SUV, Coupe, Hatchback, etc.)."
+    )
+
+    transmision: str | None = Field(
+        None,
+        description="Transmission type (Automatic, Manual, CVT, etc.)."
+    )
+
+    vehicle_type: str | None = Field(
+        None,
+        description="Vehicle category or type classification."
+    )
+
+    condition: str | None = Field(
+        None,
+        description="Overall vehicle condition as reported by the auction. (e.g. Run&Drive)"
+    )
+
+    photos: List[PhotoSchema] = Field(
+        default=[],
+        exclude=True,
+        description="List of standard resolution photos (excluded from upsert payload).",
+        example=[
+            {"url": "https://copart.com/photo1.jpg"},
+            {"url": "https://copart.com/photo2.jpg"},
+            {"url": "https://copart.com/photo3.jpg"},
+        ],
+    )
+
+    photos_hd: List[PhotoSchema] = Field(
+        default=[],
+        exclude=True,
+        description="List of high-definition photos (excluded from upsert payload).",
+        example=[
+            {"url": "https://copart.com/photo_hd1.jpg"},
+            {"url": "https://copart.com/photo2_hd.jpg"},
+            {"url": "https://copart.com/photo3_hd.jpg"},
+        ],
+    )
+
+    condition_assessments: List[ConditionAssessmentResponseSchema] = Field(
+        default=[],
+        exclude=True,
+        description="Detailed condition assessment records (excluded from upsert payload).",
+        example=[
+            {"type_of_damage": "Primary", "issue_description": "Burn"},
+            {"type_of_damage": "Secondary", "issue_description": "Front"},
+        ],
+    )
