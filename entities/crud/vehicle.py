@@ -1009,12 +1009,12 @@ def is_vehicle_sellable(
     return True
 
 
-async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> bool:
+async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tuple[bool, str]:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
         existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
         if existing_vehicle:
-            existing_vehicle.relevance == RelevanceStatus.ACTIVE
+            existing_vehicle.relevance = RelevanceStatus.ACTIVE
             existing_vehicle.is_checked = False
             existing_vehicle.attempts = 0
 
@@ -1025,7 +1025,7 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> boo
             existing_vehicle.recommendation_status_reasons = None
             existing_vehicle.is_manually_upserted = True
             for field, value in vehicle_data.dict(
-                exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
+                exclude={"photos", "photos_hd", "condition_assessments"}
             ).items():
                 if (value is not None or field == "date"):
                     setattr(existing_vehicle, field, value)
@@ -1081,7 +1081,7 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> boo
 
         else:
             vehicle = CarModel(
-                **vehicle_data.dict(exclude={"photos", "photos_hd", "sales_history", "condition_assessments"})
+                **vehicle_data.dict(exclude={"photos", "photos_hd", "condition_assessments"})
             )
             db.add(vehicle)
             await db.flush()
@@ -1133,16 +1133,13 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> boo
             if vehicle_data.photos_hd:
                 db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
 
-            if vehicle_data.sales_history:
-                await save_sale_history(vehicle_data.sales_history, vehicle.id, db)
-
             await db.commit()
             return True, "success"
 
     except IntegrityError as e:
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
             logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
-            return False, e
+            return False, str(e)
     except Exception as e:
         logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
-        return False, e
+        return False, str(e)
