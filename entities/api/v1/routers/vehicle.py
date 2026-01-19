@@ -12,6 +12,7 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from celery.exceptions import CeleryError
 
 from core.celery_config import app as celery_app
 from core.config import Settings
@@ -1066,20 +1067,41 @@ async def upsert(
     current_user: UserModel = Depends(get_current_user),
 ):
     res, message = await upsert_vehicle(vehicle_data=vehicle_data, db=db)
-    if res:
-        celery_app.send_task(
-        "tasks.task.parse_and_update_car",
-        kwargs={
-            "vin": vehicle_data.vin,
-            "car_name": vehicle_data.vehicle,
-            "car_engine": vehicle_data.engine_title,
-            "mileage": vehicle_data.mileage,
-            "car_make": vehicle_data.make,
-            "car_model": vehicle_data.model,
-            "car_year": vehicle_data.year,
-            "car_transmison": vehicle_data.transmision,
-        },
-        queue="car_parsing_queue",)
-        return
-    else:
+    if not res:
         raise HTTPException(status_code=500, detail=message)
+
+    try:
+        logger.info(
+            "Trying to send Celery task parse_and_update_car | vin=%s",
+            vehicle_data.vin
+        )
+
+        task_result = celery_app.send_task(
+            "tasks.task.parse_and_update_car",
+            kwargs={
+                "vin": vehicle_data.vin,
+                "car_name": vehicle_data.vehicle,
+                "car_engine": vehicle_data.engine_title,
+                "mileage": vehicle_data.mileage,
+                "car_make": vehicle_data.make,
+                "car_model": vehicle_data.model,
+                "car_year": vehicle_data.year,
+                "car_transmison": vehicle_data.transmision,
+            },
+            queue="car_parsing_queue",
+        )
+
+        logger.info(
+            "Celery task sent successfully | vin=%s task_id=%s",
+            vehicle_data.vin,
+            getattr(task_result, "id", None),
+        )
+
+        return {"message": "task sent", "task_id": task_result.id}
+
+    except CeleryError as e:
+        logger.exception("CeleryError while sending task | vin=%s", vehicle_data.vin)
+        raise HTTPException(status_code=500, detail=f"Celery error: {str(e)}")
+    except Exception as e:
+        logger.exception("Unexpected error while sending task | vin=%s", vehicle_data.vin)
+        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")

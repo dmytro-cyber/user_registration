@@ -390,7 +390,7 @@ class CarUpsertSchema(BaseModel):
 
     auction_name: str | None = Field(
         None,
-        description="Auction type or name (e.g. BuyNow, Salvage, Insurance)."
+        description="Auction type or name (buynow or auction)."
     )
 
     date: datetime | None = Field(
