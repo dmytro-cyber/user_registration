@@ -93,52 +93,131 @@ class EmailClient:
         self.password = password
         self.imap_server = imap_server
 
+    def _extract_text_from_message(self, msg: email.message.Message) -> str:
+        """
+        Extract readable text from email message.
+        Prefer text/plain, fallback to text/html.
+        """
+        # multipart
+        if msg.is_multipart():
+            # 1) prefer text/plain
+            for part in msg.walk():
+                ctype = part.get_content_type()
+                disp = str(part.get("Content-Disposition") or "")
+                if "attachment" in disp.lower():
+                    continue
+                if ctype == "text/plain":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload.decode(errors="ignore")
+
+            # 2) fallback to text/html
+            for part in msg.walk():
+                ctype = part.get_content_type()
+                disp = str(part.get("Content-Disposition") or "")
+                if "attachment" in disp.lower():
+                    continue
+                if ctype == "text/html":
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        html = payload.decode(errors="ignore")
+                        soup = BeautifulSoup(html, "html.parser")
+                        return soup.get_text(" ", strip=True)
+
+            return ""
+
+        # not multipart
+        payload = msg.get_payload(decode=True)
+        if not payload:
+            return ""
+
+        raw = payload.decode(errors="ignore")
+        if msg.get_content_type() == "text/html":
+            soup = BeautifulSoup(raw, "html.parser")
+            return soup.get_text(" ", strip=True)
+
+        return raw
+
     def get_verification_code(
-        self, max_wait: int = Config.MAX_WAIT_VERIFICATION, poll_interval: int = Config.POLL_INTERVAL
+        self,
+        max_wait: int = 60,
+        poll_interval: int = 3,
+        unseen_only: bool = True,
     ) -> Optional[str]:
         """
-        Poll the inbox for a DealerCenter code email and extract a 6-digit code.
+        Poll the inbox for a DealerCenter MFA code email and extract a 6-digit code.
+        Supports both HTML and plain text emails.
         """
         start_time = time.time()
+
         while time.time() - start_time < max_wait:
+            mail = None
             try:
                 mail = imaplib.IMAP4_SSL(self.imap_server)
                 mail.login(self.email, self.password)
-                mail.select("inbox")
-                status, messages = mail.search(None, '(FROM "do-not-reply@dealercenter.net")')
-                email_ids = messages[0].split()
-                if not email_ids:
-                    mail.logout()
+                mail.select("INBOX")
+
+                # Search criteria
+                # unseen_only=True -> only new unread emails
+                if unseen_only:
+                    criteria = '(UNSEEN FROM "do-not-reply@dealercenter.net")'
+                else:
+                    criteria = '(FROM "do-not-reply@dealercenter.net")'
+
+                status, messages = mail.search(None, criteria)
+                if status != "OK":
+                    logging.warning(f"IMAP search failed: {status}")
                     time.sleep(poll_interval)
                     continue
+
+                email_ids = messages[0].split()
+                if not email_ids:
+                    time.sleep(poll_interval)
+                    continue
+
+                # take latest email
                 latest_email_id = email_ids[-1]
                 status, msg_data = mail.fetch(latest_email_id, "(RFC822)")
+                if status != "OK":
+                    logging.warning(f"IMAP fetch failed: {status}")
+                    time.sleep(poll_interval)
+                    continue
+
                 for response_part in msg_data:
-                    if isinstance(response_part, tuple):
-                        msg = email.message_from_bytes(response_part[1])
-                        body = ""
-                        if msg.is_multipart():
-                            for part in msg.walk():
-                                if part.get_content_type() == "text/plain":
-                                    body = part.get_payload(decode=True).decode()
-                                    break
-                        else:
-                            body = msg.get_payload(decode=True).decode()
-                        match = re.search(r"\b\d{6}\b", body)
-                        if match:
-                            code = match.group()
-                            mail.logout()
-                            return code
-                mail.logout()
+                    if not isinstance(response_part, tuple):
+                        continue
+
+                    msg = email.message_from_bytes(response_part[1])
+                    body = self._extract_text_from_message(msg)
+
+                    # 1) строгий пошук: "Your code is: 287079"
+                    match = re.search(r"(?:Your code is:|Your code is)\s*(\d{6})", body, re.IGNORECASE)
+                    if match:
+                        code = match.group(1)
+                        logging.info(f"DealerCenter MFA code found (strict) | code={code}")
+                        return code
+
+                    # 2) fallback: будь-які 6 цифр
+                    match = re.search(r"\b(\d{6})\b", body)
+                    if match:
+                        code = match.group(1)
+                        logging.info(f"DealerCenter MFA code found (fallback) | code={code}")
+                        return code
+
             except imaplib.IMAP4.error as e:
-                logging.error(f"IMAP login failed: {str(e)}")
-                mail.logout()
-                raise
+                logging.exception(f"IMAP error: {str(e)}")
             except Exception as e:
-                logging.error(f"Error checking email: {str(e)}")
-                mail.logout()
+                logging.exception(f"Error checking email: {str(e)}")
+            finally:
+                try:
+                    if mail is not None:
+                        mail.logout()
+                except Exception:
+                    pass
+
             time.sleep(poll_interval)
-        logging.error("Failed to retrieve verification code within the timeout period.")
+
+        logging.error("Failed to retrieve DealerCenter verification code within timeout.")
         return None
 
 
@@ -247,18 +326,19 @@ class DealerCenterScraper:
                 await page.wait_for_selector("#username")
                 await page.fill("#username", self.dc_username)
                 await page.fill("#password", self.dc_password)
-                await page.click("#login")
+                await page.get_by_role("button", name="Continue").click()
 
-                # Select email MFA option
-                try:
-                    await page.wait_for_selector(
-                        "xpath=//span[contains(text(), 'Email Verification Code')]/parent::a",
-                        timeout=10000,
-                    )
-                    await page.click("xpath=//span[contains(text(), 'Email Verification Code')]/parent::a")
-                except:
-                    await page.wait_for_selector("#WebMFAEmail", timeout=5000)
-                    await page.click("#WebMFAEmail")
+
+                # # Select email MFA option
+                # try:
+                #     await page.wait_for_selector(
+                #         "xpath=//span[contains(text(), 'Email Verification Code')]/parent::a",
+                #         timeout=10000,
+                #     )
+                #     await page.click("xpath=//span[contains(text(), 'Email Verification Code')]/parent::a")
+                # except:
+                #     await page.wait_for_selector("#WebMFAEmail", timeout=5000)
+                #     await page.click("#WebMFAEmail")
 
                 # Wait for email delivery, then fetch code
                 await asyncio.sleep(20)
@@ -266,9 +346,9 @@ class DealerCenterScraper:
                 if not code:
                     raise Exception("Failed to retrieve verification code.")
 
-                await page.wait_for_selector("#email-passcode-input")
-                await page.fill("#email-passcode-input", code)
-                await page.click("#email-passcode-submit")
+                await page.wait_for_selector("#code")
+                await page.fill("#code", code)
+                await page.get_by_role("button", name="Continue").click()
                 await asyncio.sleep(20)
 
                 # Save cookies
