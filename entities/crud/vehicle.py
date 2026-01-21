@@ -1029,14 +1029,14 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
             ).items():
                 if (value is not None or field == "date"):
                     setattr(existing_vehicle, field, value)
-                    if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                    if field == "fuel_type" and value and value.lower() not in ["gasoline", "flexible fuel", "unknown", "gas"]:
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{value};"
                         else:
                             if f"{value};" not in existing_vehicle.recommendation_status_reasons:
                                 existing_vehicle.recommendation_status_reasons += f"{value};"
-                    if field == "transmision" and value != "Automatic":
+                    if field == "transmision" and value and value.lower() != "automatic":
                         existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                         if not existing_vehicle.recommendation_status_reasons:
                             existing_vehicle.recommendation_status_reasons = f"{value};"
@@ -1085,13 +1085,13 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
             )
             db.add(vehicle)
             await db.flush()
-            if vehicle.fuel_type not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+            if vehicle.fuel_type and vehicle.fuel_type.lower() not in ["gasoline", "flexible fuel", "unknown", "gas"]:
                 vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                 if not vehicle.recommendation_status_reasons:
                     vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
                 else:
                     vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
-            if vehicle.transmision != "Automatic":
+            if vehicle.transmision and vehicle.transmision.lower() != "automatic":
                 vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                 if not vehicle.recommendation_status_reasons:
                     vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
