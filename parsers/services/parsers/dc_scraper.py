@@ -285,66 +285,67 @@ class DealerCenterScraper:
 
         raise RuntimeError("Login retries exceeded")
 
-async def _perform_login(self):
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(**Config.BROWSER_ARGS)
-        context = await browser.new_context(
-            user_agent=Config.BASE_HEADERS["User-Agent"],
-            viewport=Config.VIEWPORT,
-        )
-        page = await context.new_page()
+    async def _perform_login(self):
 
-        try:
-            await page.goto(Config.LOGIN_URL)
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(**Config.BROWSER_ARGS)
+            context = await browser.new_context(
+                user_agent=Config.BASE_HEADERS["User-Agent"],
+                viewport=Config.VIEWPORT,
+            )
+            page = await context.new_page()
 
-            await page.wait_for_selector("#username", state="visible")
-            await page.fill("#username", self.dc_username)
+            try:
+                await page.goto(Config.LOGIN_URL)
 
-            await page.wait_for_selector("#password", state="visible")
-            await page.fill("#password", self.dc_password)
+                await page.wait_for_selector("#username", state="visible")
+                await page.fill("#username", self.dc_username)
 
-            await page.get_by_role("button", name="Continue").click(force=True)
+                await page.wait_for_selector("#password", state="visible")
+                await page.fill("#password", self.dc_password)
 
-            # ---------- WAIT MFA PAGE ----------
-            await asyncio.sleep(5)
+                await page.get_by_role("button", name="Continue").click(force=True)
 
-            if await page.locator(
-                "text=You have exceeded the amount of emails"
-            ).count():
-                raise RuntimeError("MFA rate limited")
+                # ---------- WAIT MFA PAGE ----------
+                await asyncio.sleep(5)
 
-            await page.wait_for_selector("#code", timeout=20000)
+                if await page.locator(
+                    "text=You have exceeded the amount of emails"
+                ).count():
+                    raise RuntimeError("MFA rate limited")
 
-            code = self.email_client.get_verification_code()
-            if not code:
-                raise RuntimeError("MFA code not received")
+                await page.wait_for_selector("#code", timeout=20000)
 
-            await page.fill("#code", code)
-            await page.get_by_role("button", name="Continue").click(force=True)
+                code = self.email_client.get_verification_code()
+                if not code:
+                    raise RuntimeError("MFA code not received")
 
-            # ---------- WAIT LOGIN FINISH ----------
-            await asyncio.sleep(15)
+                await page.fill("#code", code)
+                await page.get_by_role("button", name="Continue").click(force=True)
 
-            # save cookies
-            DealerCenterScraper._shared_cookies = await context.cookies()
-            self._save_credentials()
+                # ---------- WAIT LOGIN FINISH ----------
+                await asyncio.sleep(15)
 
-            # ---------- FETCH TOKEN ----------
-            await page.goto(Config.TOKEN_VALIDATION_URL)
-            await asyncio.sleep(10)
+                # save cookies
+                DealerCenterScraper._shared_cookies = await context.cookies()
+                self._save_credentials()
 
-            html = await page.content()
-            m = re.search(r"<pre>({.*})</pre>", html)
-            data = json.loads(m.group(1))
+                # ---------- FETCH TOKEN ----------
+                await page.goto(Config.TOKEN_VALIDATION_URL)
+                await asyncio.sleep(10)
 
-            DealerCenterScraper._shared_token = data["userAccessToken"]
-            self._save_credentials()
+                html = await page.content()
+                m = re.search(r"<pre>({.*})</pre>", html)
+                data = json.loads(m.group(1))
 
-            logging.info("Login successful")
+                DealerCenterScraper._shared_token = data["userAccessToken"]
+                self._save_credentials()
 
-        finally:
-            await browser.close()
+                logging.info("Login successful")
+
+            finally:
+                await browser.close()
 
     # --------------------------------------------------------
     # HTTP
