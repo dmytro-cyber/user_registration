@@ -177,6 +177,15 @@ class EmailClient:
 
 class DealerCenterScraper:
 
+    # -------- class-level single-flight --------
+    _auth_lock = asyncio.Lock()
+    _auth_ready = asyncio.Event()
+    _shared_cookies: list = []
+    _shared_token: Optional[str] = None
+    _auth_ready.clear()
+
+    # -------------------------------------------
+
     def __init__(
         self,
         vin: str,
@@ -208,61 +217,60 @@ class DealerCenterScraper:
         self._load_credentials()
 
     # --------------------------------------------------------
-    # CREDS CACHE
-    # --------------------------------------------------------
 
     def _load_credentials(self):
         if Config.CREDENTIALS:
-            GlobalAuth.cookies = Config.CREDENTIALS.get("cookies", [])
-            GlobalAuth.access_token = Config.CREDENTIALS.get("access_token")
+            DealerCenterScraper._shared_cookies = Config.CREDENTIALS.get("cookies", [])
+            DealerCenterScraper._shared_token = Config.CREDENTIALS.get("access_token")
 
     def _save_credentials(self):
         Config.CREDENTIALS = {
-            "cookies": GlobalAuth.cookies,
-            "access_token": GlobalAuth.access_token,
+            "cookies": DealerCenterScraper._shared_cookies,
+            "access_token": DealerCenterScraper._shared_token,
         }
 
-    # --------------------------------------------------------
-    # HEADERS / COOKIES
     # --------------------------------------------------------
 
     def _headers(self) -> dict:
 
         h = Config.BASE_HEADERS.copy()
 
-        if GlobalAuth.access_token:
-            h["Authorization"] = f"Bearer {GlobalAuth.access_token}"
+        if DealerCenterScraper._shared_token:
+            h["Authorization"] = f"Bearer {DealerCenterScraper._shared_token}"
 
-        if GlobalAuth.cookies:
+        if DealerCenterScraper._shared_cookies:
             h["Cookie"] = "; ".join(
                 f"{c['name']}={c['value']}"
-                for c in GlobalAuth.cookies
+                for c in DealerCenterScraper._shared_cookies
             )
 
         return h
 
     def _cookies_dict(self) -> dict:
-        return {c["name"]: c["value"] for c in (GlobalAuth.cookies or [])}
+        return {
+            c["name"]: c["value"]
+            for c in DealerCenterScraper._shared_cookies
+        }
 
     # --------------------------------------------------------
-    # SINGLE-FLIGHT LOGIN
+    # SINGLE FLIGHT LOGIN
     # --------------------------------------------------------
 
     async def _ensure_logged_in_singleflight(self, force=False):
 
-        if GlobalAuth.access_token and not force:
+        if DealerCenterScraper._shared_token and not force:
             return
 
-        if GlobalAuth.lock.locked():
-            await GlobalAuth.ready.wait()
+        if DealerCenterScraper._auth_lock.locked():
+            await DealerCenterScraper._auth_ready.wait()
             return
 
-        async with GlobalAuth.lock:
-            GlobalAuth.ready.clear()
+        async with DealerCenterScraper._auth_lock:
+            DealerCenterScraper._auth_ready.clear()
             try:
                 await self._login_with_retries()
             finally:
-                GlobalAuth.ready.set()
+                DealerCenterScraper._auth_ready.set()
 
     async def _login_with_retries(self):
 
@@ -308,7 +316,6 @@ class DealerCenterScraper:
                 await page.wait_for_selector("#code", timeout=20000)
 
                 code = self.email_client.get_verification_code()
-
                 if not code:
                     raise RuntimeError("MFA code not received")
 
@@ -317,7 +324,7 @@ class DealerCenterScraper:
 
                 await page.wait_for_load_state("networkidle")
 
-                GlobalAuth.cookies = await context.cookies()
+                DealerCenterScraper._shared_cookies = await context.cookies()
                 self._save_credentials()
 
                 await page.goto(Config.TOKEN_VALIDATION_URL)
@@ -327,7 +334,7 @@ class DealerCenterScraper:
                 m = re.search(r"<pre>({.*})</pre>", html)
                 data = json.loads(m.group(1))
 
-                GlobalAuth.access_token = data["userAccessToken"]
+                DealerCenterScraper._shared_token = data["userAccessToken"]
                 self._save_credentials()
 
                 logging.info("Login successful")
@@ -352,17 +359,17 @@ class DealerCenterScraper:
             )
 
             if r.status_code in (401, 403):
-                GlobalAuth.cookies = []
-                GlobalAuth.access_token = None
+                DealerCenterScraper._shared_cookies = []
+                DealerCenterScraper._shared_token = None
                 self._save_credentials()
-                GlobalAuth.ready.clear()
+                DealerCenterScraper._auth_ready.clear()
                 raise AuthRefreshedError("Auth expired")
 
             r.raise_for_status()
             return r.json()
 
     # --------------------------------------------------------
-    # PARSING
+    # PARSE
     # --------------------------------------------------------
 
     def _parse_history(self, html: str) -> dict:
@@ -517,4 +524,3 @@ if __name__ == "__main__":
                 print(k, ":", v)
 
     asyncio.run(main())
-
