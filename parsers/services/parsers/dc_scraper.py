@@ -234,7 +234,7 @@ class DealerCenterScraper:
 
             await page.wait_for_selector("#password", state="visible")
             await page.fill("#password", self.dc_pass)
-            await page.locator("button:has-text('Continue')").click(force=True)
+            await page.get_by_role("button", name="Continue").click(force=True)
 
             await asyncio.sleep(15)
 
@@ -250,7 +250,7 @@ class DealerCenterScraper:
 
             await page.wait_for_selector("#code", state="visible")
             await page.fill("#code", code)
-            await page.locator("button:has-text('Continue')").click(force=True)
+            await page.get_by_role("button", name="Continue").click(force=True)
             await asyncio.sleep(10)
 
             GlobalLoginManager.cookies = await ctx.cookies()
