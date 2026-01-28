@@ -134,18 +134,32 @@ class DealerCenterScraper:
     def __init__(
         self,
         vin: str,
+        vehicle_name: str,
+        engine: str,
         year: int = None,
         make: str = None,
         model: str = None,
         odometer: int = None,
         transmission: str = None,
     ):
+            # scraper = DealerCenterScraper(
+            #     vin=car_vin,
+            #     vehicle_name=car_name,
+            #     engine=car_engine,
+            #     make=car_make,
+            #     model=car_model,
+            #     year=car_year,
+            #     transmission=car_transmison,
+            #     odometer=car_mileage,
+            # )
         self.vin = vin
         self.year = year
         self.make = make
         self.model = model
         self.odometer = odometer
         self.transmission = transmission
+        self.vehicle_name = vehicle_name
+        self.engine = engine
 
         self.dc_user = os.getenv("DC_USERNAME")
         self.dc_pass = os.getenv("DC_PASSWORD")
