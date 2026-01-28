@@ -1,8 +1,3 @@
-# ============================================================
-# DealerCenter Scraper
-# Global single-flight login + MFA retry + real API calls
-# ============================================================
-
 import asyncio
 import email
 import imaplib
@@ -20,7 +15,7 @@ from dotenv import load_dotenv
 from playwright.async_api import async_playwright
 
 # ------------------------------------------------------------
-# ENV & LOGGING
+# ENV / LOGGING
 # ------------------------------------------------------------
 
 load_dotenv()
@@ -28,7 +23,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
-logger = logging.getLogger(__name__)
+
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
@@ -63,18 +58,22 @@ class Config:
         "Accept-Encoding": "gzip, deflate, br, zstd",
         "Accept-Language": "en-US,en;q=0.9",
     }
-
-    TIMEOUT = 90
-
-    VIEWPORT = {"width": 1280, "height": 720}
-
     BROWSER_ARGS = {
         "headless": True,
         "args": [
+            "--disable-gpu",
             "--no-sandbox",
             "--disable-dev-shm-usage",
+            "--disable-web-security",
+            "--allow-insecure-localhost",
+            "--ignore-certificate-errors",
         ],
     }
+
+    TIMEOUT = 100
+    VIEWPORT = {"width": 1280, "height": 720}
+
+    CREDENTIALS: Dict[str, Any] = {}
 
 # ------------------------------------------------------------
 # EXCEPTION
@@ -84,22 +83,20 @@ class AuthRefreshedError(RuntimeError):
     pass
 
 # ------------------------------------------------------------
-# GLOBAL LOGIN MANAGER
+# GLOBAL AUTH
 # ------------------------------------------------------------
 
-class GlobalLoginManager:
+class GlobalAuth:
     lock = asyncio.Lock()
     ready = asyncio.Event()
-
     cookies: list = []
     access_token: Optional[str] = None
 
-    ready.clear()
+GlobalAuth.ready.clear()
 
 # ------------------------------------------------------------
 # EMAIL CLIENT
 # ------------------------------------------------------------
-
 
 class EmailClient:
 
@@ -183,156 +180,186 @@ class DealerCenterScraper:
     def __init__(
         self,
         vin: str,
-        vehicle_name: str,
-        engine: str,
+        vehicle_name: str = None,
+        engine: str = None,
         year: int = None,
         make: str = None,
         model: str = None,
         odometer: int = None,
         transmission: str = None,
     ):
-            # scraper = DealerCenterScraper(
-            #     vin=car_vin,
-            #     vehicle_name=car_name,
-            #     engine=car_engine,
-            #     make=car_make,
-            #     model=car_model,
-            #     year=car_year,
-            #     transmission=car_transmison,
-            #     odometer=car_mileage,
-            # )
         self.vin = vin
+        self.vehicle_name = vehicle_name
+        self.engine = engine
         self.year = year
         self.make = make
         self.model = model
         self.odometer = odometer
         self.transmission = transmission
-        self.vehicle_name = vehicle_name
-        self.engine = engine
 
-        self.dc_user = os.getenv("DC_USERNAME")
-        self.dc_pass = os.getenv("DC_PASSWORD")
+        self.dc_username = os.getenv("DC_USERNAME")
+        self.dc_password = os.getenv("DC_PASSWORD")
 
         self.email_client = EmailClient(
             os.getenv("SMTP_USER"),
             os.getenv("SMTP_PASSWORD"),
         )
 
+        self._load_credentials()
+
     # --------------------------------------------------------
-    # HEADERS
+    # CREDS CACHE
+    # --------------------------------------------------------
+
+    def _load_credentials(self):
+        if Config.CREDENTIALS:
+            GlobalAuth.cookies = Config.CREDENTIALS.get("cookies", [])
+            GlobalAuth.access_token = Config.CREDENTIALS.get("access_token")
+
+    def _save_credentials(self):
+        Config.CREDENTIALS = {
+            "cookies": GlobalAuth.cookies,
+            "access_token": GlobalAuth.access_token,
+        }
+
+    # --------------------------------------------------------
+    # HEADERS / COOKIES
     # --------------------------------------------------------
 
     def _headers(self) -> dict:
 
         h = Config.BASE_HEADERS.copy()
 
-        if GlobalLoginManager.access_token:
-            h["Authorization"] = f"Bearer {GlobalLoginManager.access_token}"
+        if GlobalAuth.access_token:
+            h["Authorization"] = f"Bearer {GlobalAuth.access_token}"
 
-        if GlobalLoginManager.cookies:
+        if GlobalAuth.cookies:
             h["Cookie"] = "; ".join(
                 f"{c['name']}={c['value']}"
-                for c in GlobalLoginManager.cookies
+                for c in GlobalAuth.cookies
             )
 
         return h
 
+    def _cookies_dict(self) -> dict:
+        return {c["name"]: c["value"] for c in (GlobalAuth.cookies or [])}
+
     # --------------------------------------------------------
-    # LOGIN
+    # SINGLE-FLIGHT LOGIN
     # --------------------------------------------------------
 
-    async def _ensure_logged_in(self):
+    async def _ensure_logged_in_singleflight(self, force=False):
 
-        if GlobalLoginManager.access_token:
+        if GlobalAuth.access_token and not force:
             return
 
-        if GlobalLoginManager.lock.locked():
-            await GlobalLoginManager.ready.wait()
+        if GlobalAuth.lock.locked():
+            await GlobalAuth.ready.wait()
             return
 
-        async with GlobalLoginManager.lock:
-            GlobalLoginManager.ready.clear()
+        async with GlobalAuth.lock:
+            GlobalAuth.ready.clear()
             try:
                 await self._login_with_retries()
             finally:
-                GlobalLoginManager.ready.set()
+                GlobalAuth.ready.set()
 
-    async def _login_with_retries(self, attempts=5):
+    async def _login_with_retries(self):
 
-        for i in range(attempts):
+        for i in range(5):
             try:
                 await self._perform_login()
                 return
             except Exception as e:
                 wait = 300 + random.randint(1, 60)
-                logging.warning(f"Login attempt {i+1} failed: {e}. Wait {wait}s")
+                logging.warning(f"Login failed ({i+1}/5): {e}. Retry in {wait}s")
                 await asyncio.sleep(wait)
 
-        raise RuntimeError("Login failed after retries")
+        raise RuntimeError("Login retries exceeded")
 
     async def _perform_login(self):
 
         async with async_playwright() as p:
             browser = await p.chromium.launch(**Config.BROWSER_ARGS)
-            ctx = await browser.new_context(viewport=Config.VIEWPORT)
-            page = await ctx.new_page()
+            context = await browser.new_context(
+                user_agent=Config.BASE_HEADERS["User-Agent"],
+                viewport=Config.VIEWPORT,
+            )
+            page = await context.new_page()
 
-            await page.goto(Config.LOGIN_URL)
-            await page.wait_for_selector("#username", state="visible")
-            await page.fill("#username", self.dc_user)
+            try:
+                await page.goto(Config.LOGIN_URL)
 
-            await page.wait_for_selector("#password", state="visible")
-            await page.fill("#password", self.dc_pass)
-            await page.get_by_role("button", name="Continue").click(force=True)
+                await page.wait_for_selector("#username", state="visible")
+                await page.fill("#username", self.dc_username)
 
-            await asyncio.sleep(15)
+                await page.wait_for_selector("#password", state="visible")
+                await page.fill("#password", self.dc_password)
 
-            if await page.locator(
-                "text=You have exceeded the amount of emails"
-            ).count():
-                raise RuntimeError("MFA rate limited")
+                await page.get_by_role("button", name="Continue").click(force=True)
 
-            code = self.email_client.get_verification_code()
+                await page.wait_for_timeout(3000)
 
-            if not code:
-                raise RuntimeError("MFA code not received")
+                if await page.locator(
+                    "text=You have exceeded the amount of emails"
+                ).count():
+                    raise RuntimeError("MFA rate limited")
 
-            await page.wait_for_selector("#code", state="visible")
-            await page.fill("#code", code)
-            await page.get_by_role("button", name="Continue").click(force=True)
-            await asyncio.sleep(10)
+                await page.wait_for_selector("#code", timeout=20000)
 
-            GlobalLoginManager.cookies = await ctx.cookies()
+                code = self.email_client.get_verification_code()
 
-            await page.goto(Config.TOKEN_VALIDATION_URL)
-            html = await page.content()
+                if not code:
+                    raise RuntimeError("MFA code not received")
 
-            m = re.search(r"<pre>(.*?)</pre>", html)
-            data = json.loads(m.group(1))
-            GlobalLoginManager.access_token = data["userAccessToken"]
+                await page.fill("#code", code)
+                await page.get_by_role("button", name="Continue").click(force=True)
 
-            await browser.close()
+                await page.wait_for_load_state("networkidle")
 
-            logging.info("Login successful")
+                GlobalAuth.cookies = await context.cookies()
+                self._save_credentials()
+
+                await page.goto(Config.TOKEN_VALIDATION_URL)
+                await page.wait_for_load_state("networkidle")
+
+                html = await page.content()
+                m = re.search(r"<pre>({.*})</pre>", html)
+                data = json.loads(m.group(1))
+
+                GlobalAuth.access_token = data["userAccessToken"]
+                self._save_credentials()
+
+                logging.info("Login successful")
+
+            finally:
+                await browser.close()
 
     # --------------------------------------------------------
-    # HTTP POST
+    # HTTP
     # --------------------------------------------------------
 
-    async def _post(self, url: str, payload: dict) -> httpx.Response:
+    async def _post(self, url: str, payload: dict) -> dict:
 
-        await self._ensure_logged_in()
+        await self._ensure_logged_in_singleflight()
 
         async with httpx.AsyncClient(timeout=Config.TIMEOUT) as client:
-
-            r = await client.post(url, headers=self._headers(), json=payload)
+            r = await client.post(
+                url,
+                headers=self._headers(),
+                cookies=self._cookies_dict(),
+                json=payload,
+            )
 
             if r.status_code in (401, 403):
-                GlobalLoginManager.access_token = None
-                raise AuthRefreshedError()
+                GlobalAuth.cookies = []
+                GlobalAuth.access_token = None
+                self._save_credentials()
+                GlobalAuth.ready.clear()
+                raise AuthRefreshedError("Auth expired")
 
             r.raise_for_status()
-            return r
+            return r.json()
 
     # --------------------------------------------------------
     # PARSING
@@ -351,7 +378,7 @@ class DealerCenterScraper:
 
         accidents = 0
         try:
-            tables = soup.find_all("table")
+            tables = soup.find_all("table", class_="table table-striped")
             for t in tables:
                 if "Damage Type" in t.text:
                     accidents = len(t.find_all("tr")) - 1
@@ -361,8 +388,8 @@ class DealerCenterScraper:
 
         return {
             "owners": owners,
-            "accident_count": accidents,
             "mileage": self.odometer,
+            "accident_count": accidents,
         }
 
     # --------------------------------------------------------
@@ -378,12 +405,11 @@ class DealerCenterScraper:
             "vehicleType": 1,
         }
 
-        r = await self._post(Config.VALUATION_URL, payload)
-        j = r.json()
+        data = await self._post(Config.VALUATION_URL, payload)
 
         try:
-            jd = int(float(j["nada"]["retailBook"]))
-            manheim = int(float(j["manheim"]["adjustedRetailAverage"]))
+            jd = int(float(data["nada"]["retailBook"]))
+            manheim = int(float(data["manheim"]["adjustedRetailAverage"]))
             return jd, manheim
         except Exception:
             return None, None
@@ -406,16 +432,15 @@ class DealerCenterScraper:
             },
         }
 
-        r = await self._post(Config.MARKET_DATA_URL, payload)
-        j = r.json()
+        data = await self._post(Config.MARKET_DATA_URL, payload)
 
         try:
-            return int(float(j["priceAvg"]))
+            return int(float(data["priceAvg"]))
         except Exception:
             return None
 
     # --------------------------------------------------------
-    # PUBLIC API (UNCHANGED)
+    # PUBLIC API
     # --------------------------------------------------------
 
     async def get_history_only_async(self):
@@ -425,42 +450,7 @@ class DealerCenterScraper:
             {"vin": self.vin}
         )
 
-        logger.info(
-            "AutoCheck response | vin=%s status=%s",
-            self.vin,
-            response.status_code,
-        )
-
-        try:
-            payload = response.json()
-        except Exception as e:
-            logger.error(
-                "Failed to parse AutoCheck JSON | vin=%s error=%s raw=%s",
-                self.vin,
-                e,
-                response.text[:300],
-            )
-            return None
-
-        logger.debug(
-            "AutoCheck payload keys | vin=%s keys=%s",
-            self.vin,
-            list(payload.keys()) if isinstance(payload, dict) else type(payload),
-        )
-
-        html = payload.get("htmlResponseData")
-
-        logger.info(
-            "AutoCheck htmlResponseData | vin=%s exists=%s length=%s",
-            self.vin,
-            bool(html),
-            len(html) if html else 0,
-        )
-
-        if not html:
-            logger.warning("Empty htmlResponseData for VIN %s", self.vin)
-            return None
-
+        html = response.get("htmlResponseData")
         parsed = self._parse_history(html)
 
         return {
@@ -473,55 +463,19 @@ class DealerCenterScraper:
             "d_max": None,
         }
 
-
     async def get_history_and_market_data_async(self):
-    
+
         response = await self._post(
             Config.AUTOCHECK_URL,
             {"vin": self.vin}
         )
-    
-        logger.info(
-            "AutoCheck response | vin=%s status=%s",
-            self.vin,
-            response.status_code,
-        )
-    
-        try:
-            payload = response.json()
-        except Exception as e:
-            logger.error(
-                "Failed to parse AutoCheck JSON | vin=%s error=%s raw=%s",
-                self.vin,
-                e,
-                response.text[:300],
-            )
-            return None
-    
-        logger.debug(
-            "AutoCheck payload keys | vin=%s keys=%s",
-            self.vin,
-            list(payload.keys()) if isinstance(payload, dict) else type(payload),
-        )
-    
-        html = payload.get("htmlResponseData")
-    
-        logger.info(
-            "AutoCheck htmlResponseData | vin=%s exists=%s length=%s",
-            self.vin,
-            bool(html),
-            len(html) if html else 0,
-        )
-    
-        if not html:
-            logger.warning("Empty htmlResponseData for VIN %s", self.vin)
-            return None
-    
+
+        html = response.get("htmlResponseData")
         parsed = self._parse_history(html)
-    
+
         jd, manheim = await self._fetch_valuation()
         d_max = await self._fetch_market_stats(parsed["mileage"])
-    
+
         return {
             "owners": parsed["owners"],
             "mileage": parsed["mileage"],
@@ -531,7 +485,6 @@ class DealerCenterScraper:
             "manheim": manheim,
             "d_max": d_max,
         }
-
 
 # ------------------------------------------------------------
 # MANUAL RUN
@@ -543,6 +496,8 @@ if __name__ == "__main__":
 
         dc = DealerCenterScraper(
             vin="2HKRM4H59GH672591",
+            vehicle_name="2016 Honda CR-V",
+            engine="4-Cyl, i-VTEC, 2.4 Liter",
             year=2016,
             make="Honda",
             model="CR-V",
@@ -550,7 +505,10 @@ if __name__ == "__main__":
             transmission="Automatic",
         )
 
-        result = await dc.get_history_and_market_data_async()
+        try:
+            result = await dc.get_history_and_market_data_async()
+        except AuthRefreshedError:
+            result = await dc.get_history_and_market_data_async()
 
         for k, v in result.items():
             if k == "html_data":
@@ -559,3 +517,4 @@ if __name__ == "__main__":
                 print(k, ":", v)
 
     asyncio.run(main())
+
