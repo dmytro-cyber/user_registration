@@ -28,7 +28,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
-
+logger = logging.getLogger(__name__)
 # ------------------------------------------------------------
 # CONFIG
 # ------------------------------------------------------------
@@ -406,10 +406,46 @@ class DealerCenterScraper:
 
     async def get_history_only_async(self):
 
-        html = (await self._post(
+        response = await self._post(
             Config.AUTOCHECK_URL,
             {"vin": self.vin}
-        )).json()["htmlResponseData"]
+        )
+
+        logger.info(
+            "AutoCheck response | vin=%s status=%s",
+            self.vin,
+            response.status_code,
+        )
+
+        try:
+            payload = response.json()
+        except Exception as e:
+            logger.error(
+                "Failed to parse AutoCheck JSON | vin=%s error=%s raw=%s",
+                self.vin,
+                e,
+                response.text[:300],
+            )
+            return None
+
+        logger.debug(
+            "AutoCheck payload keys | vin=%s keys=%s",
+            self.vin,
+            list(payload.keys()) if isinstance(payload, dict) else type(payload),
+        )
+
+        html = payload.get("htmlResponseData")
+
+        logger.info(
+            "AutoCheck htmlResponseData | vin=%s exists=%s length=%s",
+            self.vin,
+            bool(html),
+            len(html) if html else 0,
+        )
+
+        if not html:
+            logger.warning("Empty htmlResponseData for VIN %s", self.vin)
+            return None
 
         parsed = self._parse_history(html)
 
@@ -423,18 +459,55 @@ class DealerCenterScraper:
             "d_max": None,
         }
 
-    async def get_history_and_market_data_async(self):
 
-        html = (await self._post(
+    async def get_history_and_market_data_async(self):
+    
+        response = await self._post(
             Config.AUTOCHECK_URL,
             {"vin": self.vin}
-        )).json()["htmlResponseData"]
-
+        )
+    
+        logger.info(
+            "AutoCheck response | vin=%s status=%s",
+            self.vin,
+            response.status_code,
+        )
+    
+        try:
+            payload = response.json()
+        except Exception as e:
+            logger.error(
+                "Failed to parse AutoCheck JSON | vin=%s error=%s raw=%s",
+                self.vin,
+                e,
+                response.text[:300],
+            )
+            return None
+    
+        logger.debug(
+            "AutoCheck payload keys | vin=%s keys=%s",
+            self.vin,
+            list(payload.keys()) if isinstance(payload, dict) else type(payload),
+        )
+    
+        html = payload.get("htmlResponseData")
+    
+        logger.info(
+            "AutoCheck htmlResponseData | vin=%s exists=%s length=%s",
+            self.vin,
+            bool(html),
+            len(html) if html else 0,
+        )
+    
+        if not html:
+            logger.warning("Empty htmlResponseData for VIN %s", self.vin)
+            return None
+    
         parsed = self._parse_history(html)
-
+    
         jd, manheim = await self._fetch_valuation()
         d_max = await self._fetch_market_stats(parsed["mileage"])
-
+    
         return {
             "owners": parsed["owners"],
             "mileage": parsed["mileage"],
@@ -444,6 +517,7 @@ class DealerCenterScraper:
             "manheim": manheim,
             "d_max": d_max,
         }
+
 
 # ------------------------------------------------------------
 # MANUAL RUN
