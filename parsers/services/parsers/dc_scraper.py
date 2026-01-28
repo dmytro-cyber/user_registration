@@ -86,17 +86,45 @@ class GlobalLoginManager:
 # EMAIL CLIENT
 # ------------------------------------------------------------
 
+
 class EmailClient:
 
     def __init__(self, email_addr: str, password: str):
         self.email = email_addr
         self.password = password
 
-    def get_verification_code(self, timeout=60, poll=4) -> Optional[str]:
+    def _extract_body(self, msg) -> str:
+        # Multipart email
+        if msg.is_multipart():
+            for part in msg.walk():
+                content_type = part.get_content_type()
 
+                if content_type in ("text/plain", "text/html"):
+                    payload = part.get_payload(decode=True)
+                    if not payload:
+                        continue
+
+                    text = payload.decode(errors="ignore")
+
+                    # If HTML -> convert to text
+                    if content_type == "text/html":
+                        soup = BeautifulSoup(text, "html.parser")
+                        return soup.get_text(" ", strip=True)
+
+                    return text
+
+        # Not multipart
+        payload = msg.get_payload(decode=True)
+        if payload:
+            return payload.decode(errors="ignore")
+
+        return ""
+
+    def get_verification_code(self, timeout=60, poll=4) -> Optional[str]:
         start = time.time()
 
         while time.time() - start < timeout:
+            mail = None
             try:
                 mail = imaplib.IMAP4_SSL("imap.gmail.com")
                 mail.login(self.email, self.password)
@@ -112,14 +140,21 @@ class EmailClient:
                     _, msg_data = mail.fetch(msg_id, "(RFC822)")
                     msg = email.message_from_bytes(msg_data[0][1])
 
-                    body = msg.get_payload(decode=True).decode(errors="ignore")
-                    match = re.search(r"\b(\d{6})\b", body)
+                    body = self._extract_body(msg)
 
+                    match = re.search(r"\b(\d{6})\b", body)
                     if match:
                         return match.group(1)
 
-            except Exception:
-                pass
+            except Exception as e:
+                print("EMAIL ERROR:", e)
+
+            finally:
+                try:
+                    if mail:
+                        mail.logout()
+                except Exception:
+                    pass
 
             time.sleep(poll)
 
