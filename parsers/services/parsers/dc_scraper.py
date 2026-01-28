@@ -285,62 +285,66 @@ class DealerCenterScraper:
 
         raise RuntimeError("Login retries exceeded")
 
-    async def _perform_login(self):
+async def _perform_login(self):
 
-        async with async_playwright() as p:
-            browser = await p.chromium.launch(**Config.BROWSER_ARGS)
-            context = await browser.new_context(
-                user_agent=Config.BASE_HEADERS["User-Agent"],
-                viewport=Config.VIEWPORT,
-            )
-            page = await context.new_page()
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(**Config.BROWSER_ARGS)
+        context = await browser.new_context(
+            user_agent=Config.BASE_HEADERS["User-Agent"],
+            viewport=Config.VIEWPORT,
+        )
+        page = await context.new_page()
 
-            try:
-                await page.goto(Config.LOGIN_URL)
+        try:
+            await page.goto(Config.LOGIN_URL)
 
-                await page.wait_for_selector("#username", state="visible")
-                await page.fill("#username", self.dc_username)
+            await page.wait_for_selector("#username", state="visible")
+            await page.fill("#username", self.dc_username)
 
-                await page.wait_for_selector("#password", state="visible")
-                await page.fill("#password", self.dc_password)
+            await page.wait_for_selector("#password", state="visible")
+            await page.fill("#password", self.dc_password)
 
-                await page.get_by_role("button", name="Continue").click(force=True)
+            await page.get_by_role("button", name="Continue").click(force=True)
 
-                await page.wait_for_timeout(3000)
+            # ---------- WAIT MFA PAGE ----------
+            await asyncio.sleep(5)
 
-                if await page.locator(
-                    "text=You have exceeded the amount of emails"
-                ).count():
-                    raise RuntimeError("MFA rate limited")
+            if await page.locator(
+                "text=You have exceeded the amount of emails"
+            ).count():
+                raise RuntimeError("MFA rate limited")
 
-                await page.wait_for_selector("#code", timeout=20000)
+            await page.wait_for_selector("#code", timeout=20000)
 
-                code = self.email_client.get_verification_code()
-                if not code:
-                    raise RuntimeError("MFA code not received")
+            code = self.email_client.get_verification_code()
+            if not code:
+                raise RuntimeError("MFA code not received")
 
-                await page.fill("#code", code)
-                await page.get_by_role("button", name="Continue").click(force=True)
+            await page.fill("#code", code)
+            await page.get_by_role("button", name="Continue").click(force=True)
 
-                await page.wait_for_load_state("networkidle")
+            # ---------- WAIT LOGIN FINISH ----------
+            await asyncio.sleep(15)
 
-                DealerCenterScraper._shared_cookies = await context.cookies()
-                self._save_credentials()
+            # save cookies
+            DealerCenterScraper._shared_cookies = await context.cookies()
+            self._save_credentials()
 
-                await page.goto(Config.TOKEN_VALIDATION_URL)
-                await page.wait_for_load_state("networkidle")
+            # ---------- FETCH TOKEN ----------
+            await page.goto(Config.TOKEN_VALIDATION_URL)
+            await asyncio.sleep(10)
 
-                html = await page.content()
-                m = re.search(r"<pre>({.*})</pre>", html)
-                data = json.loads(m.group(1))
+            html = await page.content()
+            m = re.search(r"<pre>({.*})</pre>", html)
+            data = json.loads(m.group(1))
 
-                DealerCenterScraper._shared_token = data["userAccessToken"]
-                self._save_credentials()
+            DealerCenterScraper._shared_token = data["userAccessToken"]
+            self._save_credentials()
 
-                logging.info("Login successful")
+            logging.info("Login successful")
 
-            finally:
-                await browser.close()
+        finally:
+            await browser.close()
 
     # --------------------------------------------------------
     # HTTP
