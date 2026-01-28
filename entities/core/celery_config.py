@@ -35,7 +35,7 @@ app.conf.task_always_eager = False
 app.conf.beat_schedule = {
     "update-car-bids-every-15-minutes": {
         "task": "tasks.task.update_car_bids",
-        "schedule": crontab(minute="13,30,45", hour="0-2,4-23"),
+        "schedule": crontab(minute="30", hour="0-2,4-23"),
     },
     "update-fees-every-1-month": {
         "task": "tasks.task.update_fees",
