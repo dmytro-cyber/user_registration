@@ -43,11 +43,25 @@ class Config:
     LOGIN_URL = f"{BASE_URL}/apps/shell/reports/home"
 
     BASE_HEADERS = {
+        "authority": "app.dealercenter.net",
         "Accept": "application/json",
         "Content-Type": "application/*+json",
         "Origin": BASE_URL,
         "Referer": f"{BASE_URL}/apps/shell/inventory/vehicle/history-reports",
-        "User-Agent": "Mozilla/5.0 Chrome/134.0.0.0",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/134.0.0.0 Safari/537.36 OPR/119.0.0.0",
+        "X-Xsrf-Token": "dd091ebc-65c0-413f-af29-5fa9abf2e612",
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+        "Sec-Ch-Ua": '"Chromium";v="134", "Not:A-Brand";v="24", "Opera";v="119"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": "macOS",
+        "Priority": "u=1, i",
+        "Timezone": "America/Los_Angeles",  # California, USA
+        "Dc-Location": "ceaf9582-d242-4911-9b81-2da5fa48b8bb",
+        "Dc-User": "loc=ceaf9582-d242-4911-9b81-2da5fa48b8bb;cache=74e3653a-3a14-43f8-a1c1-64102452b408;type=Self;",
+        "Accept-Encoding": "gzip, deflate, br, zstd",
+        "Accept-Language": "en-US,en;q=0.9",
     }
 
     TIMEOUT = 90
