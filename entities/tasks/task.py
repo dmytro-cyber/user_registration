@@ -225,7 +225,10 @@ def parse_and_update_car(
                 headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
                 hist_resp = http_get_with_retries(hist_url, headers=headers, timeout=30.0)
                 hist_resp.raise_for_status()
-                hist_result = CarCreateSchema.model_validate(hist_resp.json())
+                try:
+                    hist_result = CarCreateSchema.model_validate(hist_resp.json())
+                except Exception:
+                    pass
 
                 logger.info(f"Successfully scraped sales history data {hist_result.sales_history}")
 

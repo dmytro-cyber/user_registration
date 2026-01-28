@@ -229,9 +229,12 @@ class DealerCenterScraper:
             page = await ctx.new_page()
 
             await page.goto(Config.LOGIN_URL)
+            await page.wait_for_selector("#username", state="visible")
             await page.fill("#username", self.dc_user)
+
+            await page.wait_for_selector("#password", state="visible")
             await page.fill("#password", self.dc_pass)
-            await page.click("button:has-text('Continue')")
+            await page.locator("button:has-text('Continue')").click(force=True)
 
             await asyncio.sleep(15)
 
@@ -245,8 +248,9 @@ class DealerCenterScraper:
             if not code:
                 raise RuntimeError("MFA code not received")
 
+            await page.wait_for_selector("#code", state="visible")
             await page.fill("#code", code)
-            await page.click("button:has-text('Continue')")
+            await page.locator("button:has-text('Continue')").click(force=True)
             await asyncio.sleep(10)
 
             GlobalLoginManager.cookies = await ctx.cookies()
