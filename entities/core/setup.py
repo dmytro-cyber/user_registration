@@ -188,7 +188,17 @@ async def create_roles():
             new_user.phone_number = "admin"
             new_user.date_of_birth = date.today()
             new_user.role_id = admin_role.id
+            new_user_1 = UserModel.create(
+                email=os.getenv("ADMIN_ONE_USERNAME"),
+                raw_password=os.getenv("ADMIN_ONE_PASSWORD"),
+            )
+            new_user_1.first_name = "Admin"
+            new_user_1.last_name = "Admin"
+            new_user_1.phone_number = "admin"
+            new_user_1.date_of_birth = date.today()
+            new_user_1.role_id = admin_role.id
             session.add(new_user)
+            session.add(new_user_1)
 
         await session.commit()
 
