@@ -227,12 +227,11 @@ def parse_and_update_car(
                 hist_resp.raise_for_status()
                 try:
                     hist_result = CarCreateSchema.model_validate(hist_resp.json())
+                    sale_history_data = hist_result.sales_history
                 except Exception:
-                    pass
+                    sale_history_data = []
 
                 logger.info(f"Successfully scraped sales history data {hist_result.sales_history}")
-
-                sale_history_data = hist_result.sales_history or []
 
                 # If 4+ sales in last years -> NOT_RECOMMENDED with a reason
                 if len(sale_history_data) >= 4:
