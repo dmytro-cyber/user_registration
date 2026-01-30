@@ -234,25 +234,26 @@ def parse_and_update_car(
                 logger.info(f"Successfully scraped sales history data {hist_result.sales_history}")
 
                 # If 4+ sales in last years -> NOT_RECOMMENDED with a reason
-                if len(sale_history_data) >= 4:
-                    logger.debug(
-                        "More than 3 sales history records for VIN=%s. Not recommended.",
-                        vin,
-                    )
-                    car_pre.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    add_reason(
-                        car_pre,
-                        f"sales at auction in the last 3 years: {len(sale_history_data)};"
-                    )
-                    db.add(car_pre)
-                    db.flush()
-
-                # Persist history entries (fill default source if empty)
-                for h in sale_history_data:
-                    item = CarSaleHistoryModel(**h.dict(), car_id=car_pre.id)
-                    if not item.source:
-                        item.source = "Unknown"
-                    db.add(item)
+                if sale_history_data:
+                    if len(sale_history_data) >= 4:
+                        logger.debug(
+                            "More than 3 sales history records for VIN=%s. Not recommended.",
+                            vin,
+                        )
+                        car_pre.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        add_reason(
+                            car_pre,
+                            f"sales at auction in the last 3 years: {len(sale_history_data)};"
+                        )
+                        db.add(car_pre)
+                        db.flush()
+    
+                    # Persist history entries (fill default source if empty)
+                    for h in sale_history_data:
+                        item = CarSaleHistoryModel(**h.dict(), car_id=car_pre.id)
+                        if not item.source:
+                            item.source = "Unknown"
+                        db.add(item)
 
                 db.commit()
             except Exception as e:
@@ -401,6 +402,7 @@ def parse_and_update_car(
             # success marker
             car.is_checked = True
             car.relevance = RelevanceStatus.ACTIVE
+            car.attempts = (car.attempts or 0) + 1
 
             db.add(car)
             db.commit()
