@@ -215,14 +215,19 @@ class FeeScraper:
 
         try:
             clean_title_el = None
+
             # main content
             try:
+                # FIX: шукаємо саме таб, а не будь-який текст
                 clean_title_el = WebDriverWait(driver, 10).until(
-                    EC.presence_of_element_located(
-                        (By.XPATH, "//*[contains(normalize-space(text()), 'Non-Clean Title Vehicles')]")
+                    EC.element_to_be_clickable(
+                        (
+                            By.XPATH,
+                            "//a[contains(@aria-controls,'noncleanmore') and contains(., 'Non-Clean Title')]"
+                        )
                     )
                 )
-                logger.info("Found 'Non-Clean Title Vehicles' element in main content.")
+                logger.info("Found 'Non-Clean Title Vehicles' tab in main content.")
             except Exception as e:
                 logger.warning("Element not found in main content: %s. Checking iframe.", str(e))
 
@@ -234,12 +239,17 @@ class FeeScraper:
                     try:
                         driver.switch_to.frame(iframes[0])
                         logger.info("Switched to iframe 0.")
+
+                        # FIX: той самий XPATH в iframe
                         clean_title_el = WebDriverWait(driver, 10).until(
-                            EC.presence_of_element_located(
-                                (By.XPATH, "//*[contains(normalize-space(text()), 'Non-Clean Title Vehicles')]")
+                            EC.element_to_be_clickable(
+                                (
+                                    By.XPATH,
+                                    "//a[contains(@aria-controls,'noncleanmore') and contains(., 'Non-Clean Title')]"
+                                )
                             )
                         )
-                        logger.info("Found 'Non-Clean Title Vehicles' element in iframe 0.")
+                        logger.info("Found 'Non-Clean Title Vehicles' tab in iframe 0.")
                     except Exception as e:
                         logger.warning("Element not found in iframe 0: %s.", str(e))
                         driver.switch_to.default_content()
@@ -248,7 +258,7 @@ class FeeScraper:
             if clean_title_el is None:
                 raise Exception("Could not find 'Non-Clean Title Vehicles' element.")
 
-            # make clickable & click
+            # make clickable & click (твій код залишаємо)
             driver.execute_script(
                 """
                 var el = arguments[0];
@@ -256,7 +266,6 @@ class FeeScraper:
                 el.style.visibility = 'visible';
                 el.removeAttribute('disabled');
                 el.classList.remove('disabled');
-                el.classList.add('active');
                 ['mouseover','mousemove','mouseenter','mousedown'].forEach(t=>{
                     el.dispatchEvent(new Event(t, {bubbles:true}));
                 });
@@ -264,6 +273,7 @@ class FeeScraper:
                 clean_title_el,
             )
             logger.info("Prepared element for click.")
+
             WebDriverWait(driver, 10).until(
                 lambda d: d.execute_script(
                     "return arguments[0].offsetParent !== null && window.getComputedStyle(arguments[0]).visibility !== 'hidden';",
@@ -271,16 +281,32 @@ class FeeScraper:
                 )
                 and clean_title_el.is_enabled()
             )
+
             time.sleep(1)
             driver.execute_script("arguments[0].click();", clean_title_el)
             logger.info("Clicked.")
 
+            # FIX: чекаємо що активувався САМЕ ЦЕЙ таб
             WebDriverWait(driver, 10).until(
-                EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'Secured Payment Methods')]"))
+                lambda d: clean_title_el.get_attribute("aria-selected") == "true"
             )
-            logger.info("Secured Payment Methods section visible.")
+            logger.info("Non-Clean tab is active.")
+
+            # FIX: беремо id контейнера активного таба
+            pane_id = clean_title_el.get_attribute("aria-controls")
+
+            WebDriverWait(driver, 10).until(
+                EC.visibility_of_element_located((By.ID, pane_id))
+            )
+            logger.info("Non-Clean pane visible.")
 
             driver.switch_to.default_content()
+
+            # FIX: парсимо ТІЛЬКИ активний контейнер
+            pane = driver.find_element(By.ID, pane_id)
+            html = pane.get_attribute("innerHTML")
+
+            return BeautifulSoup(html, "html.parser")
 
         except Exception as e:
             logger.error("Failed to interact with page elements: %s", str(e))
@@ -293,7 +319,6 @@ class FeeScraper:
                 driver.switch_to.default_content()
             raise
 
-        return BeautifulSoup(driver.page_source, "html.parser")
 
     def collect_fees(self, soup: BeautifulSoup):
         fees = {}
