@@ -65,7 +65,8 @@ def chunked(iterable, size):
 
 @app.task
 def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
-    """Fetch -> save -> process -> forward sequentially. Delete page file immediately after usage."""
+    """Fetch ALL pages -> save -> process ALL -> cleanup folder"""
+
     if not base_url:
         base_url = "https://api.apicar.store/api/cars/db/update"
     if not size:
@@ -81,149 +82,114 @@ def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
     save_url = "http://entities:8000/api/v1/vehicles/bulk"
 
     page = 1
-    logger.info(f"[APICAR] Start fetching. base_url={base_url} size={size} run_dir={run_dir}")
+    logger.info(f"[APICAR] Start bulk fetch. base_url={base_url} size={size}")
 
-    try:
-        with httpx.Client(timeout=10) as client:
-            while True:
-                url = generate_car_api_url(page=page, size=size, base_url=base_url)
-                logger.info(f"[APICAR] Fetch page {page}: {url}")
+    # -------------------------------------------------
+    # 1) FETCH ALL PAGES
+    # -------------------------------------------------
+    with httpx.Client(timeout=20) as client:
+        while True:
+            url = generate_car_api_url(page=page, size=size, base_url=base_url)
+            logger.info(f"[APICAR] Fetch page {page}: {url}")
 
-                # -----------------------------
-                # 1) Fetch page
-                # -----------------------------
-                try:
-                    resp = client.get(url, headers=apicar_headers)
-                    resp.raise_for_status()
-                    api_response = resp.json()
-                    data = api_response.get("data", [])
-                except httpx.HTTPError as e:
-                    logger.error(f"[APICAR] Failed to fetch page {page}: {e}")
-                    err_path = os.path.join(pages_dir, f"page_{page:05d}_ERROR.json")
-                    with open(err_path, "w", encoding="utf-8") as fh:
-                        json.dump({"error": str(e), "url": url}, fh, ensure_ascii=False, indent=2)
+            try:
+                resp = client.get(url, headers=apicar_headers)
+                resp.raise_for_status()
+                payload = resp.json()
+                data = payload.get("data", [])
+            except httpx.HTTPError as e:
+                logger.error(f"[APICAR] Page {page} failed: {e}")
+                break
 
-                    page += 1
-                    continue
+            if not data:
+                logger.info(f"[APICAR] No data at page {page}. Stop.")
+                break
 
-                if not data:
-                    logger.info(f"[APICAR] Empty page {page}. Stop fetching.")
-                    break
+            out_path = os.path.join(pages_dir, f"page_{page:05d}.json")
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False)
 
-                # -----------------------------
-                # 2) Save page to file
-                # -----------------------------
-                out_path = os.path.join(pages_dir, f"page_{page:05d}.json")
-                with open(out_path, "w", encoding="utf-8") as fh:
-                    json.dump(api_response, fh, ensure_ascii=False)
+            logger.info(f"[APICAR] Saved page {page} ({len(data)} records)")
+            page += 1
 
-                logger.info(f"[APICAR] Saved page {page} with {len(data)} records -> {out_path}")
+    # -------------------------------------------------
+    # 2) PROCESS ALL FILES
+    # -------------------------------------------------
+    logger.info("[PROCESS] Start processing saved pages")
 
-                # -----------------------------
-                # 3) Process + forward this page
-                # -----------------------------
-                try:
-                    with open(out_path, "r", encoding="utf-8") as fh:
-                        page_payload = json.load(fh)
-                except Exception as e:
-                    logger.error(f"[PROCESS] Failed to read {out_path}: {e}")
-                    # файл все одно видаляємо нижче
-                    page += 1
-                    try:
-                        os.remove(out_path)
-                    except Exception:
-                        pass
-                    continue
+    files = sorted(os.listdir(pages_dir))
+    for fname in files:
+        fpath = os.path.join(pages_dir, fname)
 
-                page_data = page_payload.get("data", [])
-                if not page_data:
-                    logger.info(f"[PROCESS] Page {page} has no data after load. Skip.")
-                    page += 1
-                    try:
-                        os.remove(out_path)
-                    except Exception:
-                        pass
-                    continue
-
-                processed_vehicles = []
-                for vehicle in page_data:
-                    try:
-                        formatted = format_car_data(vehicle)
-                        adapted = {
-                            "vin": formatted["vin"],
-                            "vehicle": formatted["vehicle"],
-                            "make": formatted["make"],
-                            "model": formatted["model"],
-                            "year": formatted.get("year"),
-                            "mileage": formatted.get("mileage"),
-                            "auction": formatted.get("auction"),
-                            "auction_name": formatted.get("auction_name"),
-                            "date": formatted.get("date").isoformat() if formatted.get("date") else None,
-                            "lot": formatted.get("lot"),
-                            "seller": formatted.get("seller"),
-                            "seller_type": formatted.get("seller_type"),
-                            "location": formatted.get("location"),
-                            "current_bid": formatted.get("current_bid"),
-                            "engine": formatted.get("engine"),
-                            "has_keys": formatted.get("has_keys"),
-                            "engine_title": formatted.get("engine_title"),
-                            "engine_cylinder": formatted.get("engine_cylinder"),
-                            "drive_type": formatted.get("drive_type"),
-                            "exterior_color": formatted.get("exterior_color"),
-                            "condition": formatted.get("condition"),
-                            "body_style": formatted.get("body_style"),
-                            "fuel_type": formatted.get("fuel_type"),
-                            "transmision": formatted.get("transmision"),
-                            "vehicle_type": formatted.get("vehicle_type"),
-                            "link": formatted.get("link"),
-                            "is_salvage": formatted.get("is_salvage", False),
-                            "photos": formatted.get("photos", []),
-                            "photos_hd": formatted.get("photos_hd", []),
-                            "condition_assessments": formatted.get("condition_assessments", []),
-                        }
-                        processed_vehicles.append(adapted)
-                    except Exception:
-                        continue
-
-                if processed_vehicles:
-                    for batch in chunked(processed_vehicles, 25):
-                        payload = {
-                            "ivent": "updated" if size == 1000 else "created",
-                            "vehicles": batch,
-                        }
-                        try:
-                            r = httpx.post(save_url, json=payload, headers=headers_entities, timeout=3600)
-                            r.raise_for_status()
-                            logger.info(f"[FORWARD] Sent {len(batch)} vehicles from page {page}.")
-                        except httpx.HTTPError as e:
-                            logger.error(f"[FORWARD] Failed batch from page {page}: {e}")
-
-                # -----------------------------
-                # 4) Delete file immediately
-                # -----------------------------
-                try:
-                    os.remove(out_path)
-                    logger.info(f"[CLEANUP] Deleted page file {out_path}")
-                except Exception as e:
-                    logger.warning(f"[CLEANUP] Failed to delete {out_path}: {e}")
-
-                # go next page ONLY after everything is processed
-                page += 1
-
-        logger.info(f"[DONE] Completed sequential processing. Cleaning up {run_dir}...")
-
-        # remove run_dir (should contain only possible error files)
         try:
-            shutil.rmtree(run_dir)
-            logger.info(f"[CLEANUP] Successfully removed {run_dir}")
+            with open(fpath, "r", encoding="utf-8") as f:
+                page_payload = json.load(f)
         except Exception as e:
-            logger.warning(f"[CLEANUP] Failed to remove {run_dir}: {e}")
+            logger.error(f"[PROCESS] Failed read {fname}: {e}")
+            continue
 
-        return {"message": "Finished sequential processing and cleaned up", "run_dir": run_dir}
+        vehicles = []
+        for raw in page_payload.get("data", []):
+            try:
+                formatted = format_car_data(raw)
+                vehicles.append({
+                    "vin": formatted["vin"],
+                    "vehicle": formatted["vehicle"],
+                    "make": formatted["make"],
+                    "model": formatted["model"],
+                    "year": formatted.get("year"),
+                    "mileage": formatted.get("mileage"),
+                    "auction": formatted.get("auction"),
+                    "auction_name": formatted.get("auction_name"),
+                    "date": formatted.get("date").isoformat() if formatted.get("date") else None,
+                    "lot": formatted.get("lot"),
+                    "seller": formatted.get("seller"),
+                    "seller_type": formatted.get("seller_type"),
+                    "location": formatted.get("location"),
+                    "current_bid": formatted.get("current_bid"),
+                    "engine": formatted.get("engine"),
+                    "has_keys": formatted.get("has_keys"),
+                    "engine_title": formatted.get("engine_title"),
+                    "engine_cylinder": formatted.get("engine_cylinder"),
+                    "drive_type": formatted.get("drive_type"),
+                    "exterior_color": formatted.get("exterior_color"),
+                    "condition": formatted.get("condition"),
+                    "body_style": formatted.get("body_style"),
+                    "fuel_type": formatted.get("fuel_type"),
+                    "transmision": formatted.get("transmision"),
+                    "vehicle_type": formatted.get("vehicle_type"),
+                    "link": formatted.get("link"),
+                    "is_salvage": formatted.get("is_salvage", False),
+                    "photos": formatted.get("photos", []),
+                    "photos_hd": formatted.get("photos_hd", []),
+                    "condition_assessments": formatted.get("condition_assessments", []),
+                })
+            except Exception:
+                continue
 
+        if vehicles:
+            for batch in chunked(vehicles, 25):
+                payload = {
+                    "ivent": "updated" if size == 1000 else "created",
+                    "vehicles": batch,
+                }
+                try:
+                    r = httpx.post(save_url, json=payload, headers=headers_entities, timeout=3600)
+                    r.raise_for_status()
+                    logger.info(f"[FORWARD] Sent {len(batch)} vehicles from {fname}")
+                except httpx.HTTPError as e:
+                    logger.error(f"[FORWARD] Failed {fname}: {e}")
+
+    # -------------------------------------------------
+    # 3) FULL CLEANUP
+    # -------------------------------------------------
+    try:
+        shutil.rmtree(run_dir)
+        logger.info(f"[CLEANUP] Removed {run_dir}")
     except Exception as e:
-        logger.error(f"[FATAL] Unexpected error: {e}")
-        return {"error": str(e), "run_dir": run_dir}
+        logger.warning(f"[CLEANUP] Cleanup failed: {e}")
+
+    return {"message": "Finished bulk fetch+process", "pages": page - 1}
 
 
 
