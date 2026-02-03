@@ -387,6 +387,53 @@ async def get_vehicle_by_vin(
     return car
 
 
+async def get_vehicle_by_vin_for_upsert(
+    db: AsyncSession,
+    vin: str,
+    current_user_id: Optional[int] = None,
+) -> Optional[CarModel]:
+    """
+    Fetch a car by VIN with safe loader strategy:
+    - noload('*') disables any accidental lazy loading for ALL relationships.
+    - selectinload(...) eagerly loads only the relationships we plan to touch.
+    - 'liked' is computed via EXISTS on the association table, not via lazy M2M.
+    - finally, the entity is expunged (detached) to make accidental lazy loads impossible.
+    """
+    stmt = (
+        select(CarModel)
+        .options(
+            # disable any other relationships (no SQL will be emitted when accessed)
+            noload('*'),
+            # explicitly load only what serializer will read
+            selectinload(CarModel.photos),
+            selectinload(CarModel.photos_hd),
+            selectinload(CarModel.condition_assessments),
+            selectinload(CarModel.sales_history),
+        )
+        .where(CarModel.vin == vin)
+        .limit(1)
+    )
+    res = await db.execute(stmt)
+    car = res.scalars().first()
+    if not car:
+        return None
+
+    # Compute 'liked' via EXISTS on the link table
+    if current_user_id:
+        liked_q = select(
+            exists().where(
+                (user_likes.c.user_id == current_user_id) &
+                (user_likes.c.car_id == car.id)
+            )
+        )
+        liked = (await db.execute(liked_q)).scalar()
+        car.liked = bool(liked)
+    else:
+        car.liked = False
+
+    return car
+
+
 async def save_vehicle(db: AsyncSession, vehicle_data: CarCreateSchema) -> Optional[CarModel]:
     """Save a vehicle to the database if it doesn't already exist."""
     existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin, 1)
@@ -1028,7 +1075,7 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
     if vehicle_data.transmision:
         vehicle_data.transmision = norm(vehicle_data.transmision)
     try:
-        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+        existing_vehicle = await get_vehicle_by_vin_for_upsert(db, vehicle_data.vin)
         if existing_vehicle:
             existing_vehicle.relevance = RelevanceStatus.ACTIVE
             existing_vehicle.is_checked = False
