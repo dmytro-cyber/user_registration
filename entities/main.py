@@ -10,6 +10,7 @@ from api.v1.routers.bidding_hub import router as bidding_hub_router
 from api.v1.routers.inventory import router as inventory_router
 from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
+from api.v1.routers.fee import router as fee_router
 from core.celery_config import app as celery_app
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
 
@@ -61,6 +62,7 @@ app.include_router(admin_router, prefix="/api/v1", tags=["Admin"])
 app.include_router(bidding_hub_router, prefix="/api/v1", tags=["Bidding Hub"])
 app.include_router(inventory_router, prefix="/api/v1", tags=["Inventory"])
 app.include_router(analytics_router, prefix="/api/v1", tags=["Analytics"])
+app.include_router(fee_router, prefix="/api/v1", tags=["Fees"])
 
 def configure_logging():
     logging.getLogger("uvicorn").setLevel(logging.INFO)

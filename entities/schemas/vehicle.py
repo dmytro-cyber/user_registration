@@ -528,3 +528,32 @@ class CarUpsertSchema(BaseModel):
             {"type_of_damage": "Secondary", "issue_description": "Front"},
         ],
     )
+
+
+class FeeBase(BaseModel):
+    auction: str = Field(..., example="copart")
+    fee_type: str = Field(..., example="buyer_fee")
+    amount: float = Field(..., ge=0)
+    percent: bool = False
+    price_from: Optional[float] = Field(None, ge=0)
+    price_to: Optional[float] = Field(None, ge=0)
+
+
+class FeeCreate(FeeBase):
+    pass
+
+
+class FeeUpdate(BaseModel):
+    auction: Optional[str]
+    fee_type: Optional[str]
+    amount: Optional[float] = Field(None, ge=0)
+    percent: Optional[bool]
+    price_from: Optional[float] = Field(None, ge=0)
+    price_to: Optional[float] = Field(None, ge=0)
+
+
+class FeeRead(FeeBase):
+    id: int
+
+    class Config:
+        from_attributes = True
