@@ -62,135 +62,117 @@ def chunked(iterable, size):
     for first in it:
         yield [first, *islice(it, size - 1)]
 
-
 @app.task
 def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
-    """Fetch ALL pages -> save -> process ALL -> cleanup folder"""
+    """Streaming: fetch page -> process -> forward -> next"""
 
     if not base_url:
         base_url = "https://api.apicar.store/api/cars/db/update"
     if not size:
         size = 1000
 
-    root_dir = os.path.abspath("./apicar_runs")
-    run_dir = os.path.join(root_dir, f"run_{_ts()}")
-    pages_dir = os.path.join(run_dir, "pages")
-    os.makedirs(pages_dir, exist_ok=True)
-
     headers_entities = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
     apicar_headers = {"api-key": os.getenv("APICAR_KEY")}
     save_url = "http://entities:8000/api/v1/vehicles/bulk"
 
     page = 1
-    logger.info(f"[APICAR] Start bulk fetch. base_url={base_url} size={size}")
+    total_pages = 0
+    total_vehicles = 0
 
-    # -------------------------------------------------
-    # 1) FETCH ALL PAGES
-    # -------------------------------------------------
-    with httpx.Client(timeout=20) as client:
+    logger.info(f"[APICAR] Streaming start. base_url={base_url} size={size}")
+
+    with httpx.Client(timeout=20) as fetch_client, \
+         httpx.Client(timeout=3600) as forward_client:
+
         while True:
             url = generate_car_api_url(page=page, size=size, base_url=base_url)
-            logger.info(f"[APICAR] Fetch page {page}: {url}")
+            logger.info(f"[APICAR] Fetch page {page}")
 
             try:
-                resp = client.get(url, headers=apicar_headers)
+                resp = fetch_client.get(url, headers=apicar_headers)
                 resp.raise_for_status()
                 payload = resp.json()
                 data = payload.get("data", [])
             except httpx.HTTPError as e:
-                logger.error(f"[APICAR] Page {page} failed: {e}")
+                logger.error(f"[APICAR] Fetch failed page {page}: {e}")
                 break
 
             if not data:
-                logger.info(f"[APICAR] No data at page {page}. Stop.")
+                logger.info(f"[APICAR] Empty page {page}. Stop.")
                 break
 
-            out_path = os.path.join(pages_dir, f"page_{page:05d}.json")
-            with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False)
+            vehicles = []
+            for raw in data:
+                try:
+                    formatted = format_car_data(raw)
+                    vehicles.append({
+                        "vin": formatted["vin"],
+                        "vehicle": formatted["vehicle"],
+                        "make": formatted["make"],
+                        "model": formatted["model"],
+                        "year": formatted.get("year"),
+                        "mileage": formatted.get("mileage"),
+                        "auction": formatted.get("auction"),
+                        "auction_name": formatted.get("auction_name"),
+                        "date": formatted.get("date").isoformat() if formatted.get("date") else None,
+                        "lot": formatted.get("lot"),
+                        "seller": formatted.get("seller"),
+                        "seller_type": formatted.get("seller_type"),
+                        "location": formatted.get("location"),
+                        "current_bid": formatted.get("current_bid"),
+                        "engine": formatted.get("engine"),
+                        "has_keys": formatted.get("has_keys"),
+                        "engine_title": formatted.get("engine_title"),
+                        "engine_cylinder": formatted.get("engine_cylinder"),
+                        "drive_type": formatted.get("drive_type"),
+                        "exterior_color": formatted.get("exterior_color"),
+                        "condition": formatted.get("condition"),
+                        "body_style": formatted.get("body_style"),
+                        "fuel_type": formatted.get("fuel_type"),
+                        "transmision": formatted.get("transmision"),
+                        "vehicle_type": formatted.get("vehicle_type"),
+                        "link": formatted.get("link"),
+                        "is_salvage": formatted.get("is_salvage", False),
+                        "photos": formatted.get("photos", []),
+                        "photos_hd": formatted.get("photos_hd", []),
+                        "condition_assessments": formatted.get("condition_assessments", []),
+                    })
+                except Exception:
+                    continue
 
-            logger.info(f"[APICAR] Saved page {page} ({len(data)} records)")
+            if vehicles:
+                for batch in chunked(vehicles, 25):
+                    payload = {
+                        "ivent": "updated" if size == 1000 else "created",
+                        "vehicles": batch,
+                    }
+                    try:
+                        r = forward_client.post(
+                            save_url,
+                            json=payload,
+                            headers=headers_entities,
+                        )
+                        r.raise_for_status()
+                    except httpx.HTTPError as e:
+                        logger.error(f"[FORWARD] Failed page {page}: {e}")
+
+            total_pages += 1
+            total_vehicles += len(vehicles)
+            logger.info(
+                f"[APICAR] Page {page} done. vehicles={len(vehicles)}"
+            )
+
             page += 1
 
-    # -------------------------------------------------
-    # 2) PROCESS ALL FILES
-    # -------------------------------------------------
-    logger.info("[PROCESS] Start processing saved pages")
+    logger.info(
+        f"[DONE] Streaming finished. pages={total_pages} vehicles={total_vehicles}"
+    )
 
-    files = sorted(os.listdir(pages_dir))
-    for fname in files:
-        fpath = os.path.join(pages_dir, fname)
-
-        try:
-            with open(fpath, "r", encoding="utf-8") as f:
-                page_payload = json.load(f)
-        except Exception as e:
-            logger.error(f"[PROCESS] Failed read {fname}: {e}")
-            continue
-
-        vehicles = []
-        for raw in page_payload.get("data", []):
-            try:
-                formatted = format_car_data(raw)
-                vehicles.append({
-                    "vin": formatted["vin"],
-                    "vehicle": formatted["vehicle"],
-                    "make": formatted["make"],
-                    "model": formatted["model"],
-                    "year": formatted.get("year"),
-                    "mileage": formatted.get("mileage"),
-                    "auction": formatted.get("auction"),
-                    "auction_name": formatted.get("auction_name"),
-                    "date": formatted.get("date").isoformat() if formatted.get("date") else None,
-                    "lot": formatted.get("lot"),
-                    "seller": formatted.get("seller"),
-                    "seller_type": formatted.get("seller_type"),
-                    "location": formatted.get("location"),
-                    "current_bid": formatted.get("current_bid"),
-                    "engine": formatted.get("engine"),
-                    "has_keys": formatted.get("has_keys"),
-                    "engine_title": formatted.get("engine_title"),
-                    "engine_cylinder": formatted.get("engine_cylinder"),
-                    "drive_type": formatted.get("drive_type"),
-                    "exterior_color": formatted.get("exterior_color"),
-                    "condition": formatted.get("condition"),
-                    "body_style": formatted.get("body_style"),
-                    "fuel_type": formatted.get("fuel_type"),
-                    "transmision": formatted.get("transmision"),
-                    "vehicle_type": formatted.get("vehicle_type"),
-                    "link": formatted.get("link"),
-                    "is_salvage": formatted.get("is_salvage", False),
-                    "photos": formatted.get("photos", []),
-                    "photos_hd": formatted.get("photos_hd", []),
-                    "condition_assessments": formatted.get("condition_assessments", []),
-                })
-            except Exception:
-                continue
-
-        if vehicles:
-            for batch in chunked(vehicles, 25):
-                payload = {
-                    "ivent": "updated" if size == 1000 else "created",
-                    "vehicles": batch,
-                }
-                try:
-                    r = httpx.post(save_url, json=payload, headers=headers_entities, timeout=3600)
-                    r.raise_for_status()
-                    logger.info(f"[FORWARD] Sent {len(batch)} vehicles from {fname}")
-                except httpx.HTTPError as e:
-                    logger.error(f"[FORWARD] Failed {fname}: {e}")
-
-    # -------------------------------------------------
-    # 3) FULL CLEANUP
-    # -------------------------------------------------
-    try:
-        shutil.rmtree(run_dir)
-        logger.info(f"[CLEANUP] Removed {run_dir}")
-    except Exception as e:
-        logger.warning(f"[CLEANUP] Cleanup failed: {e}")
-
-    return {"message": "Finished bulk fetch+process", "pages": page - 1}
-
+    return {
+        "message": "Streaming finished",
+        "pages": total_pages,
+        "vehicles": total_vehicles,
+    }
 
 
 @app.task
