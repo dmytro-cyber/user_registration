@@ -1113,30 +1113,31 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
             )
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
-                    db.add(
-                        ConditionAssessmentModel(
-                            type_of_damage=assessment.type_of_damage,
-                            issue_description=assessment.issue_description,
-                            car_id=existing_vehicle.id,
+                    if assessment.type_of_damage and assessment.issue_description:
+                        db.add(
+                            ConditionAssessmentModel(
+                                type_of_damage=assessment.type_of_damage,
+                                issue_description=assessment.issue_description,
+                                car_id=existing_vehicle.id,
+                            )
                         )
-                    )
-                    if assessment.issue_description in [
-                        "Rejected Repair",
-                        "Burn Engine",
-                        "Mechanical",
-                        "Replaced Vin",
-                        "Burn",
-                        "Undercarriage",
-                        "Water/Flood",
-                        "Burn Interior",
-                        "Rollover",
-                    ]:
-                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                        if not existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
-                        else:
-                            if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
-                                existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+                        if assessment.issue_description in [
+                            "Rejected Repair",
+                            "Burn Engine",
+                            "Mechanical",
+                            "Replaced Vin",
+                            "Burn",
+                            "Undercarriage",
+                            "Water/Flood",
+                            "Burn Interior",
+                            "Rollover",
+                        ]:
+                            existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                            if not existing_vehicle.recommendation_status_reasons:
+                                existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
+                            else:
+                                if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
+                                    existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
 
             await db.commit()
 
@@ -1165,7 +1166,7 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
 
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
-                    if assessment.issue_description != "Unknown":
+                    if assessment.issue_description != "Unknown" and assessment.issue_description and assessment.type_of_damage:
                         db.add(
                             ConditionAssessmentModel(
                                 type_of_damage=assessment.type_of_damage,
