@@ -31,6 +31,7 @@ from models.vehicle import (
     USZipModel,
 )
 from ordering_constr import ORDERING_MAP
+from services.makes_and_models import MAKES_AND_MODELS
 from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema, CarUpsertSchema
 
 logger = logging.getLogger(__name__)
@@ -1070,6 +1071,17 @@ def norm(string: str) -> str:
 
 async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tuple[bool, str]:
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
+    vehicle_data.auction = vehicle_data.auction.lower()
+    make_key = vehicle.make.lower()
+    make_data = MAKES_AND_MODELS.get(make_key)
+
+    if make_data:
+        model_key = vehicle.model.lower()
+        model_original = make_data["models"].get(model_key)
+        vehicle.make = make_data["original"]
+        if model_original:
+            vehicle.model = model_original
+
     if vehicle_data.fuel_type:
         vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
     if vehicle_data.transmision:
