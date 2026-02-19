@@ -706,7 +706,7 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
             CarModel.mileage >= (filt.odometer_min or 0),
             CarModel.mileage <= (filt.odometer_max or 10_000_000),
             CarModel.avg_market_price.is_(None),
-            CarModel.is_checked == False,
+            CarModel.is_checked.is_(False),
             CarModel.attempts < 3 
         ]
         if filt.model is not None:
@@ -724,44 +724,27 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
                 CarModel.transmision,
             )
             .where(and_(*conditions))
-            .execution_options(stream_results=True, yield_per=stream_chunk)
         )
 
-        result = session.execute(stmt)
+        result = session.execute(stmt).mappings().all()
 
-        batch: List[Dict[str, Any]] = []
-        enqueued = 0
+    batch: List[Dict[str, Any]] = []
+    enqueued = 0
 
-        for row in result.mappings():
-            batch.append(
-                {
-                    "vin": row["vin"],
-                    "vehicle": row["vehicle"],
-                    "engine_title": row["engine_title"],
-                    "mileage": row["mileage"],
-                    "make": row["make"],
-                    "model": row["model"],
-                    "year": row["year"],
-                    "transmision": row["transmision"],
-                }
-            )
-
-            if len(batch) >= batch_size:
-                for v in batch:
-                    parse_and_update_car.delay(
-                        vin=v["vin"],
-                        car_name=v["vehicle"],
-                        car_engine=v["engine_title"],
-                        mileage=v["mileage"],
-                        car_make=v["make"],
-                        car_model=v["model"],
-                        car_year=v["year"],
-                        car_transmison=v["transmision"],
-                    )
-                enqueued += len(batch)
-                batch.clear()
-
-        if batch:
+    for row in result:
+        batch.append(
+            {
+                "vin": row["vin"],
+                "vehicle": row["vehicle"],
+                "engine_title": row["engine_title"],
+                "mileage": row["mileage"],
+                "make": row["make"],
+                "model": row["model"],
+                "year": row["year"],
+                "transmision": row["transmision"],
+            }
+        )
+        if len(batch) >= batch_size:
             for v in batch:
                 parse_and_update_car.delay(
                     vin=v["vin"],
@@ -774,8 +757,21 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
                     car_transmison=v["transmision"],
                 )
             enqueued += len(batch)
-
-        return {"status": "ok", "filter_id": filter_id, "enqueued": enqueued}
+            batch.clear()
+    if batch:
+        for v in batch:
+            parse_and_update_car.delay(
+                vin=v["vin"],
+                car_name=v["vehicle"],
+                car_engine=v["engine_title"],
+                mileage=v["mileage"],
+                car_make=v["make"],
+                car_model=v["model"],
+                car_year=v["year"],
+                car_transmison=v["transmision"],
+            )
+        enqueued += len(batch)
+    return {"status": "ok", "filter_id": filter_id, "enqueued": enqueued}
 
 
 @app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")

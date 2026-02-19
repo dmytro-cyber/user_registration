@@ -14,4 +14,8 @@ SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_co
 
 async def get_db():
     async with SessionLocal() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            if session.in_transaction():
+                await session.rollback()
