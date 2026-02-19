@@ -6,9 +6,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
+from db.session import get_db
 from core.config import Settings
 from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
+from models.user import UserModel
 from storages import S3StorageClient, S3StorageInterface
 
 logging.basicConfig(level=logging.INFO)
@@ -65,30 +67,54 @@ def get_s3_storage_client() -> S3StorageInterface:
     )
 
 
-async def get_current_user(request: Request, settings: Settings = Depends(get_settings)):
-    from db.session import get_db
-    from models.user import UserModel
 
-    token = request.cookies.get("access_token")
+async def get_current_user(
+    request: Request,
+    settings: Settings = Depends(get_settings),
+    db: AsyncSession = Depends(get_db),
+) -> UserModel:
+    """
+    Retrieve current authenticated user from JWT cookie.
+    """
 
-    db: AsyncSession = await anext(get_db())
+    token: str | None = request.cookies.get("access_token")
+
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials were not provided",
+        )
+
     jwt_auth_manager = get_jwt_auth_manager(settings)
+
     try:
         payload = jwt_auth_manager.decode_access_token(token)
-
-        user_id = payload.get("user_id")
-        if user_id is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
-
-        result = await db.execute(
-            select(UserModel).options(selectinload(UserModel.role)).filter(UserModel.id == user_id)
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired token",
         )
-        user = result.scalars().first()
 
-        if user is None:
-            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
+    user_id: int | None = payload.get("user_id")
 
-        return user
+    if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token payload",
+        )
 
-    except Exception as e:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Could not validate token: {str(e)}")
+    result = await db.execute(
+        select(UserModel)
+        .options(selectinload(UserModel.role))
+        .where(UserModel.id == user_id)
+    )
+
+    user: UserModel | None = result.scalars().first()
+
+    if user is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="User not found",
+        )
+
+    return user
