@@ -31,6 +31,7 @@ from models.vehicle import (
     USZipModel,
 )
 from ordering_constr import ORDERING_MAP
+from services.car_audit import log_car_update
 from services.makes_and_models import MAKES_AND_MODELS
 from schemas.vehicle import CarBulkCreateSchema, CarCreateSchema, CarUpsertSchema
 
@@ -1088,7 +1089,9 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
         vehicle_data.transmision = norm(vehicle_data.transmision)
     try:
         existing_vehicle = await get_vehicle_by_vin_for_upsert(db, vehicle_data.vin)
+        before_snapshot = None
         if existing_vehicle:
+            before_snapshot = existing_vehicle
             existing_vehicle.relevance = RelevanceStatus.ACTIVE
             existing_vehicle.is_checked = False
             existing_vehicle.attempts = 0
@@ -1150,6 +1153,10 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
                             else:
                                 if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
                                     existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+
+            await db.flush()
+
+            await log_car_update(before_snapshot, existing_vehicle)
 
             await db.commit()
 

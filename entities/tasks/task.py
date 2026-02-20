@@ -1,5 +1,3 @@
-# tasks.py — synchronous Celery tasks for gevent pool
-# --------------------------------------------------
 import asyncio
 
 # if os.environ.get("CELERY_GEVENT", "0") == "1":
@@ -8,8 +6,9 @@ import asyncio
 import logging
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from io import BytesIO
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import anyio
@@ -33,6 +32,7 @@ from models.vehicle import (
     RecommendationStatus,
     RelevanceStatus,
 )
+from services.email_sync import send_email_sync
 from schemas.vehicle import CarCreateSchema
 from storages import S3StorageClient
 
@@ -1029,3 +1029,32 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
     logger.info("Expired auction update finished: %s", stats)
     return stats
 
+AUDIT_DIR = Path("audit_logs")
+
+
+@app.task(name="tasks.task.send_daily_car_audit")
+def send_daily_car_audit():
+
+    yesterday = (
+        datetime.now(timezone.utc) - timedelta(days=1)
+    ).strftime("%Y-%m-%d")
+
+    file_path = AUDIT_DIR / f"car_updates_{yesterday}.jsonl"
+
+    if not file_path.exists():
+        return {"status": "no_file"}
+
+    try:
+        send_email_sync(
+            to_email="your_email@gmail.com",
+            subject=f"Car updates report {yesterday}",
+            body="Attached car updates report",
+            attachment_path=str(file_path),
+        )
+
+        file_path.unlink()
+
+        return {"status": "sent"}
+
+    except Exception as e:
+        return {"status": "error", "error": str(e)}
