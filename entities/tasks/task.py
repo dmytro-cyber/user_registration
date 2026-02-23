@@ -33,6 +33,12 @@ from models.vehicle import (
     RelevanceStatus,
 )
 from services.email_sync import send_email_sync
+from services.lock import (
+    acquire_kickoff_lock,
+    release_kickoff_lock,
+    is_kickoff_busy,
+    generate_lock_token,
+)
 from schemas.vehicle import CarCreateSchema
 from storages import S3StorageClient
 
@@ -683,68 +689,89 @@ def update_car_fees() -> Dict[str, Any]:
             raise
 
 
-
-
-
-# --- kickoff for filter: sync + gevent ---
 @app.task(name="tasks.task.kickoff_parse_for_filter")
-def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk: int = 400) -> dict:
-    """
-    One lightweight task: reads filter conditions, streams all vehicles, and sends parse_and_update_car sub-tasks in batches.
-    - batch_size: how many tasks to send to the broker at once
-    - stream_chunk: a hint to the driver/ORM for streaming DB results
-    """
-    with SessionLocal() as session:
-        filt = session.get(FilterModel, filter_id)
-        if not filt:
-            return {"status": "error", "reason": "filter_not_found", "filter_id": filter_id}
+def kickoff_parse_for_filter(
+    filter_id: int,
+    lock_token: str,
+    batch_size: int = 100,
+    stream_chunk: int = 400,
+) -> dict:
 
-        conditions = [
-            CarModel.make == filt.make,
-            CarModel.year >= (filt.year_from or 0),
-            CarModel.year <= (filt.year_to or 3000),
-            CarModel.mileage >= (filt.odometer_min or 0),
-            CarModel.mileage <= (filt.odometer_max or 10_000_000),
-            CarModel.avg_market_price.is_(None),
-            CarModel.is_checked.is_(False),
-            CarModel.attempts < 3 
-        ]
-        if filt.model is not None:
-            conditions.append(CarModel.model == filt.model)
+    try:
+        with SessionLocal() as session:
 
-        stmt = (
-            select(
-                CarModel.vin,
-                CarModel.vehicle,
-                CarModel.engine_title,
-                CarModel.mileage,
-                CarModel.make,
-                CarModel.model,
-                CarModel.year,
-                CarModel.transmision,
+            filt = session.get(FilterModel, filter_id)
+            if not filt:
+                return {
+                    "status": "error",
+                    "reason": "filter_not_found",
+                    "filter_id": filter_id,
+                }
+
+            conditions = [
+                CarModel.make == filt.make,
+                CarModel.year >= (filt.year_from or 0),
+                CarModel.year <= (filt.year_to or 3000),
+                CarModel.mileage >= (filt.odometer_min or 0),
+                CarModel.mileage <= (filt.odometer_max or 10_000_000),
+                CarModel.avg_market_price.is_(None),
+                CarModel.is_checked.is_(False),
+                CarModel.attempts < 3,
+            ]
+
+            if filt.model is not None:
+                conditions.append(CarModel.model == filt.model)
+
+            stmt = (
+                select(
+                    CarModel.vin,
+                    CarModel.vehicle,
+                    CarModel.engine_title,
+                    CarModel.mileage,
+                    CarModel.make,
+                    CarModel.model,
+                    CarModel.year,
+                    CarModel.transmision,
+                )
+                .where(and_(*conditions))
             )
-            .where(and_(*conditions))
-        )
 
-        result = session.execute(stmt).mappings().all()
+            result = session.execute(stmt).mappings().all()
 
-    batch: List[Dict[str, Any]] = []
-    enqueued = 0
+        batch = []
+        enqueued = 0
 
-    for row in result:
-        batch.append(
-            {
-                "vin": row["vin"],
-                "vehicle": row["vehicle"],
-                "engine_title": row["engine_title"],
-                "mileage": row["mileage"],
-                "make": row["make"],
-                "model": row["model"],
-                "year": row["year"],
-                "transmision": row["transmision"],
-            }
-        )
-        if len(batch) >= batch_size:
+        for row in result:
+            batch.append(
+                {
+                    "vin": row["vin"],
+                    "vehicle": row["vehicle"],
+                    "engine_title": row["engine_title"],
+                    "mileage": row["mileage"],
+                    "make": row["make"],
+                    "model": row["model"],
+                    "year": row["year"],
+                    "transmision": row["transmision"],
+                }
+            )
+
+            if len(batch) >= batch_size:
+                for v in batch:
+                    parse_and_update_car.delay(
+                        vin=v["vin"],
+                        car_name=v["vehicle"],
+                        car_engine=v["engine_title"],
+                        mileage=v["mileage"],
+                        car_make=v["make"],
+                        car_model=v["model"],
+                        car_year=v["year"],
+                        car_transmison=v["transmision"],
+                    )
+
+                enqueued += len(batch)
+                batch.clear()
+
+        if batch:
             for v in batch:
                 parse_and_update_car.delay(
                     vin=v["vin"],
@@ -756,22 +783,17 @@ def kickoff_parse_for_filter(filter_id: int, batch_size: int = 100, stream_chunk
                     car_year=v["year"],
                     car_transmison=v["transmision"],
                 )
+
             enqueued += len(batch)
-            batch.clear()
-    if batch:
-        for v in batch:
-            parse_and_update_car.delay(
-                vin=v["vin"],
-                car_name=v["vehicle"],
-                car_engine=v["engine_title"],
-                mileage=v["mileage"],
-                car_make=v["make"],
-                car_model=v["model"],
-                car_year=v["year"],
-                car_transmison=v["transmision"],
-            )
-        enqueued += len(batch)
-    return {"status": "ok", "filter_id": filter_id, "enqueued": enqueued}
+
+        return {
+            "status": "ok",
+            "filter_id": filter_id,
+            "enqueued": enqueued,
+        }
+
+    finally:
+        release_kickoff_lock(lock_token)
 
 
 @app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")

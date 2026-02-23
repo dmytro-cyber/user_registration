@@ -28,6 +28,12 @@ from schemas.admin import (
     ROIListResponseSchema,
     ROIResponseSchema,
 )
+from services.lock import (
+    acquire_kickoff_lock,
+    release_kickoff_lock,
+    is_kickoff_busy,
+    generate_lock_token,
+)
 from services.vehicle import build_car_filter_query, scrape_and_save_sales_history
 
 # from tasks.task import parse_and_update_car
@@ -76,27 +82,27 @@ logger.addFilter(ContextFilter())
 router = APIRouter(prefix="/admin")
 
 
-REDIS_HOST = "redis_1"
-REDIS_PORT = 6380
-REDIS_DB   = 1
+# REDIS_HOST = "redis_1"
+# REDIS_PORT = 6380
+# REDIS_DB   = 1
 
-r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+# r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
 
-LOCK_KEY = "kickoff_task_lock"
-LOCK_TTL_SEC = 60 * 60
+# LOCK_KEY = "kickoff_task_lock"
+# LOCK_TTL_SEC = 60 * 60
 
-def is_kickoff_busy() -> bool:
-    task_id = r.get(LOCK_KEY)
-    if not task_id:
-        return False
-    state = AsyncResult(task_id, app=celery_app).state
-    if state in ("SUCCESS", "FAILURE", "REVOKED"):
-        r.delete(LOCK_KEY)
-        return False
-    return True
+# def is_kickoff_busy() -> bool:
+#     task_id = r.get(LOCK_KEY)
+#     if not task_id:
+#         return False
+#     state = AsyncResult(task_id, app=celery_app).state
+#     if state in ("SUCCESS", "FAILURE", "REVOKED"):
+#         r.delete(LOCK_KEY)
+#         return False
+#     return True
 
-def set_kickoff_lock(task_id: str) -> None:
-    r.set(LOCK_KEY, task_id, ex=LOCK_TTL_SEC)
+# def set_kickoff_lock(task_id: str) -> None:
+#     r.set(LOCK_KEY, task_id, ex=LOCK_TTL_SEC)
 
 @router.post("/filters", response_model=FilterResponse, status_code=status.HTTP_201_CREATED)
 async def create_filter(
@@ -140,7 +146,7 @@ async def create_filter(
         kwargs={"filter_id": db_filter.id},
         queue="car_parsing_queue",
     )
-    set_kickoff_lock(kickoff_result.id)
+    acquire_kickoff_lock(kickoff_result.id)
 
     return db_filter
 
@@ -278,7 +284,7 @@ async def update_filter_and_relevance(
         kwargs={"filter_id": db_filter.id},
         queue="car_parsing_queue",
     )
-    set_kickoff_lock(kickoff_result.id)
+    acquire_kickoff_lock(kickoff_result.id)
 
     return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 
