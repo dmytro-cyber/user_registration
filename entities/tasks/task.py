@@ -1068,7 +1068,7 @@ def send_daily_car_audit():
 
     try:
         send_email_sync(
-            to_email="your_email@gmail.com",
+            to_email=os.getenv("ADMIN_USERNAME"),
             subject=f"Car updates report {yesterday}",
             body="Attached car updates report",
             attachment_path=str(file_path),

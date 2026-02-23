@@ -141,7 +141,7 @@ def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
                     continue
 
             if vehicles:
-                for batch in chunked(vehicles, 25):
+                for batch in chunked(vehicles, 75):
                     payload = {
                         "ivent": "updated" if size == 1000 else "created",
                         "vehicles": batch,
