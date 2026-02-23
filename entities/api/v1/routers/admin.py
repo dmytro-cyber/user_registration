@@ -143,10 +143,10 @@ async def create_filter(
 
     kickoff_result = celery_app.send_task(
         "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id},
+        kwargs={"filter_id": db_filter.id, "lock_token": db_filter.id},
         queue="car_parsing_queue",
     )
-    acquire_kickoff_lock(kickoff_result.id)
+    acquire_kickoff_lock(db_filter.id)
 
     return db_filter
 
@@ -281,10 +281,10 @@ async def update_filter_and_relevance(
 
     kickoff_result = celery_app.send_task(
         "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id},
+        kwargs={"filter_id": db_filter.id, "lock_token": db_filter.id},
         queue="car_parsing_queue",
     )
-    acquire_kickoff_lock(kickoff_result.id)
+    acquire_kickoff_lock(db_filter.id)
 
     return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 
