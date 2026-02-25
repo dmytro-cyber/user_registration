@@ -854,69 +854,41 @@ async def delete_part_endpoint(
     }
 
 
-@router.post("/bulk", status_code=201, summary="Bulk create vehicles", description="Create multiple vehicles in bulk.")
+@router.post("/bulk", status_code=201)
 async def bulk_create_cars(
     data: CarBulkCreateSchema,
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
     settings: Settings = Depends(get_settings),
-) -> Dict:
-    """
-    Create multiple vehicles in bulk.
-
-    Args:
-        vehicles (List[CarCreateSchema]): List of vehicle data to create.
-        db (AsyncSession): The database session dependency.
-        token (str): Authentication token dependency.
-
-    Returns:
-        Dict: Response with success message and skipped VINs if any.
-
-    Raises:
-        HTTPException: 500 if an error occurs during bulk creation.
-    """
-    request_id = "N/A"  # No request object available here
+):
+    request_id = "N/A"
     extra = {"request_id": request_id, "user_id": "N/A"}
+
     logger.info(f"Starting bulk creation of {len(data.vehicles)} vehicles", extra=extra)
 
     try:
-        skipped_vins = await bulk_save_vehicles(db, data)
-        response = {"message": "Cars created successfully"}
-        if skipped_vins:
-            response["skipped_vins"] = skipped_vins
-            logger.info(
-                f"Bulk creation completed, skipped {len(skipped_vins)} vehicles", extra=extra
+        result = await bulk_save_vehicles(db, data)
+
+        await db.commit()
+
+        # celery після commit
+        for task_payload in result["celery_tasks"]:
+            celery_app.send_task(
+                "tasks.task.parse_and_update_car",
+                kwargs=task_payload,
+                queue="car_parsing_queue",
             )
-        else:
-            logger.info("Bulk creation completed with no skipped vehicles", extra=extra)
 
-        for vehicle_data in data.vehicles:
-            if vehicle_data.vin not in skipped_vins:
-                logger.info(f"Scheduling parse_and_update_car for VIN: {vehicle_data.vin}", extra=extra)
-                celery_app.send_task(
-                    "tasks.task.parse_and_update_car",
-                    kwargs={
-                        "vin": vehicle_data.vin,
-                        "car_name": vehicle_data.vehicle,
-                        "car_engine": vehicle_data.engine_title,
-                        "mileage": vehicle_data.mileage,
-                        "car_make": vehicle_data.make,
-                        "car_model": vehicle_data.model,
-                        "car_year": vehicle_data.year,
-                        "car_transmison": vehicle_data.transmision,
-                    },
-                    queue="car_parsing_queue",)
+        return {
+            "message": "Cars processed",
+            "new": result["new_count"],
+            "updated": result["updated_count"],
+        }
 
-
-                # await scrape_and_save_sales_history(vehicle_data.vin, db, settings)
-
-        return response
     except Exception as e:
-        logger.error(f"Error during bulk creation of vehicles: {str(e)}", extra=extra)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error during bulk creation",
-        )
+        await db.rollback()
+        logger.exception(f"Bulk error: {e}", extra=extra)
+        raise HTTPException(500, "Bulk error")
 
 
 @router.post("/bulk/delete", status_code=status.HTTP_204_NO_CONTENT, summary="Bulk delete vehicles", description="Create multiple vehicles in bulk.")

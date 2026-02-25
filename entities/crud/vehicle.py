@@ -5,6 +5,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import and_, asc, bindparam, case, delete, desc, exists, func, literal_column, or_, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import aliased, noload, selectinload, with_loader_criteria
@@ -1006,15 +1007,420 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool
     return True, car
 
 
-async def bulk_save_vehicles(db: AsyncSession, vehicles: CarBulkCreateSchema) -> List[str]:
-    """Bulk save vehicles and return skipped VINs."""
-    skipped_vins = []
-    for vehicle_data in vehicles.vehicles:
-        success = await save_vehicle_with_photos(vehicle_data, vehicles.ivent, db)
-        await db.commit()
-        if not success:
-            skipped_vins.append(vehicle_data.vin)
-    return skipped_vins
+async def bulk_save_vehicles(
+    db: AsyncSession,
+    payload: CarBulkCreateSchema,
+):
+    # ============================================================
+    # INPUT
+    # ============================================================
+    vehicles_in = payload.vehicles or []
+    ivent = payload.ivent
+
+    new_count = 0
+    updated_count = 0
+
+    # ============================================================
+    # DEDUP VINs
+    # Keep the last occurrence within the same request.
+    # ============================================================
+    vehicles_by_vin: dict[str, any] = {}
+    for v in vehicles_in:
+        if not getattr(v, "vin", None):
+            continue
+        vehicles_by_vin[v.vin] = v
+
+    vehicles = list(vehicles_by_vin.values())
+    vins = list(vehicles_by_vin.keys())
+
+    if not vehicles:
+        return {
+            "celery_tasks": [],
+            "total": 0,
+            "new_count": 0,
+            "updated_count": 0,
+        }
+
+    # ============================================================
+    # EXISTING VEHICLES
+    # ============================================================
+    existing_map = {
+        v.vin: v
+        for v in (
+            await db.execute(
+                select(CarModel)
+                .where(CarModel.vin.in_(vins))
+                .options(
+                    selectinload(CarModel.photos),
+                    selectinload(CarModel.sales_history),
+                )
+            )
+        ).scalars()
+    }
+
+    # ============================================================
+    # FILTERS
+    # ============================================================
+    filters = (await db.execute(select(FilterModel))).scalars().all()
+
+    def match_filter(v):
+        for f in filters:
+            if (
+                f.make == v.make
+                and (f.model == v.model or f.model is None)
+                and f.year_from <= v.year <= f.year_to
+                and v.mileage <= f.odometer_max
+            ):
+                return True
+        return False
+
+    # ============================================================
+    # COLUMN TEMPLATE
+    # ============================================================
+    car_columns = [c.name for c in CarModel.__table__.columns if c.name != "id"]
+    not_null_cols = {c.name for c in CarModel.__table__.columns if c.name != "id" and not c.nullable}
+
+    def build_row(data: dict, existing: CarModel | None) -> dict:
+        """
+        Build a DB row for bulk insert.
+        - For existing cars: never overwrite with NULL (keep DB value).
+        - For new cars: ensure required NOT NULL fields are present.
+        """
+        row = {col: None for col in car_columns}
+        row.update(data)
+
+        if existing is not None:
+            # Do not wipe existing columns with NULLs (except "date" rule handled earlier)
+            for col in car_columns:
+                if col == "date":
+                    continue
+                if row.get(col) is None:
+                    row[col] = getattr(existing, col)
+            return row
+
+        # NEW: enforce NOT NULL + your required defaults
+        # (we keep your logic, just guarantee DB constraints)
+        if row.get("car_status") is None:
+            row["car_status"] = CarStatus.NEW
+        if row.get("attempts") is None:
+            row["attempts"] = 0
+        if row.get("is_checked") is None:
+            row["is_checked"] = False
+        if row.get("is_manually_upserted") is None:
+            row["is_manually_upserted"] = False
+
+        # These are NOT NULL in your model (nullable=False)
+        # If API did not send them, we ensure safe defaults.
+        if row.get("has_correct_vin") is None:
+            row["has_correct_vin"] = False
+        if row.get("has_correct_owners") is None:
+            row["has_correct_owners"] = False
+        if row.get("has_correct_accidents") is None:
+            row["has_correct_accidents"] = False
+        if row.get("has_correct_mileage") is None:
+            row["has_correct_mileage"] = False
+
+        # For safety: if something else NOT NULL sneaks in as None, set fallback defaults
+        # (only if still None)
+        for col in not_null_cols:
+            if row.get(col) is None:
+                # Keep it minimal: for Enums we already set above; for other types try safe defaults.
+                # vehicle/vin should exist anyway; but we won't guess text for vehicle.
+                if col in ("vin", "vehicle"):
+                    # if vehicle is missing -> skip would be better, but you said "не викидай нічого".
+                    # However DB requires vehicle NOT NULL, so this prevents crash.
+                    # If you prefer to SKIP such rows - скажи, зроблю.
+                    row[col] = row.get(col) or ""
+                elif col in ("attempts",):
+                    row[col] = 0
+                elif col in ("has_correct_vin", "has_correct_owners", "has_correct_accidents", "has_correct_mileage"):
+                    row[col] = False
+
+        return row
+
+    # ============================================================
+    # CONTAINERS
+    # ============================================================
+    car_rows: list[dict] = []
+    # store VIN first -> later map to car_id (prevents FK issues)
+    photos_insert: list[dict] = []
+    cond_insert: list[dict] = []
+    celery_payload: list[dict] = []
+
+    # ============================================================
+    # MAIN LOOP
+    # ============================================================
+    for v in vehicles:
+        existing = existing_map.get(v.vin)
+
+        raw = v.dict(
+            exclude={
+                "photos",
+                "photos_hd",
+                "sales_history",
+                "condition_assessments",
+            }
+        )
+
+        data: dict = {}
+        reasons: list[str] = []
+        to_parse = False
+
+        # keep your behavior: include only non-null, but allow explicit "date"
+        for field, value in raw.items():
+            if value is not None or field == "date":
+                data[field] = value
+
+        # ========================================================
+        # UPDATE
+        # ========================================================
+        if existing:
+            updated_count += 1
+
+            if existing.is_manually_upserted:
+                if v.current_bid is not None:
+                    data["current_bid"] = v.current_bid
+
+                    if (
+                        existing.suggested_bid is not None
+                        and v.current_bid > existing.suggested_bid
+                    ):
+                        reasons.append("BID_GT_SUGGESTED")
+
+                data["vin"] = v.vin
+                car_rows.append(build_row(data, existing))
+                continue
+
+            if existing.relevance == RelevanceStatus.ACTIVE:
+                if not existing.is_checked and existing.attempts < 3:
+                    to_parse = True
+
+            elif existing.relevance == RelevanceStatus.ARCHIVAL and ivent == "update":
+                if match_filter(v):
+                    data["relevance"] = RelevanceStatus.ACTIVE
+                    data["attempts"] = 0
+                    data["is_checked"] = False
+                    to_parse = True
+                else:
+                    data["relevance"] = RelevanceStatus.IRRELEVANT
+
+            # ---------------- REQUIRED BLOCK (fuel/trans/conditions) ----------------
+            fuel = data.get("fuel_type")
+            if fuel and fuel not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                reasons.append(fuel)
+
+            trans = data.get("transmision")
+            if trans and trans != "Automatic":
+                reasons.append(trans)
+
+            if v.condition_assessments:
+                for a in v.condition_assessments:
+                    # store by VIN, map to car_id after upsert
+                    cond_insert.append(
+                        {
+                            "vin": v.vin,
+                            "type_of_damage": a.type_of_damage,
+                            "issue_description": a.issue_description,
+                        }
+                    )
+
+                    if a.issue_description in [
+                        "Rejected Repair",
+                        "Burn Engine",
+                        "Mechanical",
+                        "Replaced Vin",
+                        "Burn",
+                        "Undercarriage",
+                        "Water/Flood",
+                        "Burn Interior",
+                        "Rollover",
+                    ]:
+                        reasons.append(a.issue_description)
+            # ----------------------------------------------------------------------
+
+            if (
+                v.current_bid is not None
+                and existing.suggested_bid is not None
+                and v.current_bid > existing.suggested_bid
+            ):
+                reasons.append("BID_GT_SUGGESTED")
+
+            existing_urls = {p.url for p in existing.photos}
+
+            if v.photos:
+                for p in v.photos:
+                    if p.url not in existing_urls:
+                        photos_insert.append({"vin": v.vin, "url": p.url, "is_hd": False})
+
+            if v.photos_hd:
+                for p in v.photos_hd:
+                    if p.url not in existing_urls:
+                        photos_insert.append({"vin": v.vin, "url": p.url, "is_hd": True})
+
+        # ========================================================
+        # CREATE
+        # ========================================================
+        else:
+            new_count += 1
+
+            fuel = data.get("fuel_type")
+            if fuel and fuel not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+                reasons.append(fuel)
+
+            trans = data.get("transmision")
+            if trans and trans != "Automatic":
+                reasons.append(trans)
+
+            if match_filter(v):
+                data["relevance"] = RelevanceStatus.ACTIVE
+                to_parse = True
+            else:
+                data["relevance"] = RelevanceStatus.IRRELEVANT
+
+            # REQUIRED DEFAULTS FOR NEW
+            data["car_status"] = CarStatus.NEW
+            data["attempts"] = 0
+            data["is_checked"] = False
+            data["is_manually_upserted"] = False
+
+            # If you also need conditions for NEW rows - include them (safe, mapped by vin)
+            if v.condition_assessments:
+                for a in v.condition_assessments:
+                    cond_insert.append(
+                        {
+                            "vin": v.vin,
+                            "type_of_damage": a.type_of_damage,
+                            "issue_description": a.issue_description,
+                        }
+                    )
+                    if a.issue_description in [
+                        "Rejected Repair",
+                        "Burn Engine",
+                        "Mechanical",
+                        "Replaced Vin",
+                        "Burn",
+                        "Undercarriage",
+                        "Water/Flood",
+                        "Burn Interior",
+                        "Rollover",
+                    ]:
+                        reasons.append(a.issue_description)
+
+        # ========================================================
+        # RECOMMENDATION
+        # ========================================================
+        if reasons:
+            data["recommendation_status"] = RecommendationStatus.NOT_RECOMMENDED
+            data["recommendation_status_reasons"] = ";".join(reasons) + ";"
+        else:
+            data["recommendation_status"] = RecommendationStatus.RECOMMENDED
+            data["recommendation_status_reasons"] = None
+
+        data["vin"] = v.vin
+        car_rows.append(build_row(data, existing))
+
+        if to_parse:
+            celery_payload.append(
+                {
+                    "vin": v.vin,
+                    "car_name": v.vehicle,
+                    "car_engine": v.engine_title,
+                    "mileage": v.mileage,
+                    "car_make": v.make,
+                    "car_model": v.model,
+                    "car_year": v.year,
+                    "car_transmison": v.transmision,
+                }
+            )
+
+    # ============================================================
+    # FINAL DEDUP OF ROWS BY VIN (extra safety)
+    # ============================================================
+    dedup_rows: dict[str, dict] = {}
+    for r in car_rows:
+        dedup_rows[r["vin"]] = r
+    car_rows = list(dedup_rows.values())
+
+    # ============================================================
+    # BULK UPSERT
+    # ============================================================
+    stmt = insert(CarModel).values(car_rows)
+
+    # IMPORTANT:
+    # - We do NOT update "id", "vin", "created_at"
+    # - "car_status" can be updated if you really want. If you don't want it overwritten,
+    #   remove it from update list. (Your earlier SQL shows it was being updated.)
+    update_dict = {
+        c.name: getattr(stmt.excluded, c.name)
+        for c in CarModel.__table__.columns
+        if c.name not in ("id", "vin", "created_at")
+    }
+
+    stmt = (
+        stmt.on_conflict_do_update(
+            index_elements=[CarModel.vin],
+            set_=update_dict,
+        )
+        .returning(CarModel.id, CarModel.vin)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.fetchall()
+    vin_to_id = {r.vin: r.id for r in rows}
+
+    # ============================================================
+    # CONDITIONS (FK SAFE)
+    # ============================================================
+    car_ids = list(vin_to_id.values())
+
+    if car_ids:
+        await db.execute(
+            delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id.in_(car_ids))
+        )
+
+    if cond_insert:
+        cond_rows = []
+        for c in cond_insert:
+            car_id = vin_to_id.get(c["vin"])
+            if not car_id:
+                continue
+            cond_rows.append(
+                {
+                    "car_id": car_id,
+                    "type_of_damage": c["type_of_damage"],
+                    "issue_description": c["issue_description"],
+                }
+            )
+
+        if cond_rows:
+            await db.execute(insert(ConditionAssessmentModel), cond_rows)
+
+    # ============================================================
+    # PHOTOS (FK SAFE)
+    # ============================================================
+    if photos_insert:
+        photo_rows = []
+        for p in photos_insert:
+            car_id = vin_to_id.get(p["vin"])
+            if not car_id:
+                continue
+            photo_rows.append(
+                {
+                    "car_id": car_id,
+                    "url": p["url"],
+                    "is_hd": p["is_hd"],
+                }
+            )
+
+        if photo_rows:
+            await db.execute(insert(PhotoModel), photo_rows)
+
+    return {
+        "celery_tasks": celery_payload,
+        "total": len(car_rows),
+        "new_count": new_count,
+        "updated_count": updated_count,
+    }
 
 
 def is_vehicle_sellable(

@@ -1,7 +1,9 @@
 import logging
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from sqlalchemy.exc import IntegrityError
 
 from api.v1.routers.admin import router as admin_router
 from api.v1.routers.analytic import router as analytics_router
@@ -13,6 +15,7 @@ from api.v1.routers.vehicle import router as vehicle_router
 from api.v1.routers.fee import router as fee_router
 from core.celery_config import app as celery_app
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
+import logging
 
 # from tasks.task import update_car_fees
 
@@ -21,10 +24,24 @@ app = FastAPI(
     description="Cars&Beyond API for managing vehicles, users, and bidding",
 )
 
+@app.exception_handler(IntegrityError)
+async def integrity_error_handler(request: Request, exc: IntegrityError):
+    import logging
+    logging.getLogger("app").exception("IntegrityError")
+
+    detail = "Database integrity error"
+    orig = getattr(exc, "orig", None)
+    if orig is not None:
+        detail = getattr(orig, "detail", None) or getattr(orig, "message", None) or detail
+
+    return JSONResponse(
+        status_code=409,
+        content={"detail": detail},
+    )
 
 # @app.on_event("startup")
 # async def on_startup():
-    # await create_roles()
+#     await create_roles()
     # celery_app.send_task(
     #     "tasks.task.update_fees",
     #     queue="car_parsing_queue",

@@ -3,12 +3,13 @@ from sqlalchemy.orm import sessionmaker
 
 from core.config import settings
 
+
 POSTGRESQL_DATABASE_URL = (
     f"postgresql+asyncpg://{settings.POSTGRES_USER}:{settings.POSTGRES_PASSWORD}@"
     f"{settings.POSTGRES_HOST}:{settings.POSTGRES_DB_PORT}/{settings.POSTGRES_DB}"
 )
 
-engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True, pool_size=100, max_overflow=10, pool_timeout=30, pool_pre_ping=True, pool_recycle=1800)
+engine = create_async_engine(POSTGRESQL_DATABASE_URL, echo=True, hide_parameters=False, pool_size=50, max_overflow=10, pool_timeout=30, pool_pre_ping=True, pool_recycle=1800)
 SessionLocal = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
 
 
