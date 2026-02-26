@@ -1282,6 +1282,11 @@ async def bulk_save_vehicles(
             data["attempts"] = 0
             data["is_checked"] = False
             data["is_manually_upserted"] = False
+            data["has_correct_vin"] = True
+            data["has_correct_owners"] = True
+            data["has_correct_accidents"] = True
+            data["has_correct_mileage"] = True
+            
 
             # If you also need conditions for NEW rows - include them (safe, mapped by vin)
             if v.condition_assessments:
