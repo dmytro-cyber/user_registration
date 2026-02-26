@@ -36,7 +36,7 @@ app.conf.beat_schedule = {
     },
     "delete-vehicles-evry-hour-at-0:15": {
         "task": "tasks.tasks.delete_vehicle",
-        "schedule": crontab(minute=15)
+        "schedule": crontab(minute=5)
     }
 }
 
@@ -177,10 +177,32 @@ def fetch_api_data(size: Optional[int] = None, base_url: Optional[str] = None):
 
 @app.task
 def delete_vehicle():
-    """Delete outdated vehicles."""
+    """Delete outdated vehicles in batches."""
     headers = {"X-Auth-Token": os.getenv("PARSERS_AUTH_TOKEN")}
     url = "https://api.apicar.store/api/cars/deleted"
-    response = httpx.get(url, timeout=1000, headers={"api-key": os.getenv("APICAR_KEY")})
-    to_delete = response.json()
+
+    response = httpx.get(
+        url,
+        timeout=1000,
+        headers={"api-key": os.getenv("APICAR_KEY")}
+    )
+    response.raise_for_status()
+
+    payload = response.json()
+    items = payload.get("data", [])
+
     delete_url = "http://entities:8000/api/v1/vehicles/bulk/delete"
-    httpx.post(delete_url, json=to_delete, headers=headers)
+
+    batch_size = 200
+
+    with httpx.Client(timeout=1000) as client:
+        for i in range(0, len(items), batch_size):
+            batch = items[i:i + batch_size]
+
+            body = {"data": batch}
+
+            client.post(
+                delete_url,
+                json=body,
+                headers=headers,
+            )

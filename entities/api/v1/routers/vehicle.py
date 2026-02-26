@@ -1039,8 +1039,11 @@ async def upsert(
     current_user: UserModel = Depends(get_current_user),
 ):
     res, message = await upsert_vehicle(vehicle_data=vehicle_data, db=db)
+
     if not res:
         raise HTTPException(status_code=500, detail=message)
+
+    task_id = None
 
     try:
         logger.info(
@@ -1063,17 +1066,21 @@ async def upsert(
             queue="car_parsing_queue",
         )
 
+        task_id = getattr(task_result, "id", None)
+
         logger.info(
             "Celery task sent successfully | vin=%s task_id=%s",
             vehicle_data.vin,
-            getattr(task_result, "id", None),
+            task_id,
         )
 
-        return {"message": "task sent", "task_id": task_result.id}
+    except Exception:
+        logger.exception(
+            "Celery send failed but vehicle saved | vin=%s",
+            vehicle_data.vin
+        )
 
-    except CeleryError as e:
-        logger.exception("CeleryError while sending task | vin=%s", vehicle_data.vin)
-        raise HTTPException(status_code=500, detail=f"Celery error: {str(e)}")
-    except Exception as e:
-        logger.exception("Unexpected error while sending task | vin=%s", vehicle_data.vin)
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
+    return {
+        "message": "vehicle saved",
+        "task_id": task_id,
+    }

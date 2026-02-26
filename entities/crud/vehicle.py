@@ -1475,63 +1475,124 @@ def norm(string: str) -> str:
         .lower()
     )
 
+def _apply_recommendation_rules(vehicle: CarModel):
 
-async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tuple[bool, str]:
-    """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
+    if vehicle.fuel_type and vehicle.fuel_type.strip().lower() not in [
+        "gasoline", "flexible fuel", "unknown", "gas"
+    ]:
+        vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        _append_reason(vehicle, vehicle.fuel_type)
+
+    if vehicle.transmision and vehicle.transmision.strip().lower() != "automatic":
+        vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        _append_reason(vehicle, vehicle.transmision)
+
+
+def _apply_damage_rules(vehicle: CarModel, damage: str):
+
+    BAD = {
+        "Rejected Repair",
+        "Burn Engine",
+        "Mechanical",
+        "Replaced Vin",
+        "Burn",
+        "Undercarriage",
+        "Water/Flood",
+        "Burn Interior",
+        "Rollover",
+    }
+
+    if damage in BAD:
+        vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+        _append_reason(vehicle, damage)
+
+
+def _append_reason(vehicle: CarModel, reason: str):
+
+    if not vehicle.recommendation_status_reasons:
+        vehicle.recommendation_status_reasons = f"{reason};"
+    elif f"{reason};" not in vehicle.recommendation_status_reasons:
+        vehicle.recommendation_status_reasons += f"{reason};"
+
+def _serialize(value: Any):
+    """Make values JSON serializable."""
+    if isinstance(value, datetime):
+        return value.astimezone(timezone.utc).isoformat()
+    return value
+
+
+def _model_to_dict(model) -> Dict[str, Any]:
+    """
+    Convert SQLAlchemy model instance to dict.
+    Only includes table columns (без relationships).
+    """
+    return {
+        column.name: _serialize(getattr(model, column.name))
+        for column in model.__table__.columns
+    }
+
+async def upsert_vehicle(
+    vehicle_data: CarUpsertSchema,
+    db: AsyncSession
+) -> Tuple[bool, str]:
+
     vehicle_data.auction = vehicle_data.auction.lower()
+
     make_key = vehicle_data.make.lower()
     make_data = MAKES_AND_MODELS.get(make_key)
 
     if make_data:
         model_key = vehicle_data.model.lower()
         model_original = make_data["models"].get(model_key)
+
         vehicle_data.make = make_data["original"]
         if model_original:
             vehicle_data.model = model_original
 
     if vehicle_data.fuel_type:
         vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
+
     if vehicle_data.transmision:
         vehicle_data.transmision = norm(vehicle_data.transmision)
+
     try:
-        existing_vehicle = await get_vehicle_by_vin_for_upsert(db, vehicle_data.vin)
-        before_snapshot = None
+        existing_vehicle = await get_vehicle_by_vin_for_upsert(
+            db, vehicle_data.vin
+        )
+
+        # ========================
+        # UPDATE EXISTING
+        # ========================
         if existing_vehicle:
-            before_snapshot = existing_vehicle
+
+            before_snapshot = _model_to_dict(existing_vehicle)
+
             existing_vehicle.relevance = RelevanceStatus.ACTIVE
             existing_vehicle.is_checked = False
             existing_vehicle.attempts = 0
-
-
-            
-            # logger.info(f"Vehicle with VIN {vehicle_data.vin} already exists. Updating data...")
             existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
             existing_vehicle.recommendation_status_reasons = None
             existing_vehicle.is_manually_upserted = True
+
             for field, value in vehicle_data.dict(
                 exclude={"photos", "photos_hd", "condition_assessments"}
             ).items():
-                if (value is not None or field == "date"):
+
+                if value is not None or field == "date":
                     setattr(existing_vehicle, field, value)
-                    if field == "fuel_type" and value and value.strip().lower() not in ["gasoline", "flexible fuel", "unknown", "gas"]:
-                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                        if not existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons = f"{value};"
-                        else:
-                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                                existing_vehicle.recommendation_status_reasons += f"{value};"
-                    if field == "transmision" and value and value.strip().lower() != "automatic":
-                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                        if not existing_vehicle.recommendation_status_reasons:
-                            existing_vehicle.recommendation_status_reasons = f"{value};"
-                        else:
-                            if f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                                existing_vehicle.recommendation_status_reasons += f"{value};"
 
+            # recommendation rules
+            _apply_recommendation_rules(existing_vehicle)
 
+            # delete condition assessments
             await db.execute(
-                delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id)
+                delete(ConditionAssessmentModel).where(
+                    ConditionAssessmentModel.car_id == existing_vehicle.id
+                )
             )
+            await db.flush()
+
+            # add new assessments
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.type_of_damage and assessment.issue_description:
@@ -1542,23 +1603,7 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
                                 car_id=existing_vehicle.id,
                             )
                         )
-                        if assessment.issue_description in [
-                            "Rejected Repair",
-                            "Burn Engine",
-                            "Mechanical",
-                            "Replaced Vin",
-                            "Burn",
-                            "Undercarriage",
-                            "Water/Flood",
-                            "Burn Interior",
-                            "Rollover",
-                        ]:
-                            existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                            if not existing_vehicle.recommendation_status_reasons:
-                                existing_vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
-                            else:
-                                if f"{assessment.issue_description};" not in existing_vehicle.recommendation_status_reasons:
-                                    existing_vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+                        _apply_damage_rules(existing_vehicle, assessment.issue_description)
 
             await db.flush()
 
@@ -1568,67 +1613,57 @@ async def upsert_vehicle(vehicle_data: CarUpsertSchema, db: AsyncSession) -> Tup
 
             return True, "success"
 
-        else:
-            vehicle = CarModel(
-                **vehicle_data.dict(exclude={"photos", "photos_hd", "condition_assessments"})
+        # ========================
+        # CREATE NEW
+        # ========================
+        vehicle = CarModel(
+            **vehicle_data.dict(
+                exclude={"photos", "photos_hd", "condition_assessments"}
             )
-            db.add(vehicle)
-            await db.flush()
-            if vehicle.fuel_type and vehicle.fuel_type.strip().lower() not in ["gasoline", "flexible fuel", "unknown", "gas"]:
-                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                if not vehicle.recommendation_status_reasons:
-                    vehicle.recommendation_status_reasons = f"{vehicle.fuel_type};"
-                else:
-                    vehicle.recommendation_status_reasons += f"{vehicle.fuel_type};"
-            if vehicle.transmision and vehicle.transmision.strip().lower() != "automatic":
-                vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                if not vehicle.recommendation_status_reasons:
-                    vehicle.recommendation_status_reasons = f"{vehicle.transmision};"
-                else:
-                    vehicle.recommendation_status_reasons += f"{vehicle.transmision};"
-            vehicle.is_manually_upserted = True
-            vehicle.relevance = RelevanceStatus.ACTIVE
+        )
 
-            if vehicle_data.condition_assessments:
-                for assessment in vehicle_data.condition_assessments:
-                    if assessment.issue_description != "Unknown" and assessment.issue_description and assessment.type_of_damage:
-                        db.add(
-                            ConditionAssessmentModel(
-                                type_of_damage=assessment.type_of_damage,
-                                issue_description=assessment.issue_description,
-                                car_id=vehicle.id,
-                            )
+        vehicle.is_manually_upserted = True
+        vehicle.relevance = RelevanceStatus.ACTIVE
+
+        db.add(vehicle)
+        await db.flush()
+
+        _apply_recommendation_rules(vehicle)
+
+        if vehicle_data.condition_assessments:
+            for assessment in vehicle_data.condition_assessments:
+                if assessment.issue_description and assessment.type_of_damage:
+                    db.add(
+                        ConditionAssessmentModel(
+                            type_of_damage=assessment.type_of_damage,
+                            issue_description=assessment.issue_description,
+                            car_id=vehicle.id,
                         )
-                        if assessment.issue_description in [
-                            "Rejected Repair",
-                            "Burn Engine",
-                            "Mechanical",
-                            "Replaced Vin",
-                            "Burn",
-                            "Undercarriage",
-                            "Water/Flood",
-                            "Burn Interior",
-                            "Rollover",
-                        ]:
-                            vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                            if not vehicle.recommendation_status_reasons:
-                                vehicle.recommendation_status_reasons = f"{assessment.issue_description};"
-                            else:
-                                vehicle.recommendation_status_reasons += f"{assessment.issue_description};"
+                    )
+                    _apply_damage_rules(vehicle, assessment.issue_description)
 
-            if vehicle_data.photos:
-                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False) for p in vehicle_data.photos])
+        if vehicle_data.photos:
+            db.add_all([
+                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False)
+                for p in vehicle_data.photos
+            ])
 
-            if vehicle_data.photos_hd:
-                db.add_all([PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True) for p in vehicle_data.photos_hd])
+        if vehicle_data.photos_hd:
+            db.add_all([
+                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True)
+                for p in vehicle_data.photos_hd
+            ])
 
-            await db.commit()
-            return True, "success"
+        await db.commit()
+
+        return True, "success"
 
     except IntegrityError as e:
-        if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
-            logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
-            return False, str(e)
+        await db.rollback()
+        logger.exception("IntegrityError | vin=%s", vehicle_data.vin)
+        return False, str(e)
+
     except Exception as e:
-        logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
+        await db.rollback()
+        logger.exception("Unexpected error | vin=%s", vehicle_data.vin)
         return False, str(e)

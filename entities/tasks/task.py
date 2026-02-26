@@ -1079,4 +1079,5 @@ def send_daily_car_audit():
         return {"status": "sent"}
 
     except Exception as e:
+        logger.exception("Send audit failed")
         return {"status": "error", "error": str(e)}

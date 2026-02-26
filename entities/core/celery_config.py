@@ -46,6 +46,11 @@ app.conf.beat_schedule = {
         "schedule": crontab(hour=3, minute=15),  # 03:15 CT
         "options": {"queue": "car_parsing_queue"},
     },
+    "daily-updated-via-extention-logs": {
+        "task": "tasks.task.send_daily_car_audit",
+        "schedule": crontab(hour=0),
+        "options": {"queue": "car_parsing_queue"},
+    }
 }
 
 app.autodiscover_tasks(["tasks.task"])
