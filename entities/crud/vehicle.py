@@ -1516,9 +1516,21 @@ def _append_reason(vehicle: CarModel, reason: str):
 
 def _serialize(value: Any):
     """Make values JSON serializable."""
+
     if isinstance(value, datetime):
         return value.astimezone(timezone.utc).isoformat()
+
+    if hasattr(value, "value"):
+        return value.value
+
     return value
+
+
+def _model_to_dict(model) -> Dict[str, Any]:
+    return {
+        column.name: _serialize(getattr(model, column.name))
+        for column in model.__table__.columns
+    }
 
 
 def _model_to_dict(model) -> Dict[str, Any]:
