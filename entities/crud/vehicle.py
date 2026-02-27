@@ -1098,8 +1098,6 @@ async def bulk_save_vehicles(
                     row[col] = getattr(existing, col)
             return row
 
-        # NEW: enforce NOT NULL + your required defaults
-        # (we keep your logic, just guarantee DB constraints)
         if row.get("car_status") is None:
             row["car_status"] = CarStatus.NEW
         if row.get("attempts") is None:
@@ -1109,16 +1107,14 @@ async def bulk_save_vehicles(
         if row.get("is_manually_upserted") is None:
             row["is_manually_upserted"] = False
 
-        # These are NOT NULL in your model (nullable=False)
-        # If API did not send them, we ensure safe defaults.
         if row.get("has_correct_vin") is None:
-            row["has_correct_vin"] = False
+            row["has_correct_vin"] = True
         if row.get("has_correct_owners") is None:
-            row["has_correct_owners"] = False
+            row["has_correct_owners"] = True
         if row.get("has_correct_accidents") is None:
-            row["has_correct_accidents"] = False
+            row["has_correct_accidents"] = True
         if row.get("has_correct_mileage") is None:
-            row["has_correct_mileage"] = False
+            row["has_correct_mileage"] = True
 
         # For safety: if something else NOT NULL sneaks in as None, set fallback defaults
         # (only if still None)
@@ -1553,29 +1549,55 @@ async def upsert_vehicle(
     db: AsyncSession
 ) -> Tuple[bool, str]:
 
-    vehicle_data.auction = vehicle_data.auction.lower()
-
-    make_key = vehicle_data.make.lower()
-    make_data = MAKES_AND_MODELS.get(make_key)
-
-    if make_data:
-        model_key = vehicle_data.model.lower()
-        model_original = make_data["models"].get(model_key)
-
-        vehicle_data.make = make_data["original"]
-        if model_original:
-            vehicle_data.model = model_original
-
-    if vehicle_data.fuel_type:
-        vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
-
-    if vehicle_data.transmision:
-        vehicle_data.transmision = norm(vehicle_data.transmision)
+    # safe lower
+    if vehicle_data.auction:
+        vehicle_data.auction = vehicle_data.auction.lower()
 
     try:
         existing_vehicle = await get_vehicle_by_vin_for_upsert(
             db, vehicle_data.vin
         )
+
+        # =====================================================
+        # NORMALIZE MAKE / MODEL (SAFE + FALLBACK)
+        # =====================================================
+        make_data = None
+        incoming_make = vehicle_data.make
+        incoming_model = vehicle_data.model
+
+        if incoming_make:
+            make_key = incoming_make.strip().lower()
+            make_data = MAKES_AND_MODELS.get(make_key)
+
+            if make_data:
+                incoming_make = make_data.get("original", incoming_make)
+
+                if incoming_model:
+                    model_key = incoming_model.strip().lower()
+                    model_original = make_data.get("models", {}).get(model_key)
+
+                    if model_original:
+                        incoming_model = model_original
+
+        # fallback to existing if missing
+        if existing_vehicle:
+            if not incoming_make:
+                incoming_make = existing_vehicle.make
+
+            if not incoming_model:
+                incoming_model = existing_vehicle.model
+
+        vehicle_data.make = incoming_make
+        vehicle_data.model = incoming_model
+
+        # =====================================================
+        # NORMALIZE OTHER FIELDS
+        # =====================================================
+        if vehicle_data.fuel_type:
+            vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
+
+        if vehicle_data.transmision:
+            vehicle_data.transmision = norm(vehicle_data.transmision)
 
         # ========================
         # UPDATE EXISTING
@@ -1598,10 +1620,8 @@ async def upsert_vehicle(
                 if value is not None or field == "date":
                     setattr(existing_vehicle, field, value)
 
-            # recommendation rules
             _apply_recommendation_rules(existing_vehicle)
 
-            # delete condition assessments
             await db.execute(
                 delete(ConditionAssessmentModel).where(
                     ConditionAssessmentModel.car_id == existing_vehicle.id
@@ -1609,7 +1629,6 @@ async def upsert_vehicle(
             )
             await db.flush()
 
-            # add new assessments
             if vehicle_data.condition_assessments:
                 for assessment in vehicle_data.condition_assessments:
                     if assessment.type_of_damage and assessment.issue_description:
@@ -1620,7 +1639,10 @@ async def upsert_vehicle(
                                 car_id=existing_vehicle.id,
                             )
                         )
-                        _apply_damage_rules(existing_vehicle, assessment.issue_description)
+                        _apply_damage_rules(
+                            existing_vehicle,
+                            assessment.issue_description
+                        )
 
             await db.flush()
 
