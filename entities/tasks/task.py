@@ -179,6 +179,19 @@ def _apply_fees(investment: float, fees: List[FeeModel]) -> float:
     return fee_total
 
 
+def normalize_mileage(v):
+    if v is None:
+        return None
+    if isinstance(v, str):
+        v = v.replace(",", "").strip()
+        if not v:
+            return None
+    try:
+        return int(v)
+    except Exception:
+        return None
+
+
 # # =========================
 # # Celery Tasks (sync)
 # # =========================
@@ -224,7 +237,6 @@ def parse_and_update_car(
         # --------------------------
         # 1) Sales history (FIRST ATTEMPT ONLY)
         # --------------------------
-        # тягнемо історію лише якщо це перша спроба (attempts == 0/None)
         if car_pre and ((car_pre.attempts or 0) == 0):
             try:
                 hist_url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
@@ -321,11 +333,13 @@ def parse_and_update_car(
             # 3) Field updates & flags
             # --------------------------
             car.owners = data.get("owners")
+            if data.get("owners"):
+                car.has_correct_owners = True
             car.has_correct_vin = True
             
 
             # mileage correctness: True лише якщо обидва наявні та рівні
-            incoming_mileage = data.get("mileage")
+            incoming_mileage = normalize_mileage(data.get("mileage"))
             if incoming_mileage is not None and car.mileage is not None:
                 try:
                     car.has_correct_mileage = int(car.mileage) == int(incoming_mileage)
