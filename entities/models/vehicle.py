@@ -50,10 +50,10 @@ class CarModel(Base):
     accident_count = Column(Integer, nullable=True)
 
     # Additional checks
-    has_correct_vin = Column(Boolean, nullable=False, default=False)
-    has_correct_owners = Column(Boolean, nullable=False, default=False)
-    has_correct_accidents = Column(Boolean, nullable=False, default=False)
-    has_correct_mileage = Column(Boolean, nullable=False, default=False)
+    has_correct_vin = Column(Boolean, nullable=False, default=True)
+    has_correct_owners = Column(Boolean, nullable=False, default=True)
+    has_correct_accidents = Column(Boolean, nullable=False, default=True)
+    has_correct_mileage = Column(Boolean, nullable=False, default=True)
 
     # Financials
     current_bid = Column(Float, nullable=True)
