@@ -24,6 +24,7 @@ import redis
 from sqlalchemy import and_, create_engine, delete, func, or_, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload, sessionmaker
+import requests
 
 from core.celery_config import app
 from core.config import settings
@@ -389,8 +390,12 @@ def parse_and_update_car(
                 hist_resp.raise_for_status()
 
                 hist_json = hist_resp.json()
-                hist_result = CarCreateSchema.model_validate(hist_json)
-                sale_history_data = hist_result.sales_history or []
+                if hist_json is None:
+                    logger.warning("Sales history response is None for vin=%s", vin)
+                    sale_history_data = []
+                else:
+                    hist_result = CarCreateSchema.model_validate(hist_json)
+                    sale_history_data = hist_result.sales_history or []
 
                 logger.info(
                     "Successfully scraped sales history data for VIN=%s, items=%s",
