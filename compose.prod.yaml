@@ -144,15 +144,24 @@ services:
         max-file: "3"
 
   celery:
-    build: 
+    build:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=gevent", "--concurrency=10"]
+    command:
+      [
+        "celery",
+        "-A", "core.celery_config.app",
+        "worker",
+        "-P", "gevent",
+        "-c", "10",
+        "-Q", "car_parsing_queue",
+        "--loglevel=INFO"
+      ]
     env_file:
       - ./entities/.env
     environment:
-      - PYTHONPATH=/usr/entities/fastapi
+      PYTHONPATH: /usr/entities/fastapi
     depends_on:
       redis_1:
         condition: service_healthy
@@ -168,7 +177,7 @@ services:
     cpus: 2.5
     restart: always
     logging:
-      driver: "json-file"
+      driver: json-file
       options:
         max-size: "10m"
         max-file: "3"

@@ -1,15 +1,5 @@
-# from gevent import monkey
-# monkey.patch_all(ssl=True, socket=True, dns=True, time=True, select=True, subprocess=True, os=True)
-
 from celery import Celery
 from celery.schedules import crontab
-from celery.signals import worker_process_init
-
-
-@worker_process_init.connect
-def _gevent_patch_in_child(**_):
-    from gevent import monkey
-    monkey.patch_all()
 
 app = Celery("tasks", broker="redis://redis_1:6380/0", backend="redis://redis_1:6380/0")
 
@@ -31,6 +21,12 @@ app.conf.task_serializer = "json"
 app.conf.accept_content = ["json"]
 app.conf.result_serializer = "json"
 app.conf.task_always_eager = False
+
+app.conf.task_acks_late = True
+app.conf.task_reject_on_worker_lost = True
+app.conf.worker_prefetch_multiplier = 1
+app.conf.broker_connection_retry_on_startup = True
+app.conf.broker_connection_retry = True
 
 app.conf.beat_schedule = {
     "update-car-bids-every-15-minutes": {

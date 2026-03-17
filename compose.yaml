@@ -178,12 +178,21 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "worker", "--loglevel=info", "-Q", "car_parsing_queue", "--pool=gevent", "--concurrency=50"]
+    command:
+      [
+        "celery",
+        "-A", "core.celery_config.app",
+        "worker",
+        "-P", "gevent",
+        "-c", "50",
+        "-Q", "car_parsing_queue",
+        "--loglevel=INFO"
+      ]
     env_file:
       - ./entities/.env
     environment:
-      - PYTHONPATH=/usr/entities/fastapi
-      - CELERY_GEVENT=1
+      PYTHONPATH: /usr/entities/fastapi
+      CELERY_GEVENT: "1"
     depends_on:
       redis_1:
         condition: service_healthy

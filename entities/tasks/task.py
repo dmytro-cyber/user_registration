@@ -15,6 +15,7 @@ from datetime import datetime
 from io import BytesIO
 from typing import Any, Dict, Optional
 
+from celery.exceptions import MaxRetriesExceededError
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 import anyio
@@ -117,6 +118,41 @@ def http_get_with_retries(
     raise last_exc
 
 
+def get_retry_countdown(retries: int) -> int:
+    """
+    Exponential backoff:
+    1st retry  -> 60s
+    2nd retry  -> 120s
+    3rd retry  -> 240s
+    4th retry  -> 480s
+    5th retry+ -> max 900s
+    """
+    return min(60 * (2 ** retries), 900)
+
+
+def is_retryable_http_error(exc: Exception) -> bool:
+    if isinstance(exc, (requests.Timeout, requests.ConnectionError)):
+        return True
+
+    if isinstance(exc, requests.HTTPError) and exc.response is not None:
+        return exc.response.status_code in {408, 425, 429, 500, 502, 503, 504}
+
+    return False
+
+
+def is_temporary_payload_error(error_text: str) -> bool:
+    """
+    Only for temporary upstream/parser-side failures.
+    Business errors must not be retried by Celery.
+    """
+    text = (error_text or "").strip().lower()
+
+    transient_markers = (
+        "Unexpected error during scraping",
+    )
+    return any(marker in text for marker in transient_markers)
+
+
 def http_post_with_retries(
     url: str,
     json: Dict[str, Any],
@@ -201,8 +237,14 @@ def normalize_mileage(v):
 # # =========================
 # # Celery Tasks (sync)
 # # =========================
-@app.task(name="tasks.task.parse_and_update_car")
+@app.task(
+    name="tasks.task.parse_and_update_car",
+    bind=True,
+    max_retries=5,
+    default_retry_delay=60,
+)
 def parse_and_update_car(
+    self,
     vin: str,
     car_name: Optional[str] = None,
     car_engine: Optional[str] = None,
@@ -214,19 +256,22 @@ def parse_and_update_car(
 ) -> Dict[str, Any]:
     """
     Fully synchronous task:
-    1) (First attempt only) pulls sales history directly and stores it.
+    1) (Business first attempt only) pulls sales history directly and stores it.
     2) Calls the parser (scrape/dc) and updates the vehicle using payload values.
     3) Computes avg market price, investments, margins, fees, suggested bid, ROI.
     4) Stores HTML to S3 (if present).
     5) Baseline: RECOMMENDED only if no reasons collected and status wasn't NOT_RECOMMENDED.
 
-    Flags semantics:
-    - has_correct_vin: parser responded successfully and returned usable payload
-    - has_correct_owners: owners value is present and successfully parsed (0 is valid)
-    - has_correct_accidents: accident_count value is present and successfully parsed (0 is valid)
-    - has_correct_mileage: parsed mileage matches expected mileage
+    IMPORTANT:
+    - Celery retries are technical retries for temporary failures.
+    - car.attempts is a business attempts counter and must not be incremented on technical retry.
     """
-    logger.info("parse_and_update_car: VIN=%s", vin)
+
+    logger.info(
+        "parse_and_update_car: VIN=%s | celery_retry=%s",
+        vin,
+        self.request.retries,
+    )
 
     with SessionLocal() as db:
         # -----------------------------------------
@@ -311,15 +356,32 @@ def parse_and_update_car(
                 f"&only_history=false"
             )
 
-        # Read car before history fetch to know attempts
+        def retry_now(exc: Exception) -> None:
+            countdown = get_retry_countdown(self.request.retries)
+            logger.warning(
+                "Temporary failure for VIN=%s. Celery retry %s/%s in %ss. Error=%s",
+                vin,
+                self.request.retries + 1,
+                self.max_retries,
+                countdown,
+                exc,
+            )
+            raise self.retry(exc=exc, countdown=countdown)
+
+        # Read car before history fetch
         car_pre = db.execute(
             select(CarModel).where(CarModel.vin == vin).limit(1)
         ).scalars().first()
 
+        if not car_pre:
+            raise ValueError(f"Car with VIN {vin} not found")
+
         # --------------------------
-        # 1) Sales history (FIRST ATTEMPT ONLY)
+        # 1) Sales history (BUSINESS FIRST ATTEMPT ONLY)
         # --------------------------
-        if car_pre and ((car_pre.attempts or 0) == 0):
+        # NOTE:
+        # This depends on business attempts counter, not Celery retries.
+        if (car_pre.attempts or 0) == 0:
             try:
                 hist_url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
                 headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
@@ -358,24 +420,22 @@ def parse_and_update_car(
                         db.add(item)
 
                 db.commit()
+
             except Exception as e:
+                # sales history is non-critical in this flow
                 logger.warning("Sales history fetch failed for %s: %s", vin, e)
         else:
             logger.info(
-                "Skipping sales history fetch for VIN=%s (attempts=%s)",
+                "Skipping sales history fetch for VIN=%s (business_attempts=%s)",
                 vin,
-                None if not car_pre else (car_pre.attempts or 0),
+                car_pre.attempts or 0,
             )
 
         # --------------------------
         # 2) Main parsing + updates
         # --------------------------
         try:
-            parse_url = build_parse_url()
-            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-            resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
-
-            # Lock row before any mutation
+            # lock row before mutation
             car_q = (
                 select(CarModel)
                 .where(CarModel.vin == vin)
@@ -386,33 +446,74 @@ def parse_and_update_car(
             if not car:
                 raise ValueError(f"Car with VIN {vin} not found")
 
-            # Try to decode payload safely
-            try:
-                data = resp.json()
-            except Exception:
-                data = {}
+            parse_url = build_parse_url()
+            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
 
-            # HTTP status failure
+            # ---- request / HTTP retryable block ----
             try:
+                resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
                 resp.raise_for_status()
             except Exception as e:
-                logger.warning("HTTP parser error for VIN=%s: %s", vin, e)
+                db.rollback()
 
-                car.attempts = (car.attempts or 0) + 1
-                car.has_correct_vin = False
+                if is_retryable_http_error(e):
+                    try:
+                        retry_now(e)
+                    except MaxRetriesExceededError:
+                        logger.error("Max retries exceeded for VIN=%s", vin)
+                        add_reason(car, "upstream parser error: max retries exceeded;")
+                        car.has_correct_vin = False
+                        db.add(car)
+                        db.commit()
+                        return {"status": "failed_after_retries", "vin": vin}
+
+                logger.warning("Non-retryable HTTP parser error for VIN=%s: %s", vin, e)
                 add_reason(car, "upstream parser error;")
+                car.has_correct_vin = False
+
+                # This is a business-complete attempt, parser answered but not recoverably
+                car.attempts = (car.attempts or 0) + 1
 
                 db.add(car)
                 db.commit()
                 return {"status": "exception", "vin": vin}
 
-            # Payload-level error
-            if data.get("error"):
-                logger.warning("Payload parser error for VIN=%s: %s", vin, data.get("error"))
+            # ---- JSON decode retryable block ----
+            try:
+                data = resp.json()
+            except Exception as e:
+                db.rollback()
+                try:
+                    retry_now(e)
+                except MaxRetriesExceededError:
+                    logger.error("Max retries exceeded while decoding JSON for VIN=%s", vin)
+                    add_reason(car, "invalid parser json response: max retries exceeded;")
+                    car.has_correct_vin = False
+                    db.add(car)
+                    db.commit()
+                    return {"status": "failed_after_retries", "vin": vin}
 
-                car.attempts = (car.attempts or 0) + 1
+            # ---- payload-level business/temporary errors ----
+            if data.get("error"):
+                error_text = str(data.get("error") or "").strip()
+                logger.warning("Payload parser error for VIN=%s: %s", vin, error_text)
+
+                if is_temporary_payload_error(error_text):
+                    db.rollback()
+                    try:
+                        retry_now(Exception(error_text))
+                    except MaxRetriesExceededError:
+                        logger.error("Max retries exceeded for temporary payload error VIN=%s", vin)
+                        add_reason(car, f"scraping error after retries: {error_text};")
+                        car.has_correct_vin = False
+                        db.add(car)
+                        db.commit()
+                        return {"status": "failed_after_retries", "vin": vin}
+
+                # Business error => no Celery retry
+                add_reason(car, f"scraping error: {error_text};")
                 car.has_correct_vin = False
-                add_reason(car, f"scraping error: {data['error']};")
+                car.attempts = (car.attempts or 0) + 1
 
                 db.add(car)
                 db.commit()
@@ -423,6 +524,8 @@ def parse_and_update_car(
             # --------------------------
             car.has_correct_vin = True
             remove_reason(car, "upstream parser error;")
+            remove_reason(car, "upstream parser error: max retries exceeded;")
+            remove_reason(car, "invalid parser json response: max retries exceeded;")
 
             # Owners
             raw_owners = data.get("owners")
@@ -442,6 +545,7 @@ def parse_and_update_car(
                 try:
                     car.has_correct_mileage = int(expected_mileage) == int(parsed_mileage)
                     if car.has_correct_mileage:
+                        # remove both generic and specific old mismatch reasons if needed
                         remove_reason(car, "mileage mismatch;")
                     else:
                         add_reason(
@@ -461,7 +565,6 @@ def parse_and_update_car(
                 car.accident_count = parsed_accident_count
                 car.has_correct_accidents = True
             else:
-                # Keep previous accident_count if parser did not return a usable value
                 car.has_correct_accidents = False
 
             # --------------------------
@@ -521,45 +624,64 @@ def parse_and_update_car(
             # --------------------------
             html_data = data.get("html_data")
             if html_data:
-                s3_storage = S3StorageClient(
-                    endpoint_url=settings.S3_STORAGE_ENDPOINT,
-                    access_key=settings.S3_STORAGE_ACCESS_KEY,
-                    secret_key=settings.S3_STORAGE_SECRET_KEY,
-                    bucket_name=settings.S3_BUCKET_NAME,
-                )
-                file_key = (
-                    f"auto_checks/{vin}/"
-                    f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-                )
-                s3_storage.upload_fileobj_sync(
-                    file_key,
-                    BytesIO(html_data.encode("utf-8")),
-                )
-                screenshot_url = (
-                    f"{settings.S3_STORAGE_ENDPOINT}/"
-                    f"{settings.S3_BUCKET_NAME}/"
-                    f"{file_key}"
-                )
-                db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
+                try:
+                    s3_storage = S3StorageClient(
+                        endpoint_url=settings.S3_STORAGE_ENDPOINT,
+                        access_key=settings.S3_STORAGE_ACCESS_KEY,
+                        secret_key=settings.S3_STORAGE_SECRET_KEY,
+                        bucket_name=settings.S3_BUCKET_NAME,
+                    )
+                    file_key = (
+                        f"auto_checks/{vin}/"
+                        f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
+                    )
+                    s3_storage.upload_fileobj_sync(
+                        file_key,
+                        BytesIO(html_data.encode("utf-8")),
+                    )
+                    screenshot_url = (
+                        f"{settings.S3_STORAGE_ENDPOINT}/"
+                        f"{settings.S3_BUCKET_NAME}/"
+                        f"{file_key}"
+                    )
+                    db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
+                except Exception as e:
+                    db.rollback()
+                    try:
+                        retry_now(e)
+                    except MaxRetriesExceededError:
+                        logger.error("Max retries exceeded during S3 upload for VIN=%s", vin)
+                        add_reason(car, "s3 upload failed after retries;")
+                        db.add(car)
+                        db.commit()
+                        return {"status": "failed_after_retries", "vin": vin}
 
             # Success marker
             car.is_checked = True
             car.relevance = RelevanceStatus.ACTIVE
+
+            # IMPORTANT:
+            # Increment business attempts only after meaningful business processing finished.
             car.attempts = (car.attempts or 0) + 1
 
             db.add(car)
             db.commit()
 
             logger.info(
-                "parse_and_update_car: updated VIN=%s | vin=%s owners=%s mileage=%s accidents=%s",
+                "parse_and_update_car: updated VIN=%s | vin=%s owners=%s mileage=%s accidents=%s business_attempts=%s",
                 vin,
                 car.has_correct_vin,
                 car.has_correct_owners,
                 car.has_correct_mileage,
                 car.has_correct_accidents,
+                car.attempts,
             )
             return {"status": "success", "vin": vin}
 
+        except MaxRetriesExceededError:
+            db.rollback()
+            logger.error("Max retries exceeded in outer block for VIN=%s", vin, exc_info=True)
+            raise
         except Exception as e:
             db.rollback()
             logger.error("parse_and_update_car failed for VIN %s: %s", vin, e, exc_info=True)
