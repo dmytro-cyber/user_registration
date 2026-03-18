@@ -34,12 +34,17 @@ from models.vehicle import (
     AutoCheckModel,
     CarModel,
     CarSaleHistoryModel,
+    CarInventoryInvestmentsModel,
+    CarInventoryModel,
+    HistoryModel,
+    PartModel,
     ConditionAssessmentModel,
     FeeModel,
     PhotoModel,
     RecommendationStatus,
     RelevanceStatus,
 )
+from models.user import user_likes
 from services.email_sync import send_email_sync
 from services.lock import (
     acquire_kickoff_lock,
@@ -987,6 +992,7 @@ def kickoff_parse_for_filter(
                 CarModel.mileage <= (filt.odometer_max or 10_000_000),
                 CarModel.avg_market_price.is_(None),
                 CarModel.is_checked.is_(False),
+                CarModel.relevance == RelevanceStatus.IRRELEVANT,
                 CarModel.attempts < 3,
             ]
 
@@ -1070,160 +1076,301 @@ def kickoff_parse_for_filter(
 @app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")
 def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
     """
-    Synchronous task:
-    - Selects ACTIVE vehicles with CarModel.date <= now()
-    - Pulls fresh data from parser:
-        - 404 -> relevance = ARCHIVAL
-        - 200 -> updates the existing vehicle from payload (no creation)
-    - Finally performs a transactional hard cleanup:
-        - delete dependent rows (user_likes, auto_checks) for cars with relevance=IRRELEVANT and past date
-        - delete the cars themselves
+    Flow:
+    1. Hard-delete IRRELEVANT cars with past date.
+    2. For ACTIVE cars with past date:
+       - call parser API
+       - 404 -> ARCHIVAL
+       - 200 -> update existing row
+         - if refreshed date is still in the past (or None) and not BuyNow -> ARCHIVAL
+         - else -> ACTIVE
     """
-    stats = {"checked": 0, "archived": 0, "updated": 0, "errors": 0, "cleanup": {"likes": 0, "auto_checks": 0, "cars": 0}}
 
-    def _apply_update_from_schema(db: Session, existing_vehicle: CarModel, vehicle_info: CarCreateSchema) -> None:
-        """
-        Update an existing CarModel from CarCreateSchema.
-        Mirrors business rules: fuel_type / transmision / risk assessments / bids / history / photos.
-        """
-        # 1) Simple scalar fields
+    now_utc = datetime.now(timezone.utc)
+
+    stats = {
+        "checked": 0,
+        "archived": 0,
+        "reactivated_or_kept_active": 0,
+        "deleted_irrelevant": 0,
+        "updated": 0,
+        "errors": 0,
+    }
+
+    def _add_reason_if_missing(car: CarModel, reason: str) -> None:
+        if not reason:
+            return
+        if not reason.endswith(";"):
+            reason = f"{reason};"
+        current = car.recommendation_status_reasons or ""
+        if reason not in current:
+            car.recommendation_status_reasons = f"{current}{reason}"
+
+    def _apply_update_from_schema(
+        db: Session,
+        existing_vehicle: CarModel,
+        vehicle_info: CarCreateSchema,
+    ) -> None:
+        # 1) scalar fields
         for field, value in vehicle_info.dict(
             exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
         ).items():
-            if (value is not None) or (field == "date"):
+            if value is not None or field == "date":
                 setattr(existing_vehicle, field, value)
 
-                # business rules
                 if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"{value};"
-                    elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons += f"{value};"
+                    _add_reason_if_missing(existing_vehicle, str(value))
 
                 if field == "transmision" and value != "Automatic":
                     existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = f"{value};"
-                    elif f"{value};" not in existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons += f"{value};"
+                    _add_reason_if_missing(existing_vehicle, str(value))
 
-        # 2) Photos — only add missing URLs
+        # 2) photos — add only missing
         existing_photo_urls = {p.url for p in existing_vehicle.photos}
         new_photos = []
+
         if vehicle_info.photos:
             for p in vehicle_info.photos:
                 if p.url not in existing_photo_urls:
-                    new_photos.append(PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=False))
+                    new_photos.append(
+                        PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=False)
+                    )
+
         if vehicle_info.photos_hd:
             for p in vehicle_info.photos_hd:
                 if p.url not in existing_photo_urls:
-                    new_photos.append(PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=True))
+                    new_photos.append(
+                        PhotoModel(url=p.url, car_id=existing_vehicle.id, is_hd=True)
+                    )
+
         if new_photos:
             db.add_all(new_photos)
 
-        # 3) Condition assessments — full replacement
-        db.execute(delete(ConditionAssessmentModel).where(ConditionAssessmentModel.car_id == existing_vehicle.id))
-        if vehicle_info.condition_assessments:
-            for a in vehicle_info.condition_assessments:
-                db.add(ConditionAssessmentModel(
-                    type_of_damage=a.type_of_damage,
-                    issue_description=a.issue_description,
-                    car_id=existing_vehicle.id,
-                ))
-                if a.issue_description in [
-                    "Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin", "Burn",
-                    "Undercarriage", "Water/Flood", "Burn Interior", "Rollover",
-                ]:
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    reason = f"{a.issue_description};"
-                    if not existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons = reason
-                    elif reason not in existing_vehicle.recommendation_status_reasons:
-                        existing_vehicle.recommendation_status_reasons += reason
+        # 3) condition assessments — full replace
+        db.execute(
+            delete(ConditionAssessmentModel).where(
+                ConditionAssessmentModel.car_id == existing_vehicle.id
+            )
+        )
 
-        # 4) Bid higher than suggested
+        if vehicle_info.condition_assessments:
+            bad_issues = {
+                "Rejected Repair",
+                "Burn Engine",
+                "Mechanical",
+                "Replaced Vin",
+                "Burn",
+                "Undercarriage",
+                "Water/Flood",
+                "Burn Interior",
+                "Rollover",
+            }
+
+            for a in vehicle_info.condition_assessments:
+                db.add(
+                    ConditionAssessmentModel(
+                        type_of_damage=a.type_of_damage,
+                        issue_description=a.issue_description,
+                        car_id=existing_vehicle.id,
+                    )
+                )
+                if a.issue_description in bad_issues:
+                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    _add_reason_if_missing(existing_vehicle, a.issue_description)
+
+        # 4) current bid > suggested bid
         if (
             vehicle_info.current_bid is not None
             and existing_vehicle.suggested_bid is not None
             and vehicle_info.current_bid > existing_vehicle.suggested_bid
         ):
             existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+            _add_reason_if_missing(existing_vehicle, "suggested bid < current bid")
 
-        # 5) Sales history — add only if DB still doesn't have it
+        # 5) sales history — add only if not present in DB
         if not existing_vehicle.sales_history and vehicle_info.sales_history:
             if len(vehicle_info.sales_history) >= 4:
                 existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                reason = f"sales at auction in the last 3 years: {len(vehicle_info.sales_history)};"
-                if not existing_vehicle.recommendation_status_reasons:
-                    existing_vehicle.recommendation_status_reasons = reason
-                elif reason not in existing_vehicle.recommendation_status_reasons:
-                    existing_vehicle.recommendation_status_reasons += reason
+                _add_reason_if_missing(
+                    existing_vehicle,
+                    f"sales at auction in the last 3 years: {len(vehicle_info.sales_history)}",
+                )
 
-            buf = []
+            history_rows = []
             for h in vehicle_info.sales_history:
-                m = CarSaleHistoryModel(**h.dict(), car_id=existing_vehicle.id)
-                if not m.source:
-                    m.source = "Unknown"
-                buf.append(m)
-            if buf:
-                db.add_all(buf)
+                item = CarSaleHistoryModel(**h.dict(), car_id=existing_vehicle.id)
+                if not item.source:
+                    item.source = "Unknown"
+                history_rows.append(item)
+
+            if history_rows:
+                db.add_all(history_rows)
 
         db.add(existing_vehicle)
 
+    # -----------------------------------
+    # 1. Hard delete IRRELEVANT past cars
+    # -----------------------------------
     with SessionLocal() as db:
-        # Select candidate VINs (ACTIVE with past date)
+        try:
+            irrelevant_ids = db.execute(
+                select(CarModel.id).where(
+                    and_(
+                        CarModel.relevance == RelevanceStatus.IRRELEVANT,
+                        CarModel.date.is_not(None),
+                        CarModel.date <= now_utc,
+                    )
+                )
+            ).scalars().all()
+
+            if irrelevant_ids:
+                # 1) Знайти inventory, прив'язані до цих авто
+                inventory_ids = db.execute(
+                    select(CarInventoryModel.id).where(
+                        CarInventoryModel.car_id.in_(irrelevant_ids)
+                    )
+                ).scalars().all()
+
+                # 2) Видалити залежності від car_inventory
+                if inventory_ids:
+                    db.execute(
+                        delete(CarInventoryInvestmentsModel).where(
+                            CarInventoryInvestmentsModel.car_inventory_id.in_(inventory_ids)
+                        )
+                    )
+
+                    db.execute(
+                        delete(HistoryModel).where(
+                            HistoryModel.car_inventory_id.in_(inventory_ids)
+                        )
+                    )
+
+                    db.execute(
+                        delete(CarInventoryModel).where(
+                            CarInventoryModel.id.in_(inventory_ids)
+                        )
+                    )
+
+                # 3) Видалити залежності напряму від cars
+                db.execute(
+                    delete(user_likes).where(
+                        user_likes.c.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(AutoCheckModel).where(
+                        AutoCheckModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(PhotoModel).where(
+                        PhotoModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(ConditionAssessmentModel).where(
+                        ConditionAssessmentModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(CarSaleHistoryModel).where(
+                        CarSaleHistoryModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(PartModel).where(
+                        PartModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                db.execute(
+                    delete(HistoryModel).where(
+                        HistoryModel.car_id.in_(irrelevant_ids)
+                    )
+                )
+
+                # 4) І тільки після цього видалити самі авто
+                db.execute(
+                    delete(CarModel).where(
+                        CarModel.id.in_(irrelevant_ids)
+                    )
+                )
+
+                stats["deleted_irrelevant"] = len(irrelevant_ids)
+                db.commit()
+
+            logger.info(
+                "Deleted IRRELEVANT expired cars: %s",
+                stats["deleted_irrelevant"],
+            )
+
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to delete irrelevant expired cars")
+            stats["errors"] += 1
+
+    # -----------------------------------
+    # 2. Process ACTIVE past cars
+    # -----------------------------------
+    with SessionLocal() as db:
         vin_rows = db.execute(
             select(CarModel.vin).where(
                 and_(
                     CarModel.relevance == RelevanceStatus.ACTIVE,
-                    CarModel.date <= func.now(),
+                    CarModel.date.is_not(None),
+                    CarModel.date <= now_utc,
                 )
             )
         ).scalars().all()
-        logger.info("Expired-auction: selected %d VINs to process", len(vin_rows))
+
+        logger.info("Expired-auction: selected %d ACTIVE VINs to process", len(vin_rows))
 
         for vin in vin_rows:
             stats["checked"] += 1
 
-            # 1) Query parser
             try:
-                resp = httpx.get(f"http://parsers:8001/api/v1/apicar/{vin}", timeout=30.0)
+                resp = httpx.get(
+                    f"http://parsers:8001/api/v1/apicar/{vin}",
+                    timeout=30.0,
+                )
             except Exception as e:
                 logger.exception("VIN %s: HTTP request failed: %s", vin, e)
                 stats["errors"] += 1
                 continue
 
-            # 2) 404 -> ARCHIVAL
             if resp.status_code == 404:
                 try:
-                    existing = db.execute(
+                    car = db.execute(
                         select(CarModel).where(CarModel.vin == vin)
                     ).scalars().first()
-                    if existing:
-                        existing.relevance = RelevanceStatus.ARCHIVAL
-                        existing.is_manually_upserted = False
-                        db.add(existing)
+
+                    if car:
+                        car.relevance = RelevanceStatus.ARCHIVAL
+                        car.is_manually_upserted = False
+                        db.add(car)
                         db.commit()
-                        logger.info("VIN %s marked as ARCHIVAL after 404 from parser", vin)
                         stats["archived"] += 1
-                    else:
-                        logger.info("VIN %s not found when marking as ARCHIVAL", vin)
+                        logger.info("VIN %s marked as ARCHIVAL after 404", vin)
                 except Exception as e:
                     db.rollback()
                     logger.exception("VIN %s: failed to mark ARCHIVAL: %s", vin, e)
                     stats["errors"] += 1
+
                 continue
 
-            # 3) Other HTTP errors
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
-                logger.exception("VIN %s: parser returned %s", vin, e)
+                logger.exception("VIN %s: parser returned HTTP error: %s", vin, e)
                 stats["errors"] += 1
                 continue
 
-            # 4) Payload validation
             try:
                 payload = resp.json()
                 vehicle_info = CarCreateSchema.model_validate(payload)
@@ -1232,7 +1379,6 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 stats["errors"] += 1
                 continue
 
-            # 5) Update existing vehicle (no creation)
             try:
                 existing_vehicle = db.execute(
                     select(CarModel)
@@ -1250,19 +1396,25 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
 
                 _apply_update_from_schema(db, existing_vehicle, vehicle_info)
 
-                # If still past date and not BuyNow -> archive
-                if (
-                    existing_vehicle.auction_name
-                    and existing_vehicle.auction_name.lower() != "buynow"
-                    and (
-                        (existing_vehicle.date is not None and existing_vehicle.date <= func.now())
-                        or existing_vehicle.date is None
-                    )
+                is_buynow = (
+                    existing_vehicle.auction_name is not None
+                    and existing_vehicle.auction_name.lower() == "buynow"
+                )
+
+                # final relevance decision after refresh
+                if not is_buynow and (
+                    existing_vehicle.date is None or existing_vehicle.date <= now_utc
                 ):
                     existing_vehicle.relevance = RelevanceStatus.ARCHIVAL
                     existing_vehicle.is_manually_upserted = False
-                    logger.info("VIN %s archived after update (date still in the past)", vin)
+                    stats["archived"] += 1
+                    logger.info("VIN %s archived after refresh", vin)
+                else:
+                    existing_vehicle.relevance = RelevanceStatus.ACTIVE
+                    stats["reactivated_or_kept_active"] += 1
+                    logger.info("VIN %s kept ACTIVE after refresh", vin)
 
+                db.add(existing_vehicle)
                 db.commit()
                 stats["updated"] += 1
 
@@ -1275,55 +1427,10 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 logger.exception("VIN %s: update failed: %s", vin, e)
                 stats["errors"] += 1
 
-        # === Transactional hard cleanup (dependents -> cars) ===
-        try:
-            # Use one atomic transaction to avoid FK errors and partial states
-            with db.begin():
-                # 1) Delete user_likes referencing IRRELEVANT + past-date cars
-                del_likes = db.execute(text("""
-                    DELETE FROM user_likes ul
-                    USING cars c
-                    WHERE ul.car_id = c.id
-                      AND c.date < NOW()
-                      AND c.relevance = 'IRRELEVANT'
-                """))
-
-                # 2) Delete auto_checks referencing those cars (if you store screenshots/logs)
-                del_checks = db.execute(text("""
-                    DELETE FROM auto_checks ac
-                    USING cars c
-                    WHERE ac.car_id = c.id
-                      AND c.date < NOW()
-                      AND c.relevance = 'IRRELEVANT'
-                """))
-
-                # 3) Delete cars themselves
-                del_cars = db.execute(text("""
-                    DELETE FROM cars
-                    WHERE date < NOW()
-                      AND relevance = 'IRRELEVANT'
-                """))
-
-            stats["cleanup"]["likes"] = del_likes.rowcount or 0
-            stats["cleanup"]["auto_checks"] = del_checks.rowcount or 0
-            stats["cleanup"]["cars"] = del_cars.rowcount or 0
-
-            logger.info(
-                "Cleanup done: likes=%d, auto_checks=%d, cars=%d",
-                stats["cleanup"]["likes"],
-                stats["cleanup"]["auto_checks"],
-                stats["cleanup"]["cars"],
-            )
-
-        except Exception as e:
-            db.rollback()
-            logger.exception("Cleanup delete failed: %s", e)
-
     logger.info("Expired auction update finished: %s", stats)
     return stats
 
 AUDIT_DIR = Path("audit_logs")
-
 
 @app.task(name="tasks.task.send_daily_car_audit")
 def send_daily_car_audit():
