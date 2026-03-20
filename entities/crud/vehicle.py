@@ -18,6 +18,7 @@ from models.user import UserModel, UserRoleEnum, user_likes
 from models.vehicle import (
     AutoCheckModel,
     CarInventoryModel,
+    CarInventoryInvestmentsModel,
     CarInventoryStatus,
     CarModel,
     CarSaleHistoryModel,
@@ -58,35 +59,141 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
         return
 
     filter_condition = or_(*[
-        and_(func.lower(CarModel.auction) == site.lower(), CarModel.lot.in_(lot_ids))
+        and_(
+            func.lower(CarModel.auction) == site.lower(),
+            CarModel.lot.in_(lot_ids),
+        )
         for site, lot_ids in lots_by_site.items()
     ])
 
-    # 1. Delete IRRELEVANT cars directly
-    await db.execute(
-        delete(CarModel).where(
-            and_(
-                or_(
-                    CarModel.relevance == RelevanceStatus.IRRELEVANT,
-                    CarModel.relevance.is_(None),
-                ),
-            filter_condition)
+    # -------------------------------------------------------
+    # 1. Find IRRELEVANT / NULL relevance cars that must be deleted
+    # -------------------------------------------------------
+    stmt_irrelevant_ids = select(CarModel.id).where(
+        and_(
+            or_(
+                CarModel.relevance == RelevanceStatus.IRRELEVANT,
+                CarModel.relevance.is_(None),
+            ),
+            filter_condition,
         )
     )
+    result_irrelevant = await db.execute(stmt_irrelevant_ids)
+    irrelevant_car_ids: List[int] = list(result_irrelevant.scalars().all())
 
+    if irrelevant_car_ids:
+        # 1.1 Find related inventory ids
+        stmt_inventory_ids = select(CarInventoryModel.id).where(
+            CarInventoryModel.car_id.in_(irrelevant_car_ids)
+        )
+        result_inventory_ids = await db.execute(stmt_inventory_ids)
+        inventory_ids: List[int] = list(result_inventory_ids.scalars().all())
+
+        # 1.2 Delete S3 screenshots for irrelevant cars
+        stmt_irrelevant_checks = select(AutoCheckModel.screenshot_url).where(
+            AutoCheckModel.car_id.in_(irrelevant_car_ids)
+        )
+        result_irrelevant_checks = await db.execute(stmt_irrelevant_checks)
+
+        for (screenshot_url,) in result_irrelevant_checks.all():
+            if screenshot_url:
+                file_name = screenshot_url.split("/")[-1]
+                try:
+                    s3_client.delete_file(file_name)
+                except Exception as e:
+                    print(f"Failed to delete file {file_name} from S3: {e}")
+
+        # 1.3 Delete relations from inventory side
+        if inventory_ids:
+            await db.execute(
+                delete(CarInventoryInvestmentsModel).where(
+                    CarInventoryInvestmentsModel.car_inventory_id.in_(inventory_ids)
+                )
+            )
+
+            await db.execute(
+                delete(HistoryModel).where(
+                    HistoryModel.car_inventory_id.in_(inventory_ids)
+                )
+            )
+
+            await db.execute(
+                delete(CarInventoryModel).where(
+                    CarInventoryModel.id.in_(inventory_ids)
+                )
+            )
+
+        # 1.4 Delete direct car dependencies
+        await db.execute(
+            delete(user_likes).where(
+                user_likes.c.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(AutoCheckModel).where(
+                AutoCheckModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(PhotoModel).where(
+                PhotoModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(ConditionAssessmentModel).where(
+                ConditionAssessmentModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(CarSaleHistoryModel).where(
+                CarSaleHistoryModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(PartModel).where(
+                PartModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        await db.execute(
+            delete(HistoryModel).where(
+                HistoryModel.car_id.in_(irrelevant_car_ids)
+            )
+        )
+
+        # 1.5 Delete cars last
+        await db.execute(
+            delete(CarModel).where(
+                CarModel.id.in_(irrelevant_car_ids)
+            )
+        )
+
+    # -------------------------------------------------------
     # 2. Get ACTIVE car ids to archive
+    # -------------------------------------------------------
     stmt_active_ids = select(CarModel.id).where(
-        and_(CarModel.relevance == RelevanceStatus.ACTIVE, filter_condition)
+        and_(
+            CarModel.relevance == RelevanceStatus.ACTIVE,
+            filter_condition,
+        )
     )
-    result = await db.execute(stmt_active_ids)
-    to_archive_ids = [row for row in result.scalars()]
+    result_active = await db.execute(stmt_active_ids)
+    to_archive_ids: List[int] = list(result_active.scalars().all())
 
-    # 3. Delete screenshots from S3
+    # -------------------------------------------------------
+    # 3. Delete screenshots from S3 for ACTIVE -> ARCHIVAL cars
+    # -------------------------------------------------------
     if to_archive_ids:
         stmt_checks = select(AutoCheckModel.screenshot_url).where(
             AutoCheckModel.car_id.in_(to_archive_ids)
         )
         result_checks = await db.execute(stmt_checks)
+
         for (screenshot_url,) in result_checks.all():
             if screenshot_url:
                 file_name = screenshot_url.split("/")[-1]
@@ -95,7 +202,9 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
                 except Exception as e:
                     print(f"Failed to delete file {file_name} from S3: {e}")
 
+        # -------------------------------------------------------
         # 4. Update relevance to ARCHIVAL
+        # -------------------------------------------------------
         await db.execute(
             update(CarModel)
             .where(CarModel.id.in_(to_archive_ids))
