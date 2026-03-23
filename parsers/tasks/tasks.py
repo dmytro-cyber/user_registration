@@ -193,7 +193,7 @@ def delete_vehicle():
 
     delete_url = "http://entities:8000/api/v1/vehicles/bulk/delete"
 
-    batch_size = 200
+    batch_size = 100
 
     with httpx.Client(timeout=1000) as client:
         for i in range(0, len(items), batch_size):
