@@ -2,45 +2,19 @@ version: "3.9"
 
 services:
   redis:
-    image: 'redis:latest'
+    image: "redis:latest"
     container_name: redis_cars_and_beyond
     ports:
       - "6379:6379"
     volumes:
-      - redis_cars_and_beyond_data:/var/lib/data
+      - redis_cars_and_beyond_data:/data
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "768mb", "--maxmemory-policy", "noeviction"]
     networks:
       - cars_and_beyond_network
     mem_limit: 1g
     cpus: 0.5
     healthcheck:
-      test: [ "CMD", "redis-cli", "ping" ]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    dns:
-      - 8.8.8.8
-    restart: always
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  redis_1:
-    image: 'redis:latest'
-    container_name: redis_1_cars_and_beyond
-    ports:
-      - "6380:6380"
-    command: ["redis-server", "--port", "6380"]
-    volumes:
-      - redis_1_cars_and_beyond_data:/var/lib/data
-    networks:
-      - cars_and_beyond_network
-    mem_limit: 1g
-    cpus: 0.5
-    healthcheck:
-      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
+      test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,7 +33,7 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: backend_cars_and_beyond
-    command: [ "/bin/bash", "/commands/run_entities_server_dev.sh" ]
+    command: ["/bin/bash", "/commands/run_entities_server_dev.sh"]
     env_file:
       - ./entities/.env
     environment:
@@ -91,7 +65,7 @@ services:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: parser_cars_and_beyond
-    command: [ "/bin/bash", "/commands/run_parsers_server_dev.sh" ]
+    command: ["/bin/bash", "/commands/run_parsers_server_dev.sh"]
     env_file:
       - ./parsers/.env
     environment:
@@ -106,8 +80,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 4g
-    cpus: 2.0
+    mem_limit: 5g
+    cpus: 2.7
     restart: always
     depends_on:
       migrator:
@@ -136,7 +110,7 @@ services:
       - 8.8.8.8
     mem_limit: 512m
     cpus: 0.3
-    restart: "no"   # one-shot migrator
+    restart: "no"
     logging:
       driver: "json-file"
       options:
@@ -154,16 +128,19 @@ services:
         "-A", "core.celery_config.app",
         "worker",
         "-P", "gevent",
-        "-c", "10",
+        "-c", "5",
         "-Q", "car_parsing_queue",
-        "--loglevel=INFO"
+        "--loglevel=INFO",
+        "--prefetch-multiplier=1"
       ]
     env_file:
       - ./entities/.env
     environment:
-      PYTHONPATH: /usr/entities/fastapi
+      - PYTHONPATH=/usr/entities/fastapi
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
     depends_on:
-      redis_1:
+      redis:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
@@ -173,25 +150,34 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 6g
-    cpus: 2.5
+    mem_limit: 4g
+    cpus: 1.7
     restart: always
     logging:
-      driver: json-file
+      driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
 
   celery_worker:
-    build: 
+    build:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_worker_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks.app", "worker", "--loglevel=info"]
+    command:
+      [
+        "celery",
+        "-A", "tasks.tasks.app",
+        "worker",
+        "--loglevel=info",
+        "--prefetch-multiplier=1"
+      ]
     env_file:
       - ./parsers/.env
     environment:
       - PYTHONPATH=/usr/parsers/fastapi
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
@@ -203,8 +189,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 4g
-    cpus: 1.5
+    mem_limit: 4.5g
+    cpus: 2.1
     restart: always
     logging:
       driver: "json-file"
@@ -213,7 +199,7 @@ services:
         max-file: "3"
 
   celery_beat:
-    build: 
+    build:
       context: .
       dockerfile: parsers/Dockerfile
     container_name: celery_beat_cars_and_beyond
@@ -222,6 +208,8 @@ services:
       - ./parsers/.env
     environment:
       - PYTHONPATH=/usr/parsers/fastapi
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
@@ -233,8 +221,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 512m
-    cpus: 0.3
+    mem_limit: 384m
+    cpus: 0.2
     restart: always
     logging:
       driver: "json-file"
@@ -243,7 +231,7 @@ services:
         max-file: "3"
 
   celery_beat_entities:
-    build: 
+    build:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_beat_entities_cars_and_beyond
@@ -252,8 +240,10 @@ services:
       - ./entities/.env
     environment:
       - PYTHONPATH=/usr/entities/fastapi
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
     depends_on:
-      redis_1:
+      redis:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
@@ -263,8 +253,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 512m
-    cpus: 0.3
+    mem_limit: 384m
+    cpus: 0.2
     restart: always
     logging:
       driver: "json-file"
@@ -296,8 +286,8 @@ services:
       - cars_and_beyond_network
     dns:
       - 8.8.8.8
-    mem_limit: 512m
-    cpus: 0.3
+    mem_limit: 384m
+    cpus: 0.2
     logging:
       driver: "json-file"
       options:
@@ -312,8 +302,6 @@ services:
 
 volumes:
   redis_cars_and_beyond_data:
-    driver: local
-  redis_1_cars_and_beyond_data:
     driver: local
 
 networks:
