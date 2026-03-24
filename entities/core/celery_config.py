@@ -8,7 +8,7 @@ def _gevent_patch_in_child(**_):
 from celery import Celery
 from celery.schedules import crontab
 
-app = Celery("tasks", broker="redis://redis_1:6379/1", backend="redis://redis_1:6379/1")
+app = Celery("tasks", broker="redis://redis:6379/1", backend="redis://redis:6379/1")
 
 app.conf.timezone = "America/Chicago"
 
