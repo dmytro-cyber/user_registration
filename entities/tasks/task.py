@@ -1039,7 +1039,6 @@ def kickoff_parse_for_filter(
                 CarModel.mileage <= (filt.odometer_max or 10_000_000),
                 CarModel.avg_market_price.is_(None),
                 CarModel.is_checked.is_(False),
-                CarModel.relevance == RelevanceStatus.IRRELEVANT,
                 CarModel.attempts < 3,
             ]
 
