@@ -1117,7 +1117,7 @@ def kickoff_parse_for_filter(
         }
 
     finally:
-        release_kickoff_lock(lock_token)
+        pass
 
 
 @app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")
