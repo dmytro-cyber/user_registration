@@ -6,9 +6,9 @@ from typing import Optional
 
 import redis
 
-REDIS_HOST = os.getenv("REDIS_HOST", "redis_1")
-REDIS_PORT = int(os.getenv("REDIS_PORT", "6380"))
-REDIS_DB   = int(os.getenv("REDIS_DB", "1"))
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_PORT = int(os.getenv("REDIS_PORT", "6379"))
+REDIS_DB   = int(os.getenv("REDIS_DB", "3"))
 
 redis_client = redis.Redis(
     host=REDIS_HOST,
