@@ -2,7 +2,7 @@ import logging
 import logging.handlers
 import os
 import re
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Optional, Tuple
 
 import httpx
@@ -19,6 +19,10 @@ from core.dependencies import get_current_user, get_settings, get_token
 from db.session import get_db
 from models.admin import FilterModel, ROIModel
 from models.vehicle import CarModel, FeeModel, RelevanceStatus
+from models.filter_kickoff_queue import (
+    FilterKickoffQueueModel,
+    FilterKickoffQueueStatus,
+)
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -109,17 +113,12 @@ async def create_filter(
     filter: FilterCreate,
     current_user=Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
-    settings = Depends(get_settings),
+    settings=Depends(get_settings),
 ):
-    if is_kickoff_busy():
-        raise HTTPException(
-            status_code=409,
-            detail="Previous kickoff task is still running. Please wait until it finishes.",
-        )
-
     db_filter = FilterModel(**filter.dict(exclude_unset=True))
-    db_filter.updated_at = datetime.utcnow()
+    db_filter.updated_at = datetime.now(timezone.utc)
     db.add(db_filter)
+    await db.flush()
 
     conditions = [
         CarModel.make == db_filter.make,
@@ -128,6 +127,7 @@ async def create_filter(
         CarModel.mileage >= (db_filter.odometer_min or 0),
         CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
     ]
+
     if db_filter.model is not None:
         conditions.append(CarModel.model == db_filter.model)
 
@@ -138,14 +138,16 @@ async def create_filter(
         .execution_options(synchronize_session=False)
     )
     await db.execute(bulk_update_stmt)
+
+    db.add(
+        FilterKickoffQueueModel(
+            filter_id=db_filter.id,
+            status=FilterKickoffQueueStatus.PENDING,
+        )
+    )
+
     await db.commit()
     await db.refresh(db_filter)
-
-    celery_app.send_task(
-        "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id, "lock_token": db_filter.id},
-        queue="car_parsing_queue",
-    )
 
     return db_filter
 

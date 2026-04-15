@@ -44,6 +44,10 @@ from models.vehicle import (
     RecommendationStatus,
     RelevanceStatus,
 )
+from models.filter_kickoff_queue import (
+    FilterKickoffQueueModel,
+    FilterKickoffQueueStatus,
+)
 from models.user import user_likes
 from services.email_sync import send_email_sync
 from services.lock import (
@@ -1019,12 +1023,19 @@ def kickoff_parse_for_filter(
     batch_size: int = 100,
     stream_chunk: int = 400,
 ) -> dict:
+    queue_item_id = int(lock_token)
 
     try:
         with SessionLocal() as session:
-
             filt = session.get(FilterModel, filter_id)
             if not filt:
+                queue_item = session.get(FilterKickoffQueueModel, queue_item_id)
+                if queue_item:
+                    queue_item.status = FilterKickoffQueueStatus.FAILED
+                    queue_item.finished_at = datetime.now(timezone.utc)
+                    queue_item.last_error = "filter_not_found"
+                    session.commit()
+
                 return {
                     "status": "error",
                     "reason": "filter_not_found",
@@ -1109,14 +1120,29 @@ def kickoff_parse_for_filter(
 
             enqueued += len(batch)
 
+        with SessionLocal() as session:
+            queue_item = session.get(FilterKickoffQueueModel, queue_item_id)
+            if queue_item:
+                queue_item.status = FilterKickoffQueueStatus.DONE
+                queue_item.finished_at = datetime.now(timezone.utc)
+                queue_item.last_error = None
+                session.commit()
+
         return {
             "status": "ok",
             "filter_id": filter_id,
             "enqueued": enqueued,
         }
 
-    finally:
-        pass
+    except Exception as exc:
+        with SessionLocal() as session:
+            queue_item = session.get(FilterKickoffQueueModel, queue_item_id)
+            if queue_item:
+                queue_item.status = FilterKickoffQueueStatus.FAILED
+                queue_item.finished_at = datetime.now(timezone.utc)
+                queue_item.last_error = str(exc)
+                session.commit()
+        raise
 
 
 @app.task(name="tasks.task.parse_and_update_cars_with_expired_auction_date")
@@ -1505,3 +1531,72 @@ def send_daily_car_audit():
     except Exception as e:
         logger.exception("Send audit failed")
         return {"status": "error", "error": str(e)}
+
+
+DISPATCH_LOCK_KEY = 910002
+
+
+@app.task(name="tasks.task.dispatch_next_filter_kickoff")
+def dispatch_next_filter_kickoff() -> dict:
+    now = datetime.now(timezone.utc)
+
+    with SessionLocal() as session:
+        session.execute(
+            text("SELECT pg_advisory_xact_lock(:key)"),
+            {"key": DISPATCH_LOCK_KEY},
+        )
+
+        running_job = session.execute(
+            select(FilterKickoffQueueModel)
+            .where(FilterKickoffQueueModel.status == FilterKickoffQueueStatus.RUNNING)
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if running_job is not None:
+            session.commit()
+            return {
+                "status": "ok",
+                "action": "skip",
+                "reason": "job_already_running",
+                "running_filter_id": running_job.filter_id,
+            }
+
+        next_job = session.execute(
+            select(FilterKickoffQueueModel)
+            .where(FilterKickoffQueueModel.status == FilterKickoffQueueStatus.PENDING)
+            .order_by(FilterKickoffQueueModel.created_at.asc())
+            .with_for_update(skip_locked=True)
+            .limit(1)
+        ).scalar_one_or_none()
+
+        if next_job is None:
+            session.commit()
+            return {
+                "status": "ok",
+                "action": "skip",
+                "reason": "no_pending_jobs",
+            }
+
+        async_result = app.send_task(
+            "tasks.task.kickoff_parse_for_filter",
+            kwargs={
+                "filter_id": next_job.filter_id,
+                "lock_token": str(next_job.id),
+            },
+            queue="car_parsing_queue",
+        )
+
+        next_job.status = FilterKickoffQueueStatus.RUNNING
+        next_job.started_at = now
+        next_job.celery_task_id = async_result.id
+        next_job.attempts += 1
+        next_job.last_error = None
+
+        session.commit()
+
+        return {
+            "status": "ok",
+            "action": "dispatched",
+            "queue_item_id": next_job.id,
+            "filter_id": next_job.filter_id,
+        }

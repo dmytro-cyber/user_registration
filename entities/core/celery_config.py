@@ -53,7 +53,11 @@ app.conf.beat_schedule = {
         "task": "tasks.task.send_daily_car_audit",
         "schedule": crontab(hour=0),
         "options": {"queue": "car_parsing_queue"},
-    }
+    },
+    "dispatch_next_filter_kickoff_every_minute": {
+        "task": "tasks.task.dispatch_next_filter_kickoff",
+        "schedule": crontab(minute="*"),
+    },
 }
 
 app.autodiscover_tasks(["tasks.task"])

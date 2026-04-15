@@ -22,3 +22,5 @@ from .vehicle import PartModel as PartModel
 from .vehicle import PhotoModel as PhotoModel
 from .vehicle import RelevanceStatus as RelevanceStatus
 from .vehicle import USZipModel as USZipModel
+from .filter_kickoff_queue import FilterKickoffQueueModel as FilterKickoffQueueModel
+from .filter_kickoff_queue import FilterKickoffQueueStatus as FilterKickoffQueueStatus
