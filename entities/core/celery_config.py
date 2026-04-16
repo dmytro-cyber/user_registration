@@ -57,6 +57,7 @@ app.conf.beat_schedule = {
     "dispatch_due_filter_kickoff_jobs_every_minute": {
         "task": "tasks.task.dispatch_due_filter_kickoff_jobs",
         "schedule": crontab(minute="*"),
+        "options": {"queue": "car_parsing_queue"},
     },
 }
 
