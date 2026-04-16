@@ -117,7 +117,7 @@ async def create_filter(
     settings=Depends(get_settings),
 ):
     db_filter = FilterModel(**filter.dict(exclude_unset=True))
-    db_filter.updated_at = datetime.now(timezone.utc)
+    db_filter.updated_at = datetime.now()
     db.add(db_filter)
     await db.flush()
 
