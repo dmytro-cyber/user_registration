@@ -1,15 +1,23 @@
-from datetime import datetime
+# app/models/filter_kickoff_queue.py
+
+import enum
+from datetime import datetime, timedelta
 
 from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from models import Base
-import enum
+
+
+FILTER_KICKOFF_INTERVAL = timedelta(minutes=90)
+
+FILTER_QUEUE_ENQUEUE_LOCK_KEY = 910001
+FILTER_QUEUE_DISPATCH_LOCK_KEY = 910002
 
 
 class FilterKickoffQueueStatus(str, enum.Enum):
-    PENDING = "pending"
-    RUNNING = "running"
+    SCHEDULED = "scheduled"
+    DISPATCHED = "dispatched"
     DONE = "done"
     FAILED = "failed"
 
@@ -28,14 +36,15 @@ class FilterKickoffQueueModel(Base):
     status: Mapped[FilterKickoffQueueStatus] = mapped_column(
         Enum(FilterKickoffQueueStatus, name="filter_kickoff_queue_status"),
         nullable=False,
-        default=FilterKickoffQueueStatus.PENDING,
+        default=FilterKickoffQueueStatus.SCHEDULED,
         index=True,
     )
 
-    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scheduled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    celery_task_id: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
 

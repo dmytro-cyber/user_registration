@@ -39,6 +39,7 @@ from services.lock import (
     generate_lock_token,
 )
 from services.vehicle import build_car_filter_query, scrape_and_save_sales_history
+from services.filter_kickoff_queue import enqueue_filter_kickoff
 
 # from tasks.task import parse_and_update_car
 
@@ -139,11 +140,9 @@ async def create_filter(
     )
     await db.execute(bulk_update_stmt)
 
-    db.add(
-        FilterKickoffQueueModel(
-            filter_id=db_filter.id,
-            status=FilterKickoffQueueStatus.PENDING,
-        )
+    await enqueue_filter_kickoff(
+        db=db,
+        filter_id=db_filter.id,
     )
 
     await db.commit()

@@ -1,3 +1,5 @@
+# app/services/filter_kickoff_queue.py
+
 from datetime import datetime, timezone
 
 from sqlalchemy import select, text
@@ -35,6 +37,7 @@ async def enqueue_filter_kickoff(
         .order_by(FilterKickoffQueueModel.scheduled_at.desc())
         .limit(1)
     )
+
     last_job = (await db.execute(stmt)).scalar_one_or_none()
 
     if last_job is None:
@@ -42,12 +45,12 @@ async def enqueue_filter_kickoff(
     else:
         scheduled_at = max(now, last_job.scheduled_at + FILTER_KICKOFF_INTERVAL)
 
-    job = FilterKickoffQueueModel(
+    queue_item = FilterKickoffQueueModel(
         filter_id=filter_id,
         status=FilterKickoffQueueStatus.SCHEDULED,
         scheduled_at=scheduled_at,
     )
-    db.add(job)
+    db.add(queue_item)
     await db.flush()
 
-    return job
+    return queue_item

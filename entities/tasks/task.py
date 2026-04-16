@@ -47,6 +47,7 @@ from models.vehicle import (
 from models.filter_kickoff_queue import (
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
+    FILTER_QUEUE_DISPATCH_LOCK_KEY
 )
 from models.user import user_likes
 from services.email_sync import send_email_sync
@@ -1536,67 +1537,58 @@ def send_daily_car_audit():
 DISPATCH_LOCK_KEY = 910002
 
 
-@app.task(name="tasks.task.dispatch_next_filter_kickoff")
-def dispatch_next_filter_kickoff() -> dict:
+@app.task(name="tasks.task.dispatch_due_filter_kickoff_jobs")
+def dispatch_due_filter_kickoff_jobs() -> dict:
     now = datetime.now(timezone.utc)
+    dispatched = 0
+    failed = 0
 
     with SessionLocal() as session:
         session.execute(
             text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": DISPATCH_LOCK_KEY},
+            {"key": FILTER_QUEUE_DISPATCH_LOCK_KEY},
         )
 
-        running_job = session.execute(
+        stmt = (
             select(FilterKickoffQueueModel)
-            .where(FilterKickoffQueueModel.status == FilterKickoffQueueStatus.RUNNING)
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if running_job is not None:
-            session.commit()
-            return {
-                "status": "ok",
-                "action": "skip",
-                "reason": "job_already_running",
-                "running_filter_id": running_job.filter_id,
-            }
-
-        next_job = session.execute(
-            select(FilterKickoffQueueModel)
-            .where(FilterKickoffQueueModel.status == FilterKickoffQueueStatus.PENDING)
-            .order_by(FilterKickoffQueueModel.created_at.asc())
+            .where(
+                FilterKickoffQueueModel.status == FilterKickoffQueueStatus.SCHEDULED,
+                FilterKickoffQueueModel.scheduled_at <= now,
+            )
+            .order_by(FilterKickoffQueueModel.scheduled_at.asc())
             .with_for_update(skip_locked=True)
-            .limit(1)
-        ).scalar_one_or_none()
-
-        if next_job is None:
-            session.commit()
-            return {
-                "status": "ok",
-                "action": "skip",
-                "reason": "no_pending_jobs",
-            }
-
-        async_result = app.send_task(
-            "tasks.task.kickoff_parse_for_filter",
-            kwargs={
-                "filter_id": next_job.filter_id,
-                "lock_token": str(next_job.id),
-            },
-            queue="car_parsing_queue",
         )
 
-        next_job.status = FilterKickoffQueueStatus.RUNNING
-        next_job.started_at = now
-        next_job.celery_task_id = async_result.id
-        next_job.attempts += 1
-        next_job.last_error = None
+        jobs = session.execute(stmt).scalars().all()
+
+        for job in jobs:
+            try:
+                async_result = app.send_task(
+                    "tasks.task.kickoff_parse_for_filter",
+                    kwargs={
+                        "filter_id": job.filter_id,
+                        "lock_token": str(job.id),
+                    },
+                    queue="car_parsing_queue",
+                )
+
+                job.status = FilterKickoffQueueStatus.DISPATCHED
+                job.dispatched_at = now
+                job.celery_task_id = async_result.id
+                job.attempts += 1
+                job.last_error = None
+                dispatched += 1
+
+            except Exception as exc:
+                job.status = FilterKickoffQueueStatus.FAILED
+                job.finished_at = now
+                job.last_error = str(exc)
+                failed += 1
 
         session.commit()
 
-        return {
-            "status": "ok",
-            "action": "dispatched",
-            "queue_item_id": next_job.id,
-            "filter_id": next_job.filter_id,
-        }
+    return {
+        "status": "ok",
+        "dispatched": dispatched,
+        "failed": failed,
+    }
