@@ -222,6 +222,17 @@ async def update_actual_bid(
         for fee in fees:
             total_fees += (float(fee.amount) / 100.0) * bid_amount if fee.percent else float(fee.amount)
         vehicle.auction_fee = total_fees
+        total_investments = bid_amount + vehicle.sum_of_investments
+
+        if vehicle.avg_market_price is not None and total_investments > 0:
+            profit_margin = float(vehicle.avg_market_price) - total_investments
+            roi = (profit_margin / total_investments) * 100
+
+            vehicle.profit_margin = profit_margin
+            vehicle.roi = roi
+        else:
+            vehicle.profit_margin = None
+            vehicle.roi = None
 
         db.add(HistoryModel(
             car_id=car_id,
