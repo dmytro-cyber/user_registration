@@ -13,13 +13,12 @@ async def update_inventory_financials(db: AsyncSession, inventory_id: int):
     sums_by_type = dict(result.all())
 
     update_values = {
-        "vehicle_cost": sums_by_type.get("Vehicle Cost", 0),
-        "parts_cost": sums_by_type.get("Parts Cost", 0),
-        "maintenance": sums_by_type.get("Maintenance", 0),
-        "auction_fee": sums_by_type.get("Auction Fee", 0),
-        "transportation": sums_by_type.get("Transportation", 0),
-        "labor": sums_by_type.get("Labor", 0),
-        "additional_costs": sums_by_type.get("Additional Costs", 0),
+        "parts_cost": sums_by_type.get("PARTS", 0),
+        "maintenance": sums_by_type.get("MAINTENANCE", 0),
+        "auction_fee": sums_by_type.get("AUCTION_FEE", 0),
+        "transportation": sums_by_type.get("TRANSPORTATION", 0),
+        "labor": sums_by_type.get("LABOR", 0),
+        "additional_costs": sums_by_type.get("ADDITIONAL_COSTS", 0),
     }
 
     await db.execute(update(CarInventoryModel).where(CarInventoryModel.id == inventory_id).values(**update_values))
