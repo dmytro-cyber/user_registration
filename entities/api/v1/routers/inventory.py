@@ -98,6 +98,7 @@ async def read_inventories(
                 profit_margin_percent=inventory.profit_margin_percent,
                 fullname=fullname,
                 total_investments=inventory.total_investments,
+                predicted_profit_margin=inventory.predicted_profit_margin
             )
         )
     return responses

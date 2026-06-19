@@ -325,6 +325,11 @@ class CarInventoryModel(Base):
             + (self.labor or 0)
             + (self.additional_costs or 0)
         )
+    
+    @property
+    def predicted_profit_margin(self) -> float:
+        return self.vehicle_cost - self.total_investments
+
 
     @property
     def roi(self) -> float:
