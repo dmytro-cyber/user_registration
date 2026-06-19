@@ -124,6 +124,10 @@ class CarInventoryInvestmentsUpdate(CarInventoryInvestmentsBase):
     comment: str | None = None
 
 
+class CarInventoryPriceCreate(BaseModel):
+    final_sale_price: float = Field(ge=0)
+
+
 class CarInventoryInvestmentsResponse(CarInventoryInvestmentsBase):
     id: int
     date: datetime

@@ -27,6 +27,7 @@ from crud.inventory import (
     update_part_inventory,
     update_part_status,
     upload_invoice,
+    add_final_sale_price,
 )
 from db.session import get_db
 from models.user import UserModel
@@ -46,6 +47,7 @@ from schemas.inventory import (
     PartInventoryResponse,
     PartInventoryStatusUpdate,
     PartInventoryUpdate,
+    CarInventoryPriceCreate,
 )
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (
@@ -280,6 +282,23 @@ async def delete_investment(
     db_investment = await delete_car_investment(db, investment_id, user_id=str(current_user.id))
     if db_investment is None or db_investment.car_inventory_id != inventory_id:
         raise HTTPException(status_code=404, detail="Investment not found")
+    
+
+@router.post(
+    "/vehicles/{inventory_id}/final-sale-price",
+    status_code=status.HTTP_201_CREATED,
+)
+async def delete_investment(
+    inventory_id: int,
+    price: CarInventoryPriceCreate,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+) -> CarInventoryResponse:
+    
+    db_car = await add_final_sale_price(db, inventory_id, price.final_sale_price)
+    if db_car is None:
+        raise HTTPException(status_code=404, detail="Investment not found")
+    return db_car
 
 
 @router.post("/parts/", response_model=PartInventoryResponse)

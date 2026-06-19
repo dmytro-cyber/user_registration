@@ -398,6 +398,19 @@ async def update_car_investment(
     return db_investment
 
 
+
+async def add_final_sale_price(db: AsyncSession, inventory_id: int, final_sale_price: float):
+    car = await db.execute(select(CarInventoryModel).where(CarInventoryModel.id == inventory_id))
+    if not car:
+        return
+    car.final_sale_price = final_sale_price
+    car.net_profit = final_sale_price - car.total_investments
+    await db.commit()
+    await db.refresh(car)
+    return car
+
+
+
 async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: str = "N/A", request_id: str = "N/A"):
     """
     Delete a specific investment by its ID and log the action in history.
