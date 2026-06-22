@@ -400,7 +400,8 @@ async def update_car_investment(
 
 
 async def add_final_sale_price(db: AsyncSession, inventory_id: int, final_sale_price: float):
-    car = await db.execute(select(CarInventoryModel).where(CarInventoryModel.id == inventory_id))
+    car_res = await db.execute(select(CarInventoryModel).where(CarInventoryModel.id == inventory_id))
+    car = car_res.scalar_one_or_none()
     if not car:
         return
     car.final_sale_price = final_sale_price
