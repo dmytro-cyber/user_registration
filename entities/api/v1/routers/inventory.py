@@ -298,7 +298,7 @@ async def delete_investment(
     db_car = await add_final_sale_price(db, inventory_id, price.final_sale_price)
     if db_car is None:
         raise HTTPException(status_code=404, detail="Investment not found")
-    return db_car
+    return CarInventoryResponse(**db_car.__dict__)
 
 
 @router.post("/parts/", response_model=PartInventoryResponse)
