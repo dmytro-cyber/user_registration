@@ -8,7 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.routers.vehicle import router as vehicles_router
 from models.admin import ROIModel
-from models.vehicle import AutoCheckModel, CarModel, FeeModel, RelevanceStatus
+from models.vehicle import (
+    AutoCheckModel,
+    CarModel,
+    FeeModel,
+    RecommendationStatus,
+    RelevanceStatus,
+)
 
 API_PREFIX = "/api/v1/vehicles"
 
@@ -210,6 +216,34 @@ async def test_update_car_recompute_no_roi(client, db_session, test_user, use_te
     response = await client.patch(f"{API_PREFIX}/cars/{car_row.id}", json={"avg_market_price": 10000.0})
     assert response.status_code == 400
     assert response.json()["detail"] == "Default ROI baseline not found"
+
+
+@pytest.mark.anyio
+async def test_manual_recommendation_is_marked_for_sync_protection(
+    client,
+    db_session,
+    test_user,
+    use_test_user,
+    create_car,
+):
+    car_row = await create_car(
+        vin="MANUALREC00000001",
+        avg_market_price=18_500,
+    )
+
+    response = await client.patch(
+        f"{API_PREFIX}/cars/{car_row.id}",
+        json={
+            "recommendation_status": "recommended",
+            "avg_market_price": 0,
+        },
+    )
+
+    assert response.status_code == 200
+    await db_session.refresh(car_row)
+    assert car_row.recommendation_status == RecommendationStatus.RECOMMENDED
+    assert car_row.recommendation_manually_set is True
+    assert car_row.avg_market_price == 18_500
 
 
 @pytest.mark.anyio

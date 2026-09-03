@@ -5,12 +5,19 @@ import pytest
 from sqlalchemy import desc, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from crud.vehicle import get_filtered_vehicles, save_vehicle_with_photos
+from crud.vehicle import (
+    get_filtered_vehicles,
+    save_vehicle_with_photos,
+    update_cars_relevance,
+    update_vehicle_status,
+)
 from models import Base
 from models.admin import FilterModel
 from models.vehicle import (
     CarModel,
+    CarInventoryModel,
     CarSaleHistoryModel,
+    CarStatus,
     ConditionAssessmentModel,
     PhotoModel,
     RecommendationStatus,
@@ -205,6 +212,60 @@ async def test_filter_by_engine_cylinders(db_session, seeded_cars, patch_orderin
     cars, *_ = await run_vehicle_query(db_session, {"engine_cylinder": ["6", 3, 6]})
     ids = [car.id for car in cars]
     assert set(ids) == {seeded_cars["car_3"].id}
+
+
+async def test_damage_filter_matches_primary_damage_not_secondary(db_session, patch_ordering):
+    import crud.vehicle as filters_module
+    patch_ordering(filters_module)
+
+    common = {
+        "vehicle": "2020 Test Vehicle",
+        "relevance": RelevanceStatus.ACTIVE,
+        "predicted_total_investments": 10_000,
+        "suggested_bid": 8_000,
+        "date": datetime.utcnow(),
+        "auction_name": "COPART",
+        "fuel_type": "Gasoline",
+        "recommendation_status": RecommendationStatus.RECOMMENDED,
+    }
+    front_primary = CarModel(vin="DAMAGE-FRONT-001", **common)
+    rear_primary = CarModel(vin="DAMAGE-REAR-0001", **common)
+    db_session.add_all([front_primary, rear_primary])
+    await db_session.flush()
+    db_session.add_all(
+        [
+            ConditionAssessmentModel(
+                car_id=front_primary.id,
+                type_of_damage="damage_pr",
+                issue_description="FRONT END",
+            ),
+            ConditionAssessmentModel(
+                car_id=front_primary.id,
+                type_of_damage="damage_sec",
+                issue_description="REAR END",
+            ),
+            ConditionAssessmentModel(
+                car_id=rear_primary.id,
+                type_of_damage="Primary",
+                issue_description="REAR END",
+            ),
+            ConditionAssessmentModel(
+                car_id=rear_primary.id,
+                type_of_damage="Secondary",
+                issue_description="FRONT END",
+            ),
+        ]
+    )
+    await db_session.commit()
+
+    cars, *_ = await run_vehicle_query(
+        db_session,
+        {"condition_assessments": ["rear end"]},
+    )
+    vins = {car.vin for car in cars}
+
+    assert rear_primary.vin in vins
+    assert front_primary.vin not in vins
 
 
 async def test_filter_by_mileage_and_profit(db_session, seeded_cars, patch_ordering):
@@ -626,3 +687,86 @@ async def test_existing_sales_history_not_duplicated(db_session):
     got_dates = {h.date.replace(microsecond=0).isoformat() for h in history}
     assert "2024-01-01T00:00:00" in got_dates
     assert "2024-02-01T00:00:00" in got_dates
+
+
+async def test_manual_recommendation_survives_auction_sync(db_session):
+    vin = "VIN-MANUAL-REC-1"
+    car = CarModel(
+        vin=vin,
+        vehicle="2019 Honda Accord",
+        recommendation_status=RecommendationStatus.RECOMMENDED,
+        recommendation_status_reasons="manual review;",
+        is_manually_upserted=False,
+        recommendation_manually_set=True,
+        current_bid=3_000,
+        suggested_bid=5_000,
+        avg_market_price=18_500,
+        relevance=RelevanceStatus.ACTIVE,
+        is_checked=True,
+    )
+    db_session.add(car)
+    await db_session.commit()
+
+    payload = make_schema(vin=vin, current_bid=3_000)
+    should_parse = await save_vehicle_with_photos(payload, "update", db_session)
+    updated = await fetch_car(db_session, vin)
+
+    assert should_parse is False
+    assert updated.recommendation_status == RecommendationStatus.RECOMMENDED
+    assert updated.recommendation_status_reasons == "manual review;"
+    assert updated.avg_market_price == 18_500
+
+
+async def test_marking_won_is_idempotent_and_creates_inventory_once(db_session):
+    car = CarModel(
+        vin="VIN-WON-IDEMPOTENT",
+        vehicle="2021 Toyota Camry",
+        actual_bid=12_000,
+        car_status=CarStatus.BIDDING,
+        relevance=RelevanceStatus.IRRELEVANT,
+    )
+    db_session.add(car)
+    await db_session.commit()
+    await db_session.refresh(car)
+
+    await update_vehicle_status(db_session, car.id, CarStatus.WON)
+    await db_session.commit()
+    await update_vehicle_status(db_session, car.id, CarStatus.WON)
+    await db_session.commit()
+
+    inventories = (
+        await db_session.execute(
+            select(CarInventoryModel).where(CarInventoryModel.car_id == car.id)
+        )
+    ).scalars().all()
+    assert len(inventories) == 1
+    assert car.relevance == RelevanceStatus.ACTIVE
+
+
+async def test_relevance_cleanup_never_removes_won_vehicle(db_session, monkeypatch):
+    import crud.vehicle as vehicle_module
+
+    class _S3:
+        def delete_file(self, _name):
+            raise AssertionError("WON vehicle assets must not be deleted")
+
+    monkeypatch.setattr(vehicle_module, "get_s3_storage_client", lambda: _S3())
+
+    car = CarModel(
+        vin="VIN-WON-CLEANUP-1",
+        vehicle="2022 Mazda 3",
+        lot=123456,
+        auction="Copart",
+        car_status=CarStatus.WON,
+        relevance=RelevanceStatus.IRRELEVANT,
+    )
+    db_session.add(car)
+    await db_session.commit()
+
+    await update_cars_relevance(
+        {"data": [{"site": 1, "lot_id": 123456}]},
+        db_session,
+    )
+
+    preserved = await fetch_car(db_session, car.vin)
+    assert preserved.car_status == CarStatus.WON

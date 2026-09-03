@@ -471,13 +471,24 @@ async def update_car(
     Notes:
     - Keeps original business logic; fixes route, session.get usage, None checks and auction_fee assignment.
     """
-    # Fetch car (proper AsyncSession.get signature)
-    car = await session.get(CarModel, car_id)
+    car = (
+        await session.execute(
+            select(CarModel)
+            .where(CarModel.id == car_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
 
-    # Recompute block if avg_market_price provided
-    if data.avg_market_price is not None:
+    if data.avg_market_price is not None and data.avg_market_price < 0:
+        raise HTTPException(status_code=400, detail="Market Average Price must be greater than zero")
+    if data.avg_market_price == 0 and data.recommendation_status is None:
+        raise HTTPException(status_code=400, detail="Market Average Price must be greater than zero")
+
+    # A status-only UI update may include a zero placeholder. It must not erase
+    # an established valuation; only a positive explicit price refreshes it.
+    if data.avg_market_price is not None and data.avg_market_price > 0:
         # Get most recent ROI row
         roi_stmt = (
             select(ROIModel)
@@ -527,6 +538,9 @@ async def update_car(
     # Optional status update
     if data.recommendation_status is not None:
         car.recommendation_status = data.recommendation_status
+        # Auction synchronization must preserve an explicit human decision.
+        # A later, genuinely disqualifying bid/data change may still replace it.
+        car.recommendation_manually_set = True
 
     await session.commit()
     await session.refresh(car)
@@ -633,6 +647,7 @@ async def update_car_status(
     )
     db.add(hub_history)
     await db.commit()
+    await db.refresh(car)
 
     logger.info(f"Status updated for car with ID: {car_id}", extra=extra)
     return status_data
@@ -660,7 +675,13 @@ async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, d
     """
     logger.debug("Updating car costs for ID %s with data: %s", car_id, car_data.dict(exclude_unset=True))
 
-    db_car = await db.get(CarModel, car_id)
+    db_car = (
+        await db.execute(
+            select(CarModel)
+            .where(CarModel.id == car_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not db_car:
         raise HTTPException(status_code=404, detail=f"Car with ID {car_id} not found")
 
@@ -671,7 +692,8 @@ async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, d
     # Update fields
     for key, value in update_data.items():
         setattr(db_car, key, value)
-    db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
+    if db_car.predicted_total_investments is not None:
+        db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
 
     try:
         await db.commit()

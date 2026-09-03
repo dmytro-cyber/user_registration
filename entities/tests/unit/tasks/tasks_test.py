@@ -276,3 +276,51 @@ def test_sales_history_four_entries_only_verify_invocation_and_effect_flag(
     updated = db_session_sync.query(CarModel).filter_by(vin="VINHIST4").first()
     assert updated.recommendation_status == RecommendationStatus.NOT_RECOMMENDED
     assert "sales at auction in the last 3 years: 4;" in (updated.recommendation_status_reasons or "")
+
+
+def test_partial_market_response_does_not_replace_established_price(
+    patch_task_sessionlocal,
+    patch_task_settings,
+    mock_roi_and_fees,
+    http_router_mock,
+    db_session_sync,
+):
+    car = CarModel(
+        vin="VINPARTIALMARKET",
+        vehicle="Test Vehicle",
+        relevance=RelevanceStatus.ACTIVE,
+        auction="Copart",
+        attempts=1,
+        avg_market_price=20_000,
+        predicted_total_investments=16_000,
+        predicted_profit_margin=2_000,
+        predicted_profit_margin_percent=10,
+        predicted_roi=25,
+        suggested_bid=15_000,
+    )
+    db_session_sync.add(car)
+    db_session_sync.commit()
+
+    class _RespParser(_RespBase):
+        def json(self):
+            return {
+                "owners": 1,
+                "mileage": 100_000,
+                "accident_count": 0,
+                "jd": 15_000,
+                "d_max": None,
+                "manheim": None,
+            }
+
+    http_router_mock(lambda: _RespBase(), lambda: _RespParser())
+
+    from tasks.task import parse_and_update_car
+
+    out = parse_and_update_car(vin=car.vin, mileage=100_000)
+    assert out["status"] == "success"
+
+    updated = db_session_sync.query(CarModel).filter_by(vin=car.vin).first()
+    assert updated.avg_market_price == 20_000
+    assert updated.predicted_total_investments == 16_000
+    assert updated.predicted_profit_margin == 2_000
+    assert updated.suggested_bid == 15_000

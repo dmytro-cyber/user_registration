@@ -64,12 +64,14 @@ def car_to_dict(vehicle: "CarModel") -> dict:
 
 async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings) -> CarBaseSchema:
     """Scrape vehicle data by VIN and save it to the database."""
-    httpx_client = httpx.AsyncClient(timeout=10.0)
-    httpx_client.headers.update({"X-Auth-Token": settings.PARSERS_AUTH_TOKEN})
     try:
-        response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
-        response.raise_for_status()
-        result = CarCreateSchema.model_validate(response.json())
+        async with httpx.AsyncClient(
+            timeout=10.0,
+            headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
+        ) as httpx_client:
+            response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
+            response.raise_for_status()
+            result = CarCreateSchema.model_validate(response.json())
     except httpx.HTTPError as e:
         logger.warning(f"Failed to scrape data for VIN {vin}: {str(e)}")
         raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")
@@ -77,11 +79,10 @@ async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings
         logger.error(f"Failed to validate scraped data for VIN {vin}: {str(e)}")
         raise HTTPException(status_code=422, detail=f"Invalid data from parser: {str(e)}")
 
-    saved = await save_vehicle_with_photos(result, db)
-    # await db.commit()
-    if not saved:
-        logger.warning(f"Vehicle with VIN {vin} already exists in DB")
-        raise HTTPException(status_code=409, detail=f"Vehicle with VIN {vin} already exists")
+    # The boolean returned here means "needs enrichment parsing", not
+    # "insert succeeded". Verify persistence by reading the VIN after the
+    # transactional save instead of treating False as a duplicate/failure.
+    await save_vehicle_with_photos(result, "initial", db)
 
     vehicle = await get_vehicle_by_vin(db, vin, 1)
     if not vehicle:
@@ -182,6 +183,7 @@ async def scrape_and_save_sales_history(vin: str, db: AsyncSession, settings: Se
             logger.info(f"Successfully scraped sales history data {result.sales_history}")
             car = await get_vehicle_by_vin(db, vin, 1)  # Ensure the vehicle exists before saving sales history
             await save_sale_history(result.sales_history, car.id, db)
+            await db.commit()
 
             return car
         except httpx.HTTPError as e:

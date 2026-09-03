@@ -83,10 +83,9 @@ async def create_car_inventory(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Creating car inventory for user {user_id}", extra=extra)
 
-    db_inventory = CarInventoryModel(**inventory.dict(exclude_unset=True))
+    db_inventory = CarInventoryModel(**inventory.dict(exclude_unset=True, exclude={"comment"}))
     db.add(db_inventory)
-    await db.commit()
-    await db.refresh(db_inventory)
+    await db.flush()
 
     # Create a history record
     history = HistoryModel(
@@ -97,6 +96,7 @@ async def create_car_inventory(
     )
     db.add(history)
     await db.commit()
+    await db.refresh(db_inventory)
     logger.info(f"Car inventory with ID {db_inventory.id} created successfully", extra=extra)
     return db_inventory
 
@@ -180,7 +180,13 @@ async def update_car_inventory(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Updating inventory with ID: {inventory_id}", extra=extra)
 
-    db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
+    db_inventory = (
+        await db.execute(
+            select(CarInventoryModel)
+            .where(CarInventoryModel.id == inventory_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if db_inventory:
         update_data = inventory.dict(exclude_unset=True)
         action = "Updated: "
@@ -189,10 +195,7 @@ async def update_car_inventory(
                 action += f"{key} {getattr(db_inventory, key)} -> {value}, "
                 setattr(db_inventory, key, value)
         await update_inventory_financials(db, inventory_id)
-        await db.commit()
-        await db.refresh(db_inventory)
 
-        # Create a history record
         history = HistoryModel(
             action=action,
             user_id=int(user_id),
@@ -201,6 +204,7 @@ async def update_car_inventory(
         )
         db.add(history)
         await db.commit()
+        await db.refresh(db_inventory)
         logger.info(f"Inventory with ID {inventory_id} updated successfully", extra=extra)
     else:
         logger.error(f"Inventory with ID {inventory_id} not found for update", extra=extra)
@@ -223,7 +227,13 @@ async def delete_car_inventory(db: AsyncSession, inventory_id: int, user_id: str
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Deleting inventory with ID: {inventory_id}", extra=extra)
 
-    db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
+    db_inventory = (
+        await db.execute(
+            select(CarInventoryModel)
+            .where(CarInventoryModel.id == inventory_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if db_inventory:
         # Create a history record
         history = HistoryModel(action="Deleted", user_id=int(user_id), car_inventory_id=db_inventory.id)
@@ -321,18 +331,22 @@ async def create_car_investment(
     """
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Creating investment for inventory with ID: {inventory_id}", extra=extra)
+    db_investment = None
 
-    db_inventory = await get_car_inventory(db, inventory_id, user_id, request_id)
+    db_inventory = (
+        await db.execute(
+            select(CarInventoryModel)
+            .where(CarInventoryModel.id == inventory_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if db_inventory:
         data = investment.dict(exclude={"comment"})
         db_investment = CarInventoryInvestmentsModel(**data, car_inventory_id=inventory_id)
         db.add(db_investment)
+        await db.flush()
         await update_inventory_financials(db, inventory_id)
-        await db.commit()
-        await db.refresh(db_inventory)
-        await db.refresh(db_investment)
 
-        # Create a history record
         history = HistoryModel(
             action=f"Added investment type {investment.investment_type}",
             user_id=int(user_id),
@@ -341,6 +355,8 @@ async def create_car_investment(
         )
         db.add(history)
         await db.commit()
+        await db.refresh(db_inventory)
+        await db.refresh(db_investment)
         logger.info(f"Investment created for inventory with ID: {inventory_id}", extra=extra)
     else:
         logger.error(
@@ -373,17 +389,21 @@ async def update_car_investment(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Updating investment with ID: {investment_id}", extra=extra)
 
-    db_investment = await get_car_investment(db, investment_id, user_id, request_id)
+    db_investment = (
+        await db.execute(
+            select(CarInventoryInvestmentsModel)
+            .options(selectinload(CarInventoryInvestmentsModel.car_inventory))
+            .where(CarInventoryInvestmentsModel.id == investment_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if db_investment:
         update_data = investment.dict(exclude_unset=True, exclude={"comment"})
         for key, value in update_data.items():
             setattr(db_investment, key, value)
-        await db.commit()
-        await db.refresh(db_investment)
+        await db.flush()
         await update_inventory_financials(db, db_investment.car_inventory_id)
-        await db.commit()
 
-        # Create a history record
         history = HistoryModel(
             action=f"Updated investment type {db_investment.investment_type}",
             user_id=int(user_id),
@@ -392,6 +412,7 @@ async def update_car_investment(
         )
         db.add(history)
         await db.commit()
+        await db.refresh(db_investment)
         logger.info(f"Investment with ID {investment_id} updated successfully", extra=extra)
     else:
         logger.error(f"Investment with ID {investment_id} not found for update", extra=extra)
@@ -400,7 +421,11 @@ async def update_car_investment(
 
 
 async def add_final_sale_price(db: AsyncSession, inventory_id: int, final_sale_price: float):
-    car_res = await db.execute(select(CarInventoryModel).where(CarInventoryModel.id == inventory_id))
+    car_res = await db.execute(
+        select(CarInventoryModel)
+        .where(CarInventoryModel.id == inventory_id)
+        .with_for_update()
+    )
     car = car_res.scalar_one_or_none()
     if not car:
         return
@@ -473,10 +498,9 @@ async def create_part_inventory(db: AsyncSession, part: PartInventoryCreate, use
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Creating part inventory for user {user_id}", extra=extra)
 
-    db_part = PartInventoryModel(**part.dict(exclude_unset=True))
+    db_part = PartInventoryModel(**part.dict(exclude_unset=True, exclude={"comment"}))
     db.add(db_part)
-    await db.commit()
-    await db.refresh(db_part)
+    await db.flush()
 
     # Create a history record
     history = HistoryModel(
@@ -487,6 +511,7 @@ async def create_part_inventory(db: AsyncSession, part: PartInventoryCreate, use
     )
     db.add(history)
     await db.commit()
+    await db.refresh(db_part)
     logger.info(f"Part inventory with ID {db_part.id} created successfully", extra=extra)
     return db_part
 
@@ -572,19 +597,25 @@ async def update_part_inventory(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Updating part inventory with ID: {part_id}", extra=extra)
 
-    db_part = await get_part_inventory(db, part_id, user_id, request_id)
+    db_part = (
+        await db.execute(
+            select(PartInventoryModel)
+            .options(
+                selectinload(PartInventoryModel.history).selectinload(HistoryModel.user),
+                selectinload(PartInventoryModel.invoices),
+            )
+            .where(PartInventoryModel.id == part_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not db_part:
         logger.error(f"Part inventory with ID {part_id} not found for update", extra=extra)
         return None
 
-    update_data = part.dict(exclude_unset=True)
+    update_data = part.dict(exclude_unset=True, exclude={"comment"})
     for key, value in update_data.items():
         setattr(db_part, key, value)
 
-    await db.commit()
-    await db.refresh(db_part)
-
-    # Create a history record
     history = HistoryModel(
         action="Updated",
         user_id=int(user_id),
@@ -593,6 +624,7 @@ async def update_part_inventory(
     )
     db.add(history)
     await db.commit()
+    await db.refresh(db_part)
     logger.info(f"Part inventory with ID {part_id} updated successfully", extra=extra)
     return db_part
 
@@ -613,7 +645,17 @@ async def delete_part_inventory(db: AsyncSession, part_id: int, user_id: str, re
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Deleting part inventory with ID: {part_id}", extra=extra)
 
-    db_part = await get_part_inventory(db, part_id, user_id, request_id)
+    db_part = (
+        await db.execute(
+            select(PartInventoryModel)
+            .options(
+                selectinload(PartInventoryModel.history).selectinload(HistoryModel.user),
+                selectinload(PartInventoryModel.invoices),
+            )
+            .where(PartInventoryModel.id == part_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not db_part:
         logger.error(f"Part inventory with ID {part_id} not found for deletion", extra=extra)
         return None
@@ -652,15 +694,23 @@ async def update_part_status(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Updating status for part inventory with ID: {part_id}", extra=extra)
 
-    db_part = await get_part_inventory(db, part_id, user_id, request_id)
+    db_part = (
+        await db.execute(
+            select(PartInventoryModel)
+            .options(
+                selectinload(PartInventoryModel.history).selectinload(HistoryModel.user),
+                selectinload(PartInventoryModel.invoices),
+            )
+            .where(PartInventoryModel.id == part_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not db_part:
         logger.error(f"Part inventory with ID {part_id} not found for status update", extra=extra)
         return None
 
     previous_status = db_part.part_status
     db_part.part_status = status_update.part_status
-    await db.commit()
-    await db.refresh(db_part)
 
     history = HistoryModel(
         action=f"Status changed from {previous_status.value} to {status_update.part_status.value}",
@@ -670,6 +720,7 @@ async def update_part_status(
     )
     db.add(history)
     await db.commit()
+    await db.refresh(db_part)
     logger.info(f"Status for part inventory with ID {part_id} updated successfully", extra=extra)
     return db_part
 

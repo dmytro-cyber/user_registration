@@ -67,6 +67,12 @@ class CarModel(Base):
     attempts = Column(Integer, nullable=False, default=0, server_default="0")
     is_checked = Column(Boolean, default=False)
     is_manually_upserted = Column(Boolean, default=False)
+    recommendation_manually_set = Column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default="false",
+    )
 
     # Additional costs
     parts_cost = Column(Float, nullable=True)

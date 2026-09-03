@@ -18,7 +18,7 @@ from core.celery_config import app as celery_app
 from core.dependencies import get_current_user, get_settings, get_token
 from db.session import get_db
 from models.admin import FilterModel, ROIModel
-from models.vehicle import CarModel, FeeModel, RelevanceStatus
+from models.vehicle import CarModel, CarStatus, FeeModel, RelevanceStatus
 from models.filter_kickoff_queue import (
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
@@ -269,12 +269,20 @@ async def update_filter_and_relevance(
     if to_irrelevant:
         await db.execute(
             update(CarModel)
-            .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ACTIVE)
+            .where(
+                CarModel.id.in_(to_irrelevant),
+                CarModel.relevance == RelevanceStatus.ACTIVE,
+                CarModel.car_status != CarStatus.WON,
+            )
             .values(relevance=RelevanceStatus.IRRELEVANT)
         )
         await db.execute(
             delete(CarModel)
-            .where(CarModel.id.in_(to_irrelevant), CarModel.relevance == RelevanceStatus.ARCHIVAL)
+            .where(
+                CarModel.id.in_(to_irrelevant),
+                CarModel.relevance == RelevanceStatus.ARCHIVAL,
+                CarModel.car_status != CarStatus.WON,
+            )
         )
 
     await db.commit()
@@ -325,7 +333,11 @@ async def delete_filter(
         )
 
         archived_query = select(CarModel.id).where(
-            and_(base_filter, CarModel.relevance == RelevanceStatus.ARCHIVAL)
+            and_(
+                base_filter,
+                CarModel.relevance == RelevanceStatus.ARCHIVAL,
+                CarModel.car_status != CarStatus.WON,
+            )
         )
         archived_ids = (await db.execute(archived_query)).scalars().all()
 
@@ -333,7 +345,11 @@ async def delete_filter(
             await db.execute(delete(CarModel).where(CarModel.id.in_(archived_ids)))
 
         active_query = select(CarModel.id).where(
-            and_(base_filter, CarModel.relevance == RelevanceStatus.ACTIVE)
+            and_(
+                base_filter,
+                CarModel.relevance == RelevanceStatus.ACTIVE,
+                CarModel.car_status != CarStatus.WON,
+            )
         )
         active_ids = (await db.execute(active_query)).scalars().all()
 
