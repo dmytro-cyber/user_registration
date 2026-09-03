@@ -1038,46 +1038,67 @@ async def upsert(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ):
-    res, message = await upsert_vehicle(vehicle_data=vehicle_data, db=db)
+    res, message, should_parse = await upsert_vehicle(
+        vehicle_data=vehicle_data,
+        db=db,
+    )
 
     if not res:
-        raise HTTPException(status_code=500, detail=message)
+        raise HTTPException(
+            status_code=500,
+            detail=message,
+        )
 
     task_id = None
 
-    try:
+    if should_parse:
+        try:
+            logger.info(
+                "Trying to send Celery task "
+                "parse_and_update_car | vin=%s",
+                vehicle_data.vin,
+            )
+
+            task_result = celery_app.send_task(
+                "tasks.task.parse_and_update_car",
+                kwargs={
+                    "vin": vehicle_data.vin,
+                    "car_name": vehicle_data.vehicle,
+                    "car_engine": vehicle_data.engine_title,
+                    "mileage": vehicle_data.mileage,
+                    "car_make": vehicle_data.make,
+                    "car_model": vehicle_data.model,
+                    "car_year": vehicle_data.year,
+                    "car_transmison": vehicle_data.transmision,
+                },
+                queue="car_parsing_queue",
+            )
+
+            task_id = getattr(
+                task_result,
+                "id",
+                None,
+            )
+
+            logger.info(
+                "Celery task sent successfully | "
+                "vin=%s task_id=%s",
+                vehicle_data.vin,
+                task_id,
+            )
+
+        except Exception:
+            logger.exception(
+                "Celery send failed but vehicle saved | vin=%s",
+                vehicle_data.vin,
+            )
+
+    else:
         logger.info(
-            "Trying to send Celery task parse_and_update_car | vin=%s",
-            vehicle_data.vin
-        )
-
-        task_result = celery_app.send_task(
-            "tasks.task.parse_and_update_car",
-            kwargs={
-                "vin": vehicle_data.vin,
-                "car_name": vehicle_data.vehicle,
-                "car_engine": vehicle_data.engine_title,
-                "mileage": vehicle_data.mileage,
-                "car_make": vehicle_data.make,
-                "car_model": vehicle_data.model,
-                "car_year": vehicle_data.year,
-                "car_transmison": vehicle_data.transmision,
-            },
-            queue="car_parsing_queue",
-        )
-
-        task_id = getattr(task_result, "id", None)
-
-        logger.info(
-            "Celery task sent successfully | vin=%s task_id=%s",
+            "Celery parsing skipped | "
+            "vin=%s already checked and "
+            "parser fields unchanged",
             vehicle_data.vin,
-            task_id,
-        )
-
-    except Exception:
-        logger.exception(
-            "Celery send failed but vehicle saved | vin=%s",
-            vehicle_data.vin
         )
 
     return {

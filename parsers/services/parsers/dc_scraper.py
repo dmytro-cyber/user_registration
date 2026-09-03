@@ -511,8 +511,7 @@ class DealerCenterScraper:
 
     # ----------------------- parsing & API helpers ---------------------
 
-    @staticmethod
-    def _parse_history(html_data: str, fallback_odometer: Optional[int]) -> dict:
+    def _parse_history(self, html_data: str, fallback_odometer: Optional[int]) -> dict:
         """
         Extract owners, odometer and accident count from the AutoCheck HTML.
         """
@@ -536,16 +535,42 @@ class DealerCenterScraper:
 
         # accidents
         acc_cnt = 0
+
         try:
-            tables = soup.find_all("table", class_="table table-striped")
+            tables = soup.find_all(
+                "table",
+                class_="table table-striped",
+            )
+
             for table in tables:
-                if "Damage Type" in table.get_text():
-                    rows = table.find_all("tr")
-                    damage_rows = [row for row in rows if len(row.find_all("td")) >= 3]
-                    acc_cnt = len(damage_rows)
-                    break
+                if "Damage Type" not in table.get_text():
+                    continue
+
+                accident_dates = set()
+
+                for row in table.find_all("tr"):
+                    cells = row.find_all("td")
+
+                    if len(cells) < 3:
+                        continue
+
+                    damage_date = cells[0].get_text(
+                        " ",
+                        strip=True,
+                    )
+
+                    if damage_date:
+                        accident_dates.add(damage_date)
+
+                acc_cnt = len(accident_dates)
+                break
+
         except Exception as e:
-            logging.warning(f"Failed to extract accidents: {e}, defaulting to 0")
+            logging.warning(
+                "Failed to extract accidents for vin=%s: %s",
+                self.vin,
+                e,
+            )
 
         return {
             "owners": owners_val,

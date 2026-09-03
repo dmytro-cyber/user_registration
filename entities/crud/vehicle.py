@@ -1375,11 +1375,18 @@ async def bulk_save_vehicles(
                 if v.current_bid is not None:
                     minimal_data["current_bid"] = v.current_bid
 
-                    if (
-                        existing.suggested_bid is not None
-                        and v.current_bid > existing.suggested_bid
-                    ):
-                        add_reason_once(reasons, "BID_GT_SUGGESTED")
+                bid_limit = (
+                    existing.actual_bid
+                    if existing.actual_bid is not None
+                    else existing.suggested_bid
+                )
+
+                if (
+                        v.current_bid is not None
+                        and bid_limit is not None
+                        and v.current_bid > bid_limit
+                ):
+                    add_reason_once(reasons, "BID_GT_SUGGESTED")
 
                 minimal_data.update(build_recommendation_fields(reasons))
                 car_rows.append(build_row(minimal_data, existing))
@@ -1418,10 +1425,16 @@ async def bulk_save_vehicles(
                     if a.issue_description in bad_condition_values:
                         add_reason_once(reasons, a.issue_description)
 
+            bid_limit = (
+                existing.actual_bid
+                if existing.actual_bid is not None
+                else existing.suggested_bid
+            )
+
             if (
-                v.current_bid is not None
-                and existing.suggested_bid is not None
-                and v.current_bid > existing.suggested_bid
+                    v.current_bid is not None
+                    and bid_limit is not None
+                    and v.current_bid > bid_limit
             ):
                 add_reason_once(reasons, "BID_GT_SUGGESTED")
 
@@ -1745,34 +1758,35 @@ def _model_to_dict(model) -> Dict[str, Any]:
         for column in model.__table__.columns
     }
 
+PARSER_RELEVANT_FIELDS = {
+    "vehicle",
+    "engine_title",
+    "mileage",
+    "make",
+    "model",
+    "year",
+    "transmision",
+}
 
-def _model_to_dict(model) -> Dict[str, Any]:
-    """
-    Convert SQLAlchemy model instance to dict.
-    Only includes table columns (без relationships).
-    """
-    return {
-        column.name: _serialize(getattr(model, column.name))
-        for column in model.__table__.columns
-    }
 
 async def upsert_vehicle(
     vehicle_data: CarUpsertSchema,
-    db: AsyncSession
-) -> Tuple[bool, str]:
+    db: AsyncSession,
+) -> Tuple[bool, str, bool]:
 
-    # safe lower
     if vehicle_data.auction:
         vehicle_data.auction = vehicle_data.auction.lower()
 
     try:
         existing_vehicle = await get_vehicle_by_vin_for_upsert(
-            db, vehicle_data.vin
+            db,
+            vehicle_data.vin,
         )
 
         # =====================================================
-        # NORMALIZE MAKE / MODEL (SAFE + FALLBACK)
+        # NORMALIZE MAKE / MODEL
         # =====================================================
+
         make_data = None
         incoming_make = vehicle_data.make
         incoming_model = vehicle_data.model
@@ -1782,16 +1796,21 @@ async def upsert_vehicle(
             make_data = MAKES_AND_MODELS.get(make_key)
 
             if make_data:
-                incoming_make = make_data.get("original", incoming_make)
+                incoming_make = make_data.get(
+                    "original",
+                    incoming_make,
+                )
 
                 if incoming_model:
                     model_key = incoming_model.strip().lower()
-                    model_original = make_data.get("models", {}).get(model_key)
+                    model_original = make_data.get(
+                        "models",
+                        {},
+                    ).get(model_key)
 
                     if model_original:
                         incoming_model = model_original
 
-        # fallback to existing if missing
         if existing_vehicle:
             if not incoming_make:
                 incoming_make = existing_vehicle.make
@@ -1805,116 +1824,237 @@ async def upsert_vehicle(
         # =====================================================
         # NORMALIZE OTHER FIELDS
         # =====================================================
+
         if vehicle_data.fuel_type:
-            vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
+            vehicle_data.fuel_type = norm(
+                vehicle_data.fuel_type
+            )
 
         if vehicle_data.transmision:
-            vehicle_data.transmision = norm(vehicle_data.transmision)
+            vehicle_data.transmision = norm(
+                vehicle_data.transmision
+            )
 
-        # ========================
+        # =====================================================
         # UPDATE EXISTING
-        # ========================
+        # =====================================================
+
         if existing_vehicle:
 
-            before_snapshot = _model_to_dict(existing_vehicle)
+            before_snapshot = _model_to_dict(
+                existing_vehicle
+            )
 
-            existing_vehicle.relevance = RelevanceStatus.ACTIVE
-            existing_vehicle.is_checked = False
-            existing_vehicle.attempts = 0
-            existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
-            existing_vehicle.recommendation_status_reasons = None
+            incoming_data = vehicle_data.dict(
+                exclude={
+                    "photos",
+                    "photos_hd",
+                    "condition_assessments",
+                }
+            )
+
+            should_parse = not bool(
+                existing_vehicle.is_checked
+            )
+
+            if existing_vehicle.is_checked:
+
+                for field in PARSER_RELEVANT_FIELDS:
+
+                    new_value = incoming_data.get(field)
+
+                    if new_value is None:
+                        continue
+
+                    old_value = getattr(
+                        existing_vehicle,
+                        field,
+                        None,
+                    )
+
+                    if new_value != old_value:
+                        should_parse = True
+
+                        logger.info(
+                            "Parser relevant field changed | "
+                            "vin=%s field=%s old=%r new=%r",
+                            vehicle_data.vin,
+                            field,
+                            old_value,
+                            new_value,
+                        )
+
+                        break
+
+            existing_vehicle.relevance = (
+                RelevanceStatus.ACTIVE
+            )
+
             existing_vehicle.is_manually_upserted = True
 
-            for field, value in vehicle_data.dict(
-                exclude={"photos", "photos_hd", "condition_assessments"}
-            ).items():
+            # Скидаємо parser state ТІЛЬКИ якщо
+            # реально буде повторний parsing.
+            if should_parse:
+                existing_vehicle.is_checked = False
+                existing_vehicle.attempts = 0
+
+            for field, value in incoming_data.items():
 
                 if value is not None or field == "date":
-                    setattr(existing_vehicle, field, value)
+                    setattr(
+                        existing_vehicle,
+                        field,
+                        value,
+                    )
 
-            _apply_recommendation_rules(existing_vehicle)
+            _apply_recommendation_rules(
+                existing_vehicle
+            )
 
             await db.execute(
-                delete(ConditionAssessmentModel).where(
-                    ConditionAssessmentModel.car_id == existing_vehicle.id
+                delete(
+                    ConditionAssessmentModel
+                ).where(
+                    ConditionAssessmentModel.car_id
+                    == existing_vehicle.id
                 )
             )
+
             await db.flush()
 
             if vehicle_data.condition_assessments:
-                for assessment in vehicle_data.condition_assessments:
-                    if assessment.type_of_damage and assessment.issue_description:
+
+                for assessment in (
+                    vehicle_data.condition_assessments
+                ):
+
+                    if (
+                        assessment.type_of_damage
+                        and assessment.issue_description
+                    ):
+
                         db.add(
                             ConditionAssessmentModel(
-                                type_of_damage=assessment.type_of_damage,
-                                issue_description=assessment.issue_description,
+                                type_of_damage=(
+                                    assessment.type_of_damage
+                                ),
+                                issue_description=(
+                                    assessment.issue_description
+                                ),
                                 car_id=existing_vehicle.id,
                             )
                         )
+
                         _apply_damage_rules(
                             existing_vehicle,
-                            assessment.issue_description
+                            assessment.issue_description,
                         )
 
             await db.flush()
 
-            await log_car_update(before_snapshot, existing_vehicle)
+            await log_car_update(
+                before_snapshot,
+                existing_vehicle,
+            )
 
             await db.commit()
 
-            return True, "success"
+            return True, "success", should_parse
 
-        # ========================
+        # =====================================================
         # CREATE NEW
-        # ========================
+        # =====================================================
+
         vehicle = CarModel(
             **vehicle_data.dict(
-                exclude={"photos", "photos_hd", "condition_assessments"}
+                exclude={
+                    "photos",
+                    "photos_hd",
+                    "condition_assessments",
+                }
             )
         )
 
         vehicle.is_manually_upserted = True
         vehicle.relevance = RelevanceStatus.ACTIVE
 
+        vehicle.is_checked = False
+        vehicle.attempts = 0
+
         db.add(vehicle)
+
         await db.flush()
 
         _apply_recommendation_rules(vehicle)
 
         if vehicle_data.condition_assessments:
-            for assessment in vehicle_data.condition_assessments:
-                if assessment.issue_description and assessment.type_of_damage:
+
+            for assessment in (
+                vehicle_data.condition_assessments
+            ):
+
+                if (
+                    assessment.issue_description
+                    and assessment.type_of_damage
+                ):
+
                     db.add(
                         ConditionAssessmentModel(
-                            type_of_damage=assessment.type_of_damage,
-                            issue_description=assessment.issue_description,
+                            type_of_damage=(
+                                assessment.type_of_damage
+                            ),
+                            issue_description=(
+                                assessment.issue_description
+                            ),
                             car_id=vehicle.id,
                         )
                     )
-                    _apply_damage_rules(vehicle, assessment.issue_description)
+
+                    _apply_damage_rules(
+                        vehicle,
+                        assessment.issue_description,
+                    )
 
         if vehicle_data.photos:
             db.add_all([
-                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False)
+                PhotoModel(
+                    url=p.url,
+                    car_id=vehicle.id,
+                    is_hd=False,
+                )
                 for p in vehicle_data.photos
             ])
 
         if vehicle_data.photos_hd:
             db.add_all([
-                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True)
+                PhotoModel(
+                    url=p.url,
+                    car_id=vehicle.id,
+                    is_hd=True,
+                )
                 for p in vehicle_data.photos_hd
             ])
 
         await db.commit()
 
-        return True, "success"
+        return True, "success", True
 
     except IntegrityError as e:
         await db.rollback()
-        logger.exception("IntegrityError | vin=%s", vehicle_data.vin)
-        return False, str(e)
+
+        logger.exception(
+            "IntegrityError | vin=%s",
+            vehicle_data.vin,
+        )
+
+        return False, str(e), False
 
     except Exception as e:
         await db.rollback()
-        logger.exception("Unexpected error | vin=%s", vehicle_data.vin)
-        return False, str(e)
+
+        logger.exception(
+            "Unexpected error | vin=%s",
+            vehicle_data.vin,
+        )
+
+        return False, str(e), False
