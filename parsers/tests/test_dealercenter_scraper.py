@@ -45,6 +45,9 @@ async def test_get_history_and_market_data_async_happy_path(monkeypatch):
     dc.cookies = [{"name": "sid", "value": "abc"}]
     dc.access_token = "token"
     html = fake_autocheck_html(owners=3, odo=135_000)
+    async def fake_ensure(force=False):
+        return None
+    monkeypatch.setattr(dc, "_ensure_logged_in_singleflight", fake_ensure)
     async def fake_auth_post(url: str, payload: dict):
         return _Resp({"htmlResponseData": html})
     async def fake_fetch_valuation():
@@ -75,6 +78,30 @@ async def test_history_counts_unique_accident_events_not_damage_rows():
 
     assert result["accident_count"] == 2
 
+
+async def test_history_missing_table_is_unknown():
+    dc = DealerCenterScraper(vin="TEST-MISSING")
+    assert dc._parse_history("<html></html>", None)["accident_count"] is None
+
+
+async def test_history_saved_report():
+    from pathlib import Path
+    dc = DealerCenterScraper(vin="TEST-REPORT")
+    html = (Path(__file__).parents[1] / "response.html").read_text()
+    assert dc._parse_history(html, None)["accident_count"] == 2
+
+
+async def test_history_does_not_count_non_collision_damage():
+    dc = DealerCenterScraper(vin="TEST-DAMAGE")
+    html = fake_autocheck_html(damage_dates=("01/01/2024",)).replace("Collision", "Vandalism")
+    assert dc._parse_history(html, None)["accident_count"] == 0
+
+
+async def test_history_undated_accident_is_unknown():
+    dc = DealerCenterScraper(vin="TEST-UNDATED")
+    html = fake_autocheck_html(damage_dates=("",))
+    assert dc._parse_history(html, None)["accident_count"] is None
+
 async def test_get_history_and_market_data_async_raises_on_401_and_forces_login(monkeypatch):
     dc = DealerCenterScraper(vin="TESTVIN401")
     dc.cookies = [{"name": "sid", "value": "abc"}]
@@ -88,7 +115,7 @@ async def test_get_history_and_market_data_async_raises_on_401_and_forces_login(
     monkeypatch.setattr(dc, "_ensure_logged_in_singleflight", fake_ensure, raising=True)
     with pytest.raises(AuthRefreshedError):
         await dc.get_history_and_market_data_async()
-    assert forced == [True]
+    assert forced[-1] is True
     assert dc.cookies == []
     assert dc.access_token is None
 

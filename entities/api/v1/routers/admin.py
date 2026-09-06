@@ -342,7 +342,9 @@ async def delete_filter(
         archived_ids = (await db.execute(archived_query)).scalars().all()
 
         if archived_ids:
-            await db.execute(delete(CarModel).where(CarModel.id.in_(archived_ids)))
+            await db.execute(delete(CarModel).where(
+                CarModel.id.in_(archived_ids), CarModel.car_status != CarStatus.WON,
+            ))
 
         active_query = select(CarModel.id).where(
             and_(
@@ -356,7 +358,7 @@ async def delete_filter(
         if active_ids:
             await db.execute(
                 update(CarModel)
-                .where(CarModel.id.in_(active_ids))
+                .where(CarModel.id.in_(active_ids), CarModel.car_status != CarStatus.WON)
                 .values(relevance=RelevanceStatus.IRRELEVANT)
             )
 

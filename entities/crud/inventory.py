@@ -389,14 +389,7 @@ async def update_car_investment(
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Updating investment with ID: {investment_id}", extra=extra)
 
-    db_investment = (
-        await db.execute(
-            select(CarInventoryInvestmentsModel)
-            .options(selectinload(CarInventoryInvestmentsModel.car_inventory))
-            .where(CarInventoryInvestmentsModel.id == investment_id)
-            .with_for_update()
-        )
-    ).scalars().first()
+    db_investment = await _lock_inventory_investment(db, investment_id)
     if db_investment:
         update_data = investment.dict(exclude_unset=True, exclude={"comment"})
         for key, value in update_data.items():
@@ -453,7 +446,7 @@ async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: s
     extra = {"request_id": request_id, "user_id": user_id}
     logger.info(f"Deleting investment with ID: {investment_id}", extra=extra)
 
-    db_investment = await get_car_investment(db, investment_id, user_id, request_id)
+    db_investment = await _lock_inventory_investment(db, investment_id)
     if db_investment:
         inventory = db_investment.car_inventory
         car_inventory_id = db_investment.car_inventory_id
@@ -465,18 +458,42 @@ async def delete_car_investment(db: AsyncSession, investment_id: int, user_id: s
             car_inventory_id=car_inventory_id,
         )
         db.add(history)
-        await db.commit()
-
         await db.delete(db_investment)
-        await db.commit()
+        await db.flush()
         if inventory:
             await update_inventory_financials(db, car_inventory_id)
-            await db.commit()
+        await db.commit()
+        if inventory:
             await db.refresh(inventory)
         logger.info(f"Investment with ID {investment_id} deleted successfully", extra=extra)
     else:
         logger.error(f"Investment with ID {investment_id} not found for deletion", extra=extra)
     return db_investment
+
+
+async def _lock_inventory_investment(db: AsyncSession, investment_id: int):
+    """Serialize all investment mutations on the parent before locking a child."""
+    parent_id = await db.scalar(
+        select(CarInventoryInvestmentsModel.car_inventory_id)
+        .where(CarInventoryInvestmentsModel.id == investment_id)
+    )
+    if parent_id is None:
+        return None
+    parent = await db.scalar(
+        select(CarInventoryModel)
+        .where(CarInventoryModel.id == parent_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if parent is None:
+        return None
+    return await db.scalar(
+        select(CarInventoryInvestmentsModel)
+        .where(CarInventoryInvestmentsModel.id == investment_id)
+        .options(selectinload(CarInventoryInvestmentsModel.car_inventory))
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 # --- PartInventory CRUD Operations ---

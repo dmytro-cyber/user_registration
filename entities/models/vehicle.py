@@ -1,6 +1,6 @@
 import enum
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Index, Integer, String, JSON
 from sqlalchemy.orm import relationship, validates
 from sqlalchemy.sql import func
 
@@ -61,6 +61,7 @@ class CarModel(Base):
     price_sold = Column(Float, nullable=True)
     suggested_bid = Column(Float, nullable=True)
     avg_market_price = Column(Integer, nullable=True)
+    market_price_sources = Column(JSON, nullable=True)
     fuel_type = Column(String, nullable=True)
 
     # Additional

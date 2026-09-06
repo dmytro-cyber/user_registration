@@ -747,6 +747,15 @@ async def get_filtered_vehicles(
                 )
             )
         )
+        if not normalized_conditions.intersection({"front end", "front-end"}):
+            base_ids = base_ids.filter(~exists(
+                select(1).select_from(ConditionAssessmentModel).where(
+                    (ConditionAssessmentModel.car_id == CarModel.id)
+                    & func.lower(func.trim(ConditionAssessmentModel.issue_description)).in_(
+                        ("front end", "front-end")
+                    )
+                )
+            ))
     else:
         default_excluded = ["Biohazard/Chemical", "Water/Flood", "Rejected Repair"]
         base_ids = base_ids.filter(
@@ -1096,9 +1105,6 @@ async def update_vehicle_status(
             await db.flush()
         else:
             car_inventory_model = existing_inventory
-            car_inventory_model.vehicle = car.vehicle
-            car_inventory_model.vin = car.vin
-            car_inventory_model.vehicle_cost = car.actual_bid
 
         result = await db.execute(select(HistoryModel).where(HistoryModel.car_id == car_id))
         for history in result.scalars().all():
@@ -1271,18 +1277,18 @@ async def bulk_save_vehicles(
     payload: CarBulkCreateSchema,
 ) -> Dict[str, Any]:
     """
-    Bulk-save vehicles with short transactions.
+    Bulk-save one caller-sized batch atomically.
 
     Strategy:
     1. Prepare all rows in memory.
-    2. Transaction #1: upsert only cars.
-    3. Transaction #2: replace condition assessments.
-    4. Transaction #3: insert photos.
+    2. Lock existing cars in id order and upsert cars.
+    3. Replace condition assessments while holding the parent locks.
+    4. Insert photos and commit the batch.
     5. Return celery payload for follow-up parsing.
 
     Important:
     - Bulk updater must not overwrite parse-derived fields.
-    - Transactions are intentionally short to reduce lock contention.
+    - Callers must keep batches bounded to respect PostgreSQL bind limits.
     """
 
     # ============================================================
@@ -1355,11 +1361,15 @@ async def bulk_save_vehicles(
 
     # ============================================================
     # EXISTING VEHICLES + FILTERS
-    # Read-only stage, no transaction pressure here.
+    # Lock before reading snapshots so user edits cannot be rolled back.
     # ============================================================
+    await apply_tx_timeouts(db)
     existing_result = await db.execute(
         select(CarModel)
         .where(CarModel.vin.in_(vins))
+        .order_by(CarModel.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
         .options(
             selectinload(CarModel.photos),
             selectinload(CarModel.sales_history),
@@ -1384,6 +1394,16 @@ async def bulk_save_vehicles(
     # Fields that must NOT be overwritten by the bulk import.
     # These are owned by parse/enrichment flow.
     EXCLUDED_FROM_BULK_UPDATE = {
+        "car_status",
+        "actual_bid",
+        "roi",
+        "profit_margin",
+        "parts_cost",
+        "maintenance",
+        "transportation",
+        "labor",
+        "parts_needed",
+        "is_manually_upserted",
         "attempts",
         "is_checked",
         "has_correct_vin",
@@ -1393,6 +1413,7 @@ async def bulk_save_vehicles(
         "owners",
         "accident_count",
         "avg_market_price",
+        "market_price_sources",
         "predicted_total_investments",
         "predicted_profit_margin_percent",
         "predicted_profit_margin",
@@ -1736,8 +1757,7 @@ async def bulk_save_vehicles(
         }
 
     # ============================================================
-    # TRANSACTION #1 — BULK UPSERT CARS
-    # Keep this transaction as short as possible.
+    # BULK UPSERT CARS — retain locks until child data is saved.
     # ============================================================
     await apply_tx_timeouts(db)
 
@@ -1758,6 +1778,9 @@ async def bulk_save_vehicles(
         stmt.on_conflict_do_update(
             index_elements=[CarModel.vin],
             set_=update_dict,
+            # A row created concurrently was not part of our locked snapshot.
+            # Leave its user-owned state and child records to its creator.
+            where=CarModel.id.in_([car.id for car in existing_map.values()]),
         )
         .returning(CarModel.id, CarModel.vin)
     )
@@ -1766,13 +1789,13 @@ async def bulk_save_vehicles(
     rows = result.fetchall()
     vin_to_id: Dict[str, int] = {r.vin: r.id for r in rows}
 
-    await db.commit()
-
     # ============================================================
-    # TRANSACTION #2 — REPLACE CONDITION ASSESSMENTS
-    # Separate transaction to avoid long row locks on cars.
+    # REPLACE CONDITION ASSESSMENTS — same transaction as parent rows.
     # ============================================================
-    car_ids = list(vin_to_id.values())
+    car_ids = [
+        car_id for vin, car_id in vin_to_id.items()
+        if vin not in existing_map or not existing_map[vin].is_manually_upserted
+    ]
 
     if car_ids:
         await apply_tx_timeouts(db)
@@ -1800,10 +1823,8 @@ async def bulk_save_vehicles(
             if cond_rows:
                 await db.execute(insert(ConditionAssessmentModel), cond_rows)
 
-        await db.commit()
-
     # ============================================================
-    # TRANSACTION #3 — INSERT PHOTOS
+    # INSERT PHOTOS
     # Insert only new photos that we detected earlier.
     # ============================================================
     if photos_insert:
@@ -1833,7 +1854,7 @@ async def bulk_save_vehicles(
         if photo_rows:
             await db.execute(insert(PhotoModel), photo_rows)
 
-        await db.commit()
+    await db.commit()
 
     return {
         "celery_tasks": celery_payload,

@@ -219,23 +219,30 @@ async def test_update_car_recompute_no_roi(client, db_session, test_user, use_te
 
 
 @pytest.mark.anyio
+@pytest.mark.parametrize("submitted_price", [0, 18_500, 12_000])
 async def test_manual_recommendation_is_marked_for_sync_protection(
     client,
     db_session,
     test_user,
     use_test_user,
     create_car,
+    submitted_price,
 ):
     car_row = await create_car(
-        vin="MANUALREC00000001",
+        vin=f"MANUALREC{submitted_price:08d}",
         avg_market_price=18_500,
+        predicted_total_investments=15_000,
+        suggested_bid=12_500,
+        predicted_roi=23,
     )
+    car_row.predicted_roi = 23
+    await db_session.commit()
 
     response = await client.patch(
         f"{API_PREFIX}/cars/{car_row.id}",
         json={
             "recommendation_status": "recommended",
-            "avg_market_price": 0,
+            "avg_market_price": submitted_price,
         },
     )
 
@@ -244,6 +251,9 @@ async def test_manual_recommendation_is_marked_for_sync_protection(
     assert car_row.recommendation_status == RecommendationStatus.RECOMMENDED
     assert car_row.recommendation_manually_set is True
     assert car_row.avg_market_price == 18_500
+    assert car_row.predicted_total_investments == 15_000
+    assert car_row.suggested_bid == 12_500
+    assert car_row.predicted_roi == 23
 
 
 @pytest.mark.anyio

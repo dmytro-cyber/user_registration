@@ -33,6 +33,7 @@ from models.admin import FilterModel, ROIModel
 from models.vehicle import (
     AutoCheckModel,
     CarModel,
+    CarStatus,
     CarSaleHistoryModel,
     CarInventoryInvestmentsModel,
     CarInventoryModel,
@@ -567,15 +568,16 @@ def parse_and_update_car(
         if parsed_price is not None and parsed_price > 0:
             price_values_by_source[key] = parsed_price
 
-    candidate_avg_market_price = (
-        int(sum(price_values_by_source.values()) / len(price_values_by_source))
-        if price_values_by_source
-        else None
+    from services.market_price import merge_market_prices
+
+    previous_sources = car_pre.market_price_sources
+    candidate_avg_market_price, merged_sources = merge_market_prices(
+        car_pre.avg_market_price, previous_sources, price_values_by_source,
     )
     market_refresh_is_complete = len(price_values_by_source) == 3
     previous_avg_market_price = car_pre.avg_market_price
     should_refresh_market = candidate_avg_market_price is not None and (
-        previous_avg_market_price is None or market_refresh_is_complete
+        candidate_avg_market_price != previous_avg_market_price
     )
     calculation_market_price = (
         candidate_avg_market_price
@@ -711,7 +713,12 @@ def parse_and_update_car(
             # Market-derived fields are one consistency unit. Do not replace an
             # established price with a partial/empty upstream response, and do
             # not overwrite a manual price saved while this task was running.
-            market_snapshot_is_current = car.avg_market_price == previous_avg_market_price
+            market_snapshot_is_current = (
+                car.avg_market_price == previous_avg_market_price
+                and car.market_price_sources == previous_sources
+            )
+            if market_snapshot_is_current and merged_sources:
+                car.market_price_sources = merged_sources
             if should_refresh_market and market_snapshot_is_current:
                 car.avg_market_price = candidate_avg_market_price
                 car.predicted_total_investments = predicted_total_investments
@@ -875,6 +882,7 @@ def update_car_bids() -> Dict[str, Any]:
 
                     # update bids/status
                     try:
+                        previous_current_bid = car.current_bid
                         car.current_bid = int(float(pre_bid))
                     except (ValueError, TypeError):
                         logger.debug("skip: invalid pre_bid=%r lot=%s", pre_bid, lot)
@@ -886,13 +894,16 @@ def update_car_bids() -> Dict[str, Any]:
                         else car.suggested_bid
                     )
                     if bid_limit is not None:
-                        if car.current_bid > bid_limit:
+                        if car.current_bid > bid_limit and (
+                            not car.recommendation_manually_set
+                            or car.current_bid != previous_current_bid
+                        ):
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
                             car.recommendation_manually_set = False
                             reasons = (car.recommendation_status_reasons or "")
                             if "suggested bid < current bid;" not in reasons:
                                 car.recommendation_status_reasons = (reasons + "suggested bid < current bid;").strip()
-                        else:
+                        elif car.current_bid <= bid_limit and not car.recommendation_manually_set:
                             # current bid does not exceed suggested
                             if car.recommendation_status_reasons:
                                 car.recommendation_status_reasons = car.recommendation_status_reasons.replace(

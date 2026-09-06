@@ -452,7 +452,7 @@ async def get_car_detail(
     "/cars/{car_id}",
     status_code=200,
     summary="Update car",
-    description="Update car fields; when avg_market_price is provided, recompute related pricing fields."
+    description="Update recommendation, or submit a price-only request to change the valuation."
 )
 async def update_car(
     car_id: int,
@@ -461,7 +461,7 @@ async def update_car(
     user: UserModel = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Update a car. If `avg_market_price` is provided, recompute:
+    Status updates ignore bundled UI prices. A changed price-only request recomputes:
       - predicted_total_investments = avg_market_price / (1 + ROI/100)
       - predicted_profit_margin_percent = default ROI profit margin
       - predicted_profit_margin = avg_market_price * (profit_margin/100)
@@ -488,7 +488,12 @@ async def update_car(
 
     # A status-only UI update may include a zero placeholder. It must not erase
     # an established valuation; only a positive explicit price refreshes it.
-    if data.avg_market_price is not None and data.avg_market_price > 0:
+    if (
+        data.avg_market_price is not None
+        and data.avg_market_price > 0
+        and data.recommendation_status is None
+        and data.avg_market_price != car.avg_market_price
+    ):
         # Get most recent ROI row
         roi_stmt = (
             select(ROIModel)

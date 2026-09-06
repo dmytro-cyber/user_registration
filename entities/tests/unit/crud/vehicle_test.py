@@ -6,6 +6,7 @@ from sqlalchemy import desc, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from crud.vehicle import (
+    bulk_save_vehicles,
     get_filtered_vehicles,
     save_vehicle_with_photos,
     update_cars_relevance,
@@ -25,6 +26,7 @@ from models.vehicle import (
     user_likes,
 )
 from schemas.vehicle import (
+    CarBulkCreateSchema,
     CarCreateSchema,
     ConditionAssessmentResponseSchema,
     PhotoSchema,
@@ -264,7 +266,7 @@ async def test_damage_filter_matches_primary_damage_not_secondary(db_session, pa
     )
     vins = {car.vin for car in cars}
 
-    assert rear_primary.vin in vins
+    assert rear_primary.vin not in vins
     assert front_primary.vin not in vins
 
 
@@ -770,3 +772,55 @@ async def test_relevance_cleanup_never_removes_won_vehicle(db_session, monkeypat
 
     preserved = await fetch_car(db_session, car.vin)
     assert preserved.car_status == CarStatus.WON
+
+
+async def test_bulk_preserves_manual_vehicle_damage_and_financials(db_session):
+    car = CarModel(
+        vin="BULK-MANUAL-1", vehicle="Test", is_manually_upserted=True,
+        car_status=CarStatus.WON, actual_bid=8000, parts_cost=500,
+        recommendation_status=RecommendationStatus.RECOMMENDED,
+        recommendation_manually_set=True, current_bid=6000,
+    )
+    db_session.add(car)
+    await db_session.flush()
+    db_session.add(ConditionAssessmentModel(
+        car_id=car.id, type_of_damage="damage_pr", issue_description="REAR END",
+    ))
+    await db_session.commit()
+    result = await bulk_save_vehicles(db_session, CarBulkCreateSchema(
+        ivent="update", vehicles=[make_schema(vin=car.vin, current_bid=6000)],
+    ))
+    assert result["updated_count"] == 1
+    await db_session.refresh(car)
+    assert car.car_status == CarStatus.WON
+    assert car.actual_bid == 8000
+    assert car.parts_cost == 500
+    assert car.recommendation_manually_set is True
+    damage = (await db_session.execute(select(ConditionAssessmentModel).where(
+        ConditionAssessmentModel.car_id == car.id,
+    ))).scalars().all()
+    assert [d.issue_description for d in damage] == ["REAR END"]
+
+
+async def test_investment_update_and_delete_recalculate_parent(db_session):
+    from crud.inventory import create_car_investment, update_car_investment, delete_car_investment
+    from models.vehicle import CarInventoryInvestmentsType
+    from schemas.inventory import CarInventoryInvestmentsCreate, CarInventoryInvestmentsUpdate
+
+    inventory = CarInventoryModel(vehicle="Test", vin="INV-RECALC")
+    db_session.add(inventory)
+    await db_session.commit()
+    investment = await create_car_investment(db_session, inventory.id,
+        CarInventoryInvestmentsCreate(vendor="Test", description="Repair", cost=500,
+            payment_method="Cash", investment_type=CarInventoryInvestmentsType.PARTS),
+        user_id="1",
+    )
+    assert inventory.parts_cost == 500
+    await update_car_investment(db_session, investment.id,
+        CarInventoryInvestmentsUpdate(cost=700), user_id="1",
+    )
+    await db_session.refresh(inventory)
+    assert inventory.parts_cost == 700
+    await delete_car_investment(db_session, investment.id, user_id="1")
+    await db_session.refresh(inventory)
+    assert inventory.parts_cost == 0

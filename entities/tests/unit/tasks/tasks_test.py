@@ -11,6 +11,38 @@ class _RespBase:
     def raise_for_status(self): return None
     def json(self): return {}
 
+
+@pytest.mark.parametrize("incoming,expected,manual", [
+    (6000, RecommendationStatus.RECOMMENDED, True),
+    (6500, RecommendationStatus.NOT_RECOMMENDED, False),
+])
+def test_bid_refresh_preserves_manual_decision_until_bid_changes(
+    patch_task_sessionlocal, patch_task_settings, db_session_sync, monkeypatch,
+    incoming, expected, manual,
+):
+    import tasks.task as task_module
+    vin = f"BID-MANUAL-{incoming}"
+    car = CarModel(
+        vin=vin, vehicle="Test", lot=incoming, auction="Copart",
+        date=datetime.utcnow(), relevance=RelevanceStatus.ACTIVE,
+        current_bid=6000, suggested_bid=5000,
+        recommendation_status=RecommendationStatus.RECOMMENDED,
+        recommendation_manually_set=True,
+    )
+    db_session_sync.add(car)
+    db_session_sync.commit()
+
+    class Response(_RespBase):
+        def json(self):
+            return {"bids": [{"lot_id": str(incoming), "site": 1, "pre_bid": incoming}]}
+
+    monkeypatch.setattr(task_module, "http_post_with_retries", lambda **kw: Response())
+    result = task_module.update_car_bids()
+    assert result["status"] == "success"
+    db_session_sync.refresh(car)
+    assert car.recommendation_status == expected
+    assert car.recommendation_manually_set is manual
+
 def test_happy_path_math_and_invocations(
     patch_task_sessionlocal,
     patch_task_settings,
@@ -164,7 +196,7 @@ def test_http_error_increments_attempts_and_marks_flags(
     assert not updated.is_checked
 
 
-def test_parser_returns_error_field_raises_and_rolls_back(
+def test_parser_error_records_failed_attempt_without_enrichment(
     patch_task_sessionlocal,
     patch_task_settings,
     mock_roi_and_fees,
@@ -199,12 +231,14 @@ def test_parser_returns_error_field_raises_and_rolls_back(
     http_router_mock(_history, _parser)
 
     from tasks.task import parse_and_update_car
-    # Task should raise and rollback
-    with pytest.raises(Exception):
-        parse_and_update_car(vin="VINERR2")
+    # The task reports upstream failure as a result and records the attempt.
+    result = parse_and_update_car(vin="VINERR2")
+    assert result["status"] == "exception"
 
     updated = db_session_sync.query(CarModel).filter_by(vin="VINERR2").first()
-    # No partial state should be persisted on failure
+    assert updated.attempts == 1
+    assert updated.has_correct_vin is False
+    assert "scraping error:" in updated.recommendation_status_reasons
     assert updated.owners is None
     assert not updated.is_checked
 

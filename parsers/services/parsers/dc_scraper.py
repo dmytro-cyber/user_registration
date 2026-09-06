@@ -7,6 +7,7 @@ import os
 import random
 import re
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -534,7 +535,13 @@ class DealerCenterScraper:
             odo_val = fallback_odometer
 
         # accidents
-        acc_cnt = 0
+        acc_cnt = None
+        accident_section = soup.select_one("#accident")
+        if accident_section and re.search(
+            r"\bno accidents?(?:\s+(?:or|and|/|&)?\s*damage)?\s+(?:reported|found)",
+            accident_section.get_text(" ", strip=True), re.IGNORECASE,
+        ):
+            acc_cnt = 0
 
         try:
             tables = soup.find_all(
@@ -547,6 +554,7 @@ class DealerCenterScraper:
                     continue
 
                 accident_dates = set()
+                incomplete = False
 
                 for row in table.find_all("tr"):
                     cells = row.find_all("td")
@@ -559,10 +567,16 @@ class DealerCenterScraper:
                         strip=True,
                     )
 
-                    if damage_date:
-                        accident_dates.add(damage_date)
+                    damage_type = cells[1].get_text(" ", strip=True).lower()
+                    if damage_type not in {"collision", "accident"}:
+                        # Damage (e.g. vandalism) is not necessarily an accident.
+                        continue
+                    try:
+                        accident_dates.add(datetime.strptime(damage_date, "%m/%d/%Y").date())
+                    except ValueError:
+                        incomplete = True
 
-                acc_cnt = len(accident_dates)
+                acc_cnt = None if incomplete else len(accident_dates)
                 break
 
         except Exception as e:
