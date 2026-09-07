@@ -452,7 +452,7 @@ async def get_car_detail(
     "/cars/{car_id}",
     status_code=200,
     summary="Update car",
-    description="Update car fields; when avg_market_price is provided, recompute related pricing fields."
+    description="Update recommendation, or submit a price-only request to change the valuation."
 )
 async def update_car(
     car_id: int,
@@ -461,7 +461,7 @@ async def update_car(
     user: UserModel = Depends(get_current_user)
 ) -> Dict[str, Any]:
     """
-    Update a car. If `avg_market_price` is provided, recompute:
+    Status updates ignore bundled UI prices. A changed price-only request recomputes:
       - predicted_total_investments = avg_market_price / (1 + ROI/100)
       - predicted_profit_margin_percent = default ROI profit margin
       - predicted_profit_margin = avg_market_price * (profit_margin/100)
@@ -471,13 +471,29 @@ async def update_car(
     Notes:
     - Keeps original business logic; fixes route, session.get usage, None checks and auction_fee assignment.
     """
-    # Fetch car (proper AsyncSession.get signature)
-    car = await session.get(CarModel, car_id)
+    car = (
+        await session.execute(
+            select(CarModel)
+            .where(CarModel.id == car_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not car:
         raise HTTPException(status_code=404, detail="Car not found")
 
-    # Recompute block if avg_market_price provided
-    if data.avg_market_price is not None:
+    if data.avg_market_price is not None and data.avg_market_price < 0:
+        raise HTTPException(status_code=400, detail="Market Average Price must be greater than zero")
+    if data.avg_market_price == 0 and data.recommendation_status is None:
+        raise HTTPException(status_code=400, detail="Market Average Price must be greater than zero")
+
+    # A status-only UI update may include a zero placeholder. It must not erase
+    # an established valuation; only a positive explicit price refreshes it.
+    if (
+        data.avg_market_price is not None
+        and data.avg_market_price > 0
+        and data.recommendation_status is None
+        and data.avg_market_price != car.avg_market_price
+    ):
         # Get most recent ROI row
         roi_stmt = (
             select(ROIModel)
@@ -527,6 +543,9 @@ async def update_car(
     # Optional status update
     if data.recommendation_status is not None:
         car.recommendation_status = data.recommendation_status
+        # Auction synchronization must preserve an explicit human decision.
+        # A later, genuinely disqualifying bid/data change may still replace it.
+        car.recommendation_manually_set = True
 
     await session.commit()
     await session.refresh(car)
@@ -633,6 +652,7 @@ async def update_car_status(
     )
     db.add(hub_history)
     await db.commit()
+    await db.refresh(car)
 
     logger.info(f"Status updated for car with ID: {car_id}", extra=extra)
     return status_data
@@ -660,7 +680,13 @@ async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, d
     """
     logger.debug("Updating car costs for ID %s with data: %s", car_id, car_data.dict(exclude_unset=True))
 
-    db_car = await db.get(CarModel, car_id)
+    db_car = (
+        await db.execute(
+            select(CarModel)
+            .where(CarModel.id == car_id)
+            .with_for_update()
+        )
+    ).scalars().first()
     if not db_car:
         raise HTTPException(status_code=404, detail=f"Car with ID {car_id} not found")
 
@@ -671,7 +697,8 @@ async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, d
     # Update fields
     for key, value in update_data.items():
         setattr(db_car, key, value)
-    db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
+    if db_car.predicted_total_investments is not None:
+        db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
 
     try:
         await db.commit()
@@ -1038,46 +1065,67 @@ async def upsert(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ):
-    res, message = await upsert_vehicle(vehicle_data=vehicle_data, db=db)
+    res, message, should_parse = await upsert_vehicle(
+        vehicle_data=vehicle_data,
+        db=db,
+    )
 
     if not res:
-        raise HTTPException(status_code=500, detail=message)
+        raise HTTPException(
+            status_code=500,
+            detail=message,
+        )
 
     task_id = None
 
-    try:
+    if should_parse:
+        try:
+            logger.info(
+                "Trying to send Celery task "
+                "parse_and_update_car | vin=%s",
+                vehicle_data.vin,
+            )
+
+            task_result = celery_app.send_task(
+                "tasks.task.parse_and_update_car",
+                kwargs={
+                    "vin": vehicle_data.vin,
+                    "car_name": vehicle_data.vehicle,
+                    "car_engine": vehicle_data.engine_title,
+                    "mileage": vehicle_data.mileage,
+                    "car_make": vehicle_data.make,
+                    "car_model": vehicle_data.model,
+                    "car_year": vehicle_data.year,
+                    "car_transmison": vehicle_data.transmision,
+                },
+                queue="car_parsing_queue",
+            )
+
+            task_id = getattr(
+                task_result,
+                "id",
+                None,
+            )
+
+            logger.info(
+                "Celery task sent successfully | "
+                "vin=%s task_id=%s",
+                vehicle_data.vin,
+                task_id,
+            )
+
+        except Exception:
+            logger.exception(
+                "Celery send failed but vehicle saved | vin=%s",
+                vehicle_data.vin,
+            )
+
+    else:
         logger.info(
-            "Trying to send Celery task parse_and_update_car | vin=%s",
-            vehicle_data.vin
-        )
-
-        task_result = celery_app.send_task(
-            "tasks.task.parse_and_update_car",
-            kwargs={
-                "vin": vehicle_data.vin,
-                "car_name": vehicle_data.vehicle,
-                "car_engine": vehicle_data.engine_title,
-                "mileage": vehicle_data.mileage,
-                "car_make": vehicle_data.make,
-                "car_model": vehicle_data.model,
-                "car_year": vehicle_data.year,
-                "car_transmison": vehicle_data.transmision,
-            },
-            queue="car_parsing_queue",
-        )
-
-        task_id = getattr(task_result, "id", None)
-
-        logger.info(
-            "Celery task sent successfully | vin=%s task_id=%s",
+            "Celery parsing skipped | "
+            "vin=%s already checked and "
+            "parser fields unchanged",
             vehicle_data.vin,
-            task_id,
-        )
-
-    except Exception:
-        logger.exception(
-            "Celery send failed but vehicle saved | vin=%s",
-            vehicle_data.vin
         )
 
     return {

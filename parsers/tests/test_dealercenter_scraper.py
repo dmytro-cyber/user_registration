@@ -10,8 +10,15 @@ from services.parsers.dc_scraper import AuthRefreshedError, DealerCenterScraper
 def anyio_backend():
     return "asyncio"
 
-def fake_autocheck_html(owners: int = 2, odo: int = 123_456, damage_rows: int = 2) -> str:
-    rows_html = "".join("<tr><td>a</td><td>b</td><td>Damage Type</td></tr>" for _ in range(damage_rows))
+def fake_autocheck_html(
+    owners: int = 2,
+    odo: int = 123_456,
+    damage_dates: tuple[str, ...] = ("01/01/2024", "02/01/2024"),
+) -> str:
+    rows_html = "".join(
+        f"<tr><td>{damage_date}</td><td>Collision</td><td>Unknown</td></tr>"
+        for damage_date in damage_dates
+    )
     return f"""
     <html>
       <body>
@@ -37,7 +44,10 @@ async def test_get_history_and_market_data_async_happy_path(monkeypatch):
     dc = DealerCenterScraper(vin="TESTVIN1234567890", year=2016, make="Honda", model="CR-V", odometer=100000)
     dc.cookies = [{"name": "sid", "value": "abc"}]
     dc.access_token = "token"
-    html = fake_autocheck_html(owners=3, odo=135_000, damage_rows=2)
+    html = fake_autocheck_html(owners=3, odo=135_000)
+    async def fake_ensure(force=False):
+        return None
+    monkeypatch.setattr(dc, "_ensure_logged_in_singleflight", fake_ensure)
     async def fake_auth_post(url: str, payload: dict):
         return _Resp({"htmlResponseData": html})
     async def fake_fetch_valuation():
@@ -57,6 +67,41 @@ async def test_get_history_and_market_data_async_happy_path(monkeypatch):
     assert result["manheim"] == 21000
     assert result["d_max"] == 17500
 
+
+async def test_history_counts_unique_accident_events_not_damage_rows():
+    dc = DealerCenterScraper(vin="TESTVIN-DUPLICATE-DAMAGE")
+    html = fake_autocheck_html(
+        damage_dates=("01/01/2024", "01/01/2024", "02/01/2024"),
+    )
+
+    result = dc._parse_history(html, fallback_odometer=100_000)
+
+    assert result["accident_count"] == 2
+
+
+async def test_history_missing_table_is_unknown():
+    dc = DealerCenterScraper(vin="TEST-MISSING")
+    assert dc._parse_history("<html></html>", None)["accident_count"] is None
+
+
+async def test_history_saved_report():
+    from pathlib import Path
+    dc = DealerCenterScraper(vin="TEST-REPORT")
+    html = (Path(__file__).parents[1] / "response.html").read_text()
+    assert dc._parse_history(html, None)["accident_count"] == 2
+
+
+async def test_history_does_not_count_non_collision_damage():
+    dc = DealerCenterScraper(vin="TEST-DAMAGE")
+    html = fake_autocheck_html(damage_dates=("01/01/2024",)).replace("Collision", "Vandalism")
+    assert dc._parse_history(html, None)["accident_count"] == 0
+
+
+async def test_history_undated_accident_is_unknown():
+    dc = DealerCenterScraper(vin="TEST-UNDATED")
+    html = fake_autocheck_html(damage_dates=("",))
+    assert dc._parse_history(html, None)["accident_count"] is None
+
 async def test_get_history_and_market_data_async_raises_on_401_and_forces_login(monkeypatch):
     dc = DealerCenterScraper(vin="TESTVIN401")
     dc.cookies = [{"name": "sid", "value": "abc"}]
@@ -70,7 +115,7 @@ async def test_get_history_and_market_data_async_raises_on_401_and_forces_login(
     monkeypatch.setattr(dc, "_ensure_logged_in_singleflight", fake_ensure, raising=True)
     with pytest.raises(AuthRefreshedError):
         await dc.get_history_and_market_data_async()
-    assert forced == [True]
+    assert forced[-1] is True
     assert dc.cookies == []
     assert dc.access_token is None
 

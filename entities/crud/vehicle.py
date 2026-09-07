@@ -8,7 +8,7 @@ from sqlalchemy import and_, asc, bindparam, case, delete, desc, exists, func, l
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased, noload, selectinload, with_loader_criteria
+from sqlalchemy.orm import aliased, noload, selectinload
 from sqlalchemy.sql import over
 
 from core.dependencies import get_s3_storage_client
@@ -68,8 +68,10 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
 
     s3_urls_to_delete: List[str] = []
 
-    await db.execute(text("SET LOCAL lock_timeout = '2s'"))
-    await db.execute(text("SET LOCAL statement_timeout = '20s'"))
+    bind = db.get_bind()
+    if bind is not None and bind.dialect.name == "postgresql":
+        await db.execute(text("SET LOCAL lock_timeout = '2s'"))
+        await db.execute(text("SET LOCAL statement_timeout = '20s'"))
 
     # -------------------------------------------------------
     # 1. CLAIM IRRELEVANT / NULL cars with row lock + skip locked
@@ -82,6 +84,7 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
                     CarModel.relevance == RelevanceStatus.IRRELEVANT,
                     CarModel.relevance.is_(None),
                 ),
+                CarModel.car_status != CarStatus.WON,
                 filter_condition,
             )
         )
@@ -186,6 +189,7 @@ async def update_cars_relevance(payload: Dict, db: AsyncSession) -> None:
         .where(
             and_(
                 CarModel.relevance == RelevanceStatus.ACTIVE,
+                CarModel.car_status != CarStatus.WON,
                 filter_condition,
             )
         )
@@ -249,7 +253,7 @@ async def save_sale_history(sale_history_data: List[CarCreateSchema], car_id: in
         if not sales_history.source:
             sales_history.source = "Unknown"
         db.add(sales_history)
-        await db.commit()
+    await db.flush()
 
 
 def finalize_recommendation(vehicle: CarModel):
@@ -264,30 +268,54 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
     """Save a single vehicle and its photos. Update all fields and photos if vehicle already exists."""
     try:
         to_parse = False
-        existing_vehicle = await get_vehicle_by_vin(db, vehicle_data.vin)
+        existing_vehicle = await get_vehicle_by_vin_for_upsert(db, vehicle_data.vin)
 
         # ============================================================
         # ======================== UPDATE ===========================
         # ============================================================
         if existing_vehicle:
-
-            # --- always reset recommendation ---
-            existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
-            existing_vehicle.recommendation_status_reasons = None
-
             if existing_vehicle.is_manually_upserted:
+                previous_current_bid = existing_vehicle.current_bid
+
                 if vehicle_data.current_bid is not None:
                     existing_vehicle.current_bid = vehicle_data.current_bid
 
-                    if (
-                        existing_vehicle.suggested_bid is not None
-                        and vehicle_data.current_bid > existing_vehicle.suggested_bid
-                    ):
-                        existing_vehicle.recommendation_status_reasons = "BID_GT_SUGGESTED;"
+                    bid_limit = (
+                        existing_vehicle.actual_bid
+                        if existing_vehicle.actual_bid is not None
+                        else existing_vehicle.suggested_bid
+                    )
 
-                finalize_recommendation(existing_vehicle)
+                    if (
+                        vehicle_data.current_bid != previous_current_bid
+                        and bid_limit is not None
+                        and vehicle_data.current_bid > bid_limit
+                    ):
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        _append_reason(existing_vehicle, "BID_GT_SUGGESTED")
+                        existing_vehicle.recommendation_manually_set = False
+
                 await db.commit()
                 return False
+
+            preserve_manual_recommendation = bool(
+                existing_vehicle.recommendation_manually_set
+            )
+            previous_recommendation = existing_vehicle.recommendation_status
+            previous_reasons = existing_vehicle.recommendation_status_reasons
+            previous_current_bid = existing_vehicle.current_bid
+            previous_fuel_type = existing_vehicle.fuel_type
+            previous_transmission = existing_vehicle.transmision
+            previous_damage_issues = {
+                assessment.issue_description
+                for assessment in existing_vehicle.condition_assessments
+                if assessment.issue_description
+            }
+            recommendation_override_triggered = False
+
+            if not preserve_manual_recommendation:
+                existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
+                existing_vehicle.recommendation_status_reasons = None
 
             if existing_vehicle.relevance == RelevanceStatus.ACTIVE:
                 if not existing_vehicle.is_checked and existing_vehicle.attempts < 3:
@@ -320,12 +348,16 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                     setattr(existing_vehicle, field, value)
 
                     if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-                        existing_vehicle.recommendation_status_reasons = \
-                            (existing_vehicle.recommendation_status_reasons or "") + f"{value};"
+                        if not preserve_manual_recommendation or value != previous_fuel_type:
+                            existing_vehicle.recommendation_status_reasons = \
+                                (existing_vehicle.recommendation_status_reasons or "") + f"{value};"
+                            recommendation_override_triggered = True
 
                     if field == "transmision" and value != "Automatic":
-                        existing_vehicle.recommendation_status_reasons = \
-                            (existing_vehicle.recommendation_status_reasons or "") + f"{value};"
+                        if not preserve_manual_recommendation or value != previous_transmission:
+                            existing_vehicle.recommendation_status_reasons = \
+                                (existing_vehicle.recommendation_status_reasons or "") + f"{value};"
+                            recommendation_override_triggered = True
 
             # -------- photos ----------
             existing_photo_urls = {p.url for p in existing_vehicle.photos}
@@ -364,23 +396,41 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
                         "Rejected Repair", "Burn Engine", "Mechanical", "Replaced Vin",
                         "Burn", "Undercarriage", "Water/Flood", "Burn Interior", "Rollover",
                     ]:
-                        existing_vehicle.recommendation_status_reasons = \
-                            (existing_vehicle.recommendation_status_reasons or "") + f"{a.issue_description};"
+                        if (
+                            not preserve_manual_recommendation
+                            or a.issue_description not in previous_damage_issues
+                        ):
+                            existing_vehicle.recommendation_status_reasons = \
+                                (existing_vehicle.recommendation_status_reasons or "") + f"{a.issue_description};"
+                            recommendation_override_triggered = True
 
             # -------- bid check ----------
             if (
                 vehicle_data.current_bid is not None
                 and existing_vehicle.suggested_bid is not None
                 and vehicle_data.current_bid > existing_vehicle.suggested_bid
+                and (
+                    not preserve_manual_recommendation
+                    or vehicle_data.current_bid != previous_current_bid
+                )
             ):
                 existing_vehicle.recommendation_status_reasons = \
                     (existing_vehicle.recommendation_status_reasons or "") + "BID_GT_SUGGESTED;"
+                recommendation_override_triggered = True
 
             # -------- sales history ----------
             if not existing_vehicle.sales_history and vehicle_data.sales_history:
+                if len(vehicle_data.sales_history) >= 4:
+                    recommendation_override_triggered = True
                 await save_sale_history(vehicle_data.sales_history, existing_vehicle.id, db)
 
-            finalize_recommendation(existing_vehicle)
+            if preserve_manual_recommendation and not recommendation_override_triggered:
+                existing_vehicle.recommendation_status = previous_recommendation
+                existing_vehicle.recommendation_status_reasons = previous_reasons
+            else:
+                if recommendation_override_triggered:
+                    existing_vehicle.recommendation_manually_set = False
+                finalize_recommendation(existing_vehicle)
             await db.commit()
             return to_parse
 
@@ -455,11 +505,15 @@ async def save_vehicle_with_photos(vehicle_data: CarCreateSchema, ivent: str, db
         return to_parse
 
     except IntegrityError as e:
+        await db.rollback()
         if "unique constraint" in str(e).lower() and "vin" in str(e).lower():
             logger.info(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
             return False
+        logger.exception(f"Integrity error -----------> {e} for vin: {vehicle_data.vin}")
+        return False
 
     except Exception as e:
+        await db.rollback()
         logger.exception(f"Exception -----------> {e} for vin: {vehicle_data.vin}")
         return False
 
@@ -540,6 +594,7 @@ async def get_vehicle_by_vin_for_upsert(
         )
         .where(CarModel.vin == vin)
         .limit(1)
+        .with_for_update()
     )
     res = await db.execute(stmt)
     car = res.scalars().first()
@@ -643,23 +698,64 @@ async def get_filtered_vehicles(
         selectinload(CarModel.condition_assessments),
     ]
     if cond_values:
+        normalized_conditions = {
+            value.strip().lower()
+            for value in cond_values
+            if isinstance(value, str) and value.strip()
+        }
+        issue_matches = func.lower(
+            func.trim(ConditionAssessmentModel.issue_description)
+        ).in_(normalized_conditions)
+        damage_type = func.lower(
+            func.trim(func.coalesce(ConditionAssessmentModel.type_of_damage, ""))
+        )
+        is_primary_damage = damage_type.in_(("damage_pr", "primary"))
+        has_typed_primary_damage = exists(
+            select(1)
+            .select_from(ConditionAssessmentModel)
+            .where(
+                (ConditionAssessmentModel.car_id == CarModel.id)
+                & is_primary_damage
+            )
+        )
+
+        # Auction feeds provide both primary and secondary damage. Filtering
+        # against every row made a FRONT END vehicle match when, for example,
+        # its secondary damage was REAR END. Prefer the primary damage and keep
+        # a legacy fallback for rows that predate the type marker.
         base_ids = base_ids.filter(
-            exists(
-                select(1)
-                .select_from(ConditionAssessmentModel)
-                .where(
-                    (ConditionAssessmentModel.car_id == CarModel.id) &
-                    (ConditionAssessmentModel.issue_description.in_(cond_values))
+            or_(
+                exists(
+                    select(1)
+                    .select_from(ConditionAssessmentModel)
+                    .where(
+                        (ConditionAssessmentModel.car_id == CarModel.id)
+                        & is_primary_damage
+                        & issue_matches
+                    )
+                ),
+                and_(
+                    ~has_typed_primary_damage,
+                    exists(
+                        select(1)
+                        .select_from(ConditionAssessmentModel)
+                        .where(
+                            (ConditionAssessmentModel.car_id == CarModel.id)
+                            & issue_matches
+                        )
+                    ),
                 )
             )
         )
-        loader_options.append(
-            with_loader_criteria(
-                ConditionAssessmentModel,
-                ConditionAssessmentModel.issue_description.in_(cond_values),
-                include_aliases=True,
-            )
-        )
+        if not normalized_conditions.intersection({"front end", "front-end"}):
+            base_ids = base_ids.filter(~exists(
+                select(1).select_from(ConditionAssessmentModel).where(
+                    (ConditionAssessmentModel.car_id == CarModel.id)
+                    & func.lower(func.trim(ConditionAssessmentModel.issue_description)).in_(
+                        ("front end", "front-end")
+                    )
+                )
+            ))
     else:
         default_excluded = ["Biohazard/Chemical", "Water/Flood", "Rejected Repair"]
         base_ids = base_ids.filter(
@@ -965,9 +1061,17 @@ async def get_vehicle_by_id(db: AsyncSession, car_id: int, user_id: Optional[int
     return car
 
 
-async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) -> Optional[CarModel]:
+async def update_vehicle_status(
+    db: AsyncSession,
+    car_id: int,
+    car_status: str,
+) -> Tuple[CarModel, str]:
     """Update the status of a vehicle."""
-    result = await db.execute(select(CarModel).where(CarModel.id == car_id))
+    result = await db.execute(
+        select(CarModel)
+        .where(CarModel.id == car_id)
+        .with_for_update()
+    )
     car = result.scalars().first()
     if not car:
         raise HTTPException(status_code=404, detail="Vehicle not found")
@@ -978,23 +1082,36 @@ async def update_vehicle_status(db: AsyncSession, car_id: int, car_status: str) 
     if car.car_status == CarStatus.WON:
         if not car.actual_bid:
             raise HTTPException(status_code=400, detail="First fill out the actual bid")
+
+        car.relevance = RelevanceStatus.ACTIVE
+
+        existing_inventory = (
+            await db.execute(
+                select(CarInventoryModel)
+                .where(CarInventoryModel.car_id == car_id)
+                .with_for_update()
+            )
+        ).scalars().first()
+
+        if existing_inventory is None:
+            car_inventory_model = CarInventoryModel(
+                car=car,
+                vehicle=car.vehicle,
+                vin=car.vin,
+                vehicle_cost=car.actual_bid,
+                car_status=CarInventoryStatus.AWAITING_DELIVERY,
+            )
+            db.add(car_inventory_model)
+            await db.flush()
+        else:
+            car_inventory_model = existing_inventory
+
         result = await db.execute(select(HistoryModel).where(HistoryModel.car_id == car_id))
-        car_inventory_model = CarInventoryModel(
-            car=car,
-            vehicle=car.vehicle,
-            vin=car.vin,
-            vehicle_cost=car.actual_bid,
-            car_status=CarInventoryStatus.AWAITING_DELIVERY,
-        )
-        db.add(car_inventory_model)
-        await db.commit()
-        await db.refresh(car_inventory_model)
         for history in result.scalars().all():
             history.car_inventory_id = car_inventory_model.id
             db.add(history)
 
-    await db.commit()
-    await db.refresh(car)
+    await db.flush()
     return car, old_status
 
 
@@ -1009,7 +1126,11 @@ async def add_part_to_vehicle(
 ) -> Optional[tuple[PartModel, CarModel]]:
     """Add a part to a vehicle."""
     logger.info(f"Adding part to vehicle. car_id: {car_id}, part_data: {part_data}")
-    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    result = await db.execute(
+        select(CarModel)
+        .filter(CarModel.id == car_id)
+        .with_for_update()
+    )
     car = result.scalars().first()
     if not car:
         logger.error(f"Vehicle not found for car_id: {car_id}")
@@ -1019,20 +1140,21 @@ async def add_part_to_vehicle(
     logger.info(f"Created new part: {new_part.__dict__}")
     db.add(new_part)
 
-    if car.parts_cost is None or car.parts_cost <= 0:
-        car.parts_cost = new_part.value
-        logger.info(f"Updated car.parts_cost to {new_part.value} as it was None or <= 0")
-    else:
-        car.parts_cost += new_part.value
-        logger.info(f"Incremented car.parts_cost by {new_part.value}, new value: {car.parts_cost}")
+    part_value = new_part.value or 0
+    car.parts_cost = (car.parts_cost or 0) + part_value
+    logger.info(f"Incremented car.parts_cost by {part_value}, new value: {car.parts_cost}")
 
-    if car.suggested_bid is not None:
+    if car.predicted_total_investments is not None:
         car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
 
-    if car.current_bid and car.current_bid > car.suggested_bid:
+    if (
+        car.current_bid is not None
+        and car.suggested_bid is not None
+        and car.current_bid > car.suggested_bid
+    ):
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
         logger.info(
             f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
@@ -1051,7 +1173,11 @@ async def update_part(
 ) -> Optional[tuple[PartModel, CarModel]]:
     """Update a part for a vehicle."""
     logger.info(f"Updating part. car_id: {car_id}, part_id: {part_id}, part_data: {part_data}")
-    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    result = await db.execute(
+        select(CarModel)
+        .filter(CarModel.id == car_id)
+        .with_for_update()
+    )
     car = result.scalars().first()
     if not car:
         logger.error(f"Vehicle not found for car_id: {car_id}")
@@ -1070,16 +1196,21 @@ async def update_part(
         logger.info(f"Updated part.{key} to {value}")
 
     if existing_part.value != temp_value:
-        car.parts_cost += existing_part.value - temp_value
-        logger.info(f"Adjusted car.parts_cost by {existing_part.value - temp_value}, new value: {car.parts_cost}")
+        value_delta = (existing_part.value or 0) - (temp_value or 0)
+        car.parts_cost = (car.parts_cost or 0) + value_delta
+        logger.info(f"Adjusted car.parts_cost by {value_delta}, new value: {car.parts_cost}")
 
-    if car.suggested_bid is not None:
+    if car.predicted_total_investments is not None:
         car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
 
-    if car.current_bid and car.current_bid > car.suggested_bid:
+    if (
+        car.current_bid is not None
+        and car.suggested_bid is not None
+        and car.current_bid > car.suggested_bid
+    ):
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
         logger.info(
             f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
@@ -1097,7 +1228,11 @@ async def update_part(
 async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool, CarModel]:
     """Delete a part for a vehicle."""
     logger.info(f"Deleting part. car_id: {car_id}, part_id: {part_id}")
-    result = await db.execute(select(CarModel).filter(CarModel.id == car_id))
+    result = await db.execute(
+        select(CarModel)
+        .filter(CarModel.id == car_id)
+        .with_for_update()
+    )
     car = result.scalars().first()
     if not car:
         logger.error(f"Vehicle not found for car_id: {car_id}")
@@ -1109,16 +1244,21 @@ async def delete_part(db: AsyncSession, car_id: int, part_id: int) -> tuple[bool
         return False, car
 
     logger.info(f"Part to delete: {part.__dict__}, value: {part.value}")
-    car.parts_cost -= part.value
-    logger.info(f"Decremented car.parts_cost by {part.value}, new value: {car.parts_cost}")
+    part_value = part.value or 0
+    car.parts_cost = max(0, (car.parts_cost or 0) - part_value)
+    logger.info(f"Decremented car.parts_cost by {part_value}, new value: {car.parts_cost}")
 
-    if car.suggested_bid is not None:
+    if car.predicted_total_investments is not None:
         car.suggested_bid = car.predicted_total_investments - car.sum_of_investments
         logger.info(
             f"Updated suggested_bid to {car.suggested_bid} based on predicted_total_investments: {car.predicted_total_investments}, parts_cost: {car.parts_cost}, auction_fee: {car.auction_fee}"
         )
 
-    if car.current_bid and car.current_bid > car.suggested_bid:
+    if (
+        car.current_bid is not None
+        and car.suggested_bid is not None
+        and car.current_bid > car.suggested_bid
+    ):
         car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
         logger.info(
             f"Set recommendation_status to NOT_RECOMMENDED as current_bid: {car.current_bid} > suggested_bid: {car.suggested_bid}"
@@ -1137,18 +1277,18 @@ async def bulk_save_vehicles(
     payload: CarBulkCreateSchema,
 ) -> Dict[str, Any]:
     """
-    Bulk-save vehicles with short transactions.
+    Bulk-save one caller-sized batch atomically.
 
     Strategy:
     1. Prepare all rows in memory.
-    2. Transaction #1: upsert only cars.
-    3. Transaction #2: replace condition assessments.
-    4. Transaction #3: insert photos.
+    2. Lock existing cars in id order and upsert cars.
+    3. Replace condition assessments while holding the parent locks.
+    4. Insert photos and commit the batch.
     5. Return celery payload for follow-up parsing.
 
     Important:
     - Bulk updater must not overwrite parse-derived fields.
-    - Transactions are intentionally short to reduce lock contention.
+    - Callers must keep batches bounded to respect PostgreSQL bind limits.
     """
 
     # ============================================================
@@ -1214,19 +1354,26 @@ async def bulk_save_vehicles(
         """
         Keep lock waits short so the app does not hang under contention.
         """
-        await session.execute(text("SET LOCAL lock_timeout = '2s'"))
-        await session.execute(text("SET LOCAL statement_timeout = '30s'"))
+        bind = session.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            await session.execute(text("SET LOCAL lock_timeout = '2s'"))
+            await session.execute(text("SET LOCAL statement_timeout = '30s'"))
 
     # ============================================================
     # EXISTING VEHICLES + FILTERS
-    # Read-only stage, no transaction pressure here.
+    # Lock before reading snapshots so user edits cannot be rolled back.
     # ============================================================
+    await apply_tx_timeouts(db)
     existing_result = await db.execute(
         select(CarModel)
         .where(CarModel.vin.in_(vins))
+        .order_by(CarModel.id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
         .options(
             selectinload(CarModel.photos),
             selectinload(CarModel.sales_history),
+            selectinload(CarModel.condition_assessments),
         )
     )
     existing_map: dict[str, CarModel] = {
@@ -1247,6 +1394,16 @@ async def bulk_save_vehicles(
     # Fields that must NOT be overwritten by the bulk import.
     # These are owned by parse/enrichment flow.
     EXCLUDED_FROM_BULK_UPDATE = {
+        "car_status",
+        "actual_bid",
+        "roi",
+        "profit_margin",
+        "parts_cost",
+        "maintenance",
+        "transportation",
+        "labor",
+        "parts_needed",
+        "is_manually_upserted",
         "attempts",
         "is_checked",
         "has_correct_vin",
@@ -1256,6 +1413,7 @@ async def bulk_save_vehicles(
         "owners",
         "accident_count",
         "avg_market_price",
+        "market_price_sources",
         "predicted_total_investments",
         "predicted_profit_margin_percent",
         "predicted_profit_margin",
@@ -1291,6 +1449,8 @@ async def bulk_save_vehicles(
             row["is_checked"] = False
         if row.get("is_manually_upserted") is None:
             row["is_manually_upserted"] = False
+        if row.get("recommendation_manually_set") is None:
+            row["recommendation_manually_set"] = False
 
         if row.get("has_correct_vin") is None:
             row["has_correct_vin"] = True
@@ -1367,21 +1527,44 @@ async def bulk_save_vehicles(
         # ========================================================
         if existing:
             updated_count += 1
+            preserve_manual_recommendation = bool(
+                existing.recommendation_manually_set
+            )
+            previous_damage_issues = {
+                assessment.issue_description
+                for assessment in existing.condition_assessments
+                if assessment.issue_description
+            }
 
             # manually upserted cars: only update safe minimal fields
             if existing.is_manually_upserted:
                 minimal_data = {"vin": v.vin}
+                previous_current_bid = existing.current_bid
 
                 if v.current_bid is not None:
                     minimal_data["current_bid"] = v.current_bid
 
-                    if (
-                        existing.suggested_bid is not None
-                        and v.current_bid > existing.suggested_bid
-                    ):
-                        add_reason_once(reasons, "BID_GT_SUGGESTED")
+                bid_limit = (
+                    existing.actual_bid
+                    if existing.actual_bid is not None
+                    else existing.suggested_bid
+                )
 
-                minimal_data.update(build_recommendation_fields(reasons))
+                if (
+                        v.current_bid is not None
+                        and v.current_bid != previous_current_bid
+                        and bid_limit is not None
+                        and v.current_bid > bid_limit
+                ):
+                    existing_reasons = [
+                        reason
+                        for reason in (existing.recommendation_status_reasons or "").split(";")
+                        if reason
+                    ]
+                    add_reason_once(existing_reasons, "BID_GT_SUGGESTED")
+                    minimal_data.update(build_recommendation_fields(existing_reasons))
+                    minimal_data["recommendation_manually_set"] = False
+
                 car_rows.append(build_row(minimal_data, existing))
                 continue
 
@@ -1399,11 +1582,25 @@ async def bulk_save_vehicles(
                     data["relevance"] = RelevanceStatus.IRRELEVANT
 
             fuel = data.get("fuel_type")
-            if fuel and fuel not in ["Gasoline", "Flexible Fuel", "Unknown"]:
+            if (
+                fuel
+                and fuel not in ["Gasoline", "Flexible Fuel", "Unknown"]
+                and (
+                    not preserve_manual_recommendation
+                    or fuel != existing.fuel_type
+                )
+            ):
                 add_reason_once(reasons, fuel)
 
             trans = data.get("transmision")
-            if trans and trans != "Automatic":
+            if (
+                trans
+                and trans != "Automatic"
+                and (
+                    not preserve_manual_recommendation
+                    or trans != existing.transmision
+                )
+            ):
                 add_reason_once(reasons, trans)
 
             if v.condition_assessments:
@@ -1415,13 +1612,29 @@ async def bulk_save_vehicles(
                             "issue_description": a.issue_description,
                         }
                     )
-                    if a.issue_description in bad_condition_values:
+                    if (
+                        a.issue_description in bad_condition_values
+                        and (
+                            not preserve_manual_recommendation
+                            or a.issue_description not in previous_damage_issues
+                        )
+                    ):
                         add_reason_once(reasons, a.issue_description)
 
+            bid_limit = (
+                existing.actual_bid
+                if existing.actual_bid is not None
+                else existing.suggested_bid
+            )
+
             if (
-                v.current_bid is not None
-                and existing.suggested_bid is not None
-                and v.current_bid > existing.suggested_bid
+                    v.current_bid is not None
+                    and bid_limit is not None
+                    and v.current_bid > bid_limit
+                    and (
+                        not preserve_manual_recommendation
+                        or v.current_bid != existing.current_bid
+                    )
             ):
                 add_reason_once(reasons, "BID_GT_SUGGESTED")
 
@@ -1494,7 +1707,22 @@ async def bulk_save_vehicles(
                         {"vin": v.vin, "url": p.url, "is_hd": True}
                     )
 
-        data.update(build_recommendation_fields(reasons))
+        if existing and preserve_manual_recommendation:
+            if reasons:
+                existing_reasons = [
+                    reason
+                    for reason in (existing.recommendation_status_reasons or "").split(";")
+                    if reason
+                ]
+                for reason in reasons:
+                    add_reason_once(existing_reasons, reason)
+                data.update(build_recommendation_fields(existing_reasons))
+                data["recommendation_manually_set"] = False
+            else:
+                data["recommendation_status"] = existing.recommendation_status
+                data["recommendation_status_reasons"] = existing.recommendation_status_reasons
+        else:
+            data.update(build_recommendation_fields(reasons))
         data["vin"] = v.vin
         car_rows.append(build_row(data, existing))
 
@@ -1529,8 +1757,7 @@ async def bulk_save_vehicles(
         }
 
     # ============================================================
-    # TRANSACTION #1 — BULK UPSERT CARS
-    # Keep this transaction as short as possible.
+    # BULK UPSERT CARS — retain locks until child data is saved.
     # ============================================================
     await apply_tx_timeouts(db)
 
@@ -1551,6 +1778,9 @@ async def bulk_save_vehicles(
         stmt.on_conflict_do_update(
             index_elements=[CarModel.vin],
             set_=update_dict,
+            # A row created concurrently was not part of our locked snapshot.
+            # Leave its user-owned state and child records to its creator.
+            where=CarModel.id.in_([car.id for car in existing_map.values()]),
         )
         .returning(CarModel.id, CarModel.vin)
     )
@@ -1559,13 +1789,13 @@ async def bulk_save_vehicles(
     rows = result.fetchall()
     vin_to_id: Dict[str, int] = {r.vin: r.id for r in rows}
 
-    await db.commit()
-
     # ============================================================
-    # TRANSACTION #2 — REPLACE CONDITION ASSESSMENTS
-    # Separate transaction to avoid long row locks on cars.
+    # REPLACE CONDITION ASSESSMENTS — same transaction as parent rows.
     # ============================================================
-    car_ids = list(vin_to_id.values())
+    car_ids = [
+        car_id for vin, car_id in vin_to_id.items()
+        if vin not in existing_map or not existing_map[vin].is_manually_upserted
+    ]
 
     if car_ids:
         await apply_tx_timeouts(db)
@@ -1593,10 +1823,8 @@ async def bulk_save_vehicles(
             if cond_rows:
                 await db.execute(insert(ConditionAssessmentModel), cond_rows)
 
-        await db.commit()
-
     # ============================================================
-    # TRANSACTION #3 — INSERT PHOTOS
+    # INSERT PHOTOS
     # Insert only new photos that we detected earlier.
     # ============================================================
     if photos_insert:
@@ -1626,7 +1854,7 @@ async def bulk_save_vehicles(
         if photo_rows:
             await db.execute(insert(PhotoModel), photo_rows)
 
-        await db.commit()
+    await db.commit()
 
     return {
         "celery_tasks": celery_payload,
@@ -1745,34 +1973,35 @@ def _model_to_dict(model) -> Dict[str, Any]:
         for column in model.__table__.columns
     }
 
+PARSER_RELEVANT_FIELDS = {
+    "vehicle",
+    "engine_title",
+    "mileage",
+    "make",
+    "model",
+    "year",
+    "transmision",
+}
 
-def _model_to_dict(model) -> Dict[str, Any]:
-    """
-    Convert SQLAlchemy model instance to dict.
-    Only includes table columns (без relationships).
-    """
-    return {
-        column.name: _serialize(getattr(model, column.name))
-        for column in model.__table__.columns
-    }
 
 async def upsert_vehicle(
     vehicle_data: CarUpsertSchema,
-    db: AsyncSession
-) -> Tuple[bool, str]:
+    db: AsyncSession,
+) -> Tuple[bool, str, bool]:
 
-    # safe lower
     if vehicle_data.auction:
         vehicle_data.auction = vehicle_data.auction.lower()
 
     try:
         existing_vehicle = await get_vehicle_by_vin_for_upsert(
-            db, vehicle_data.vin
+            db,
+            vehicle_data.vin,
         )
 
         # =====================================================
-        # NORMALIZE MAKE / MODEL (SAFE + FALLBACK)
+        # NORMALIZE MAKE / MODEL
         # =====================================================
+
         make_data = None
         incoming_make = vehicle_data.make
         incoming_model = vehicle_data.model
@@ -1782,16 +2011,21 @@ async def upsert_vehicle(
             make_data = MAKES_AND_MODELS.get(make_key)
 
             if make_data:
-                incoming_make = make_data.get("original", incoming_make)
+                incoming_make = make_data.get(
+                    "original",
+                    incoming_make,
+                )
 
                 if incoming_model:
                     model_key = incoming_model.strip().lower()
-                    model_original = make_data.get("models", {}).get(model_key)
+                    model_original = make_data.get(
+                        "models",
+                        {},
+                    ).get(model_key)
 
                     if model_original:
                         incoming_model = model_original
 
-        # fallback to existing if missing
         if existing_vehicle:
             if not incoming_make:
                 incoming_make = existing_vehicle.make
@@ -1805,116 +2039,280 @@ async def upsert_vehicle(
         # =====================================================
         # NORMALIZE OTHER FIELDS
         # =====================================================
+
         if vehicle_data.fuel_type:
-            vehicle_data.fuel_type = norm(vehicle_data.fuel_type)
+            vehicle_data.fuel_type = norm(
+                vehicle_data.fuel_type
+            )
 
         if vehicle_data.transmision:
-            vehicle_data.transmision = norm(vehicle_data.transmision)
+            vehicle_data.transmision = norm(
+                vehicle_data.transmision
+            )
 
-        # ========================
+        # =====================================================
         # UPDATE EXISTING
-        # ========================
+        # =====================================================
+
         if existing_vehicle:
 
-            before_snapshot = _model_to_dict(existing_vehicle)
+            before_snapshot = _model_to_dict(
+                existing_vehicle
+            )
+            preserve_manual_recommendation = bool(
+                existing_vehicle.recommendation_manually_set
+            )
+            previous_recommendation = existing_vehicle.recommendation_status
+            previous_reasons = existing_vehicle.recommendation_status_reasons
+            previous_damage_issues = {
+                assessment.issue_description
+                for assessment in existing_vehicle.condition_assessments
+                if assessment.issue_description
+            }
 
-            existing_vehicle.relevance = RelevanceStatus.ACTIVE
-            existing_vehicle.is_checked = False
-            existing_vehicle.attempts = 0
-            existing_vehicle.recommendation_status = RecommendationStatus.RECOMMENDED
-            existing_vehicle.recommendation_status_reasons = None
+            incoming_data = vehicle_data.dict(
+                exclude={
+                    "photos",
+                    "photos_hd",
+                    "condition_assessments",
+                }
+            )
+
+            should_parse = not bool(
+                existing_vehicle.is_checked
+            )
+
+            if existing_vehicle.is_checked:
+
+                for field in PARSER_RELEVANT_FIELDS:
+
+                    new_value = incoming_data.get(field)
+
+                    if new_value is None:
+                        continue
+
+                    old_value = getattr(
+                        existing_vehicle,
+                        field,
+                        None,
+                    )
+
+                    if new_value != old_value:
+                        should_parse = True
+
+                        logger.info(
+                            "Parser relevant field changed | "
+                            "vin=%s field=%s old=%r new=%r",
+                            vehicle_data.vin,
+                            field,
+                            old_value,
+                            new_value,
+                        )
+
+                        break
+
+            existing_vehicle.relevance = (
+                RelevanceStatus.ACTIVE
+            )
+
             existing_vehicle.is_manually_upserted = True
 
-            for field, value in vehicle_data.dict(
-                exclude={"photos", "photos_hd", "condition_assessments"}
-            ).items():
+            # Скидаємо parser state ТІЛЬКИ якщо
+            # реально буде повторний parsing.
+            if should_parse:
+                existing_vehicle.is_checked = False
+                existing_vehicle.attempts = 0
+
+            for field, value in incoming_data.items():
 
                 if value is not None or field == "date":
-                    setattr(existing_vehicle, field, value)
+                    setattr(
+                        existing_vehicle,
+                        field,
+                        value,
+                    )
 
-            _apply_recommendation_rules(existing_vehicle)
+            recommendation_override_triggered = (
+                bool(vehicle_data.fuel_type)
+                and vehicle_data.fuel_type not in {"gasoline", "flexible fuel", "unknown", "gas"}
+                and vehicle_data.fuel_type != norm(before_snapshot.get("fuel_type"))
+            ) or (
+                bool(vehicle_data.transmision)
+                and vehicle_data.transmision != "automatic"
+                and vehicle_data.transmision != norm(before_snapshot.get("transmision"))
+            )
+
+            _apply_recommendation_rules(
+                existing_vehicle
+            )
 
             await db.execute(
-                delete(ConditionAssessmentModel).where(
-                    ConditionAssessmentModel.car_id == existing_vehicle.id
+                delete(
+                    ConditionAssessmentModel
+                ).where(
+                    ConditionAssessmentModel.car_id
+                    == existing_vehicle.id
                 )
             )
+
             await db.flush()
 
             if vehicle_data.condition_assessments:
-                for assessment in vehicle_data.condition_assessments:
-                    if assessment.type_of_damage and assessment.issue_description:
+
+                for assessment in (
+                    vehicle_data.condition_assessments
+                ):
+
+                    if (
+                        assessment.type_of_damage
+                        and assessment.issue_description
+                    ):
+
                         db.add(
                             ConditionAssessmentModel(
-                                type_of_damage=assessment.type_of_damage,
-                                issue_description=assessment.issue_description,
+                                type_of_damage=(
+                                    assessment.type_of_damage
+                                ),
+                                issue_description=(
+                                    assessment.issue_description
+                                ),
                                 car_id=existing_vehicle.id,
                             )
                         )
+
                         _apply_damage_rules(
                             existing_vehicle,
-                            assessment.issue_description
+                            assessment.issue_description,
                         )
+                        if (
+                            assessment.issue_description
+                            not in previous_damage_issues
+                            and assessment.issue_description
+                            in {
+                                "Rejected Repair",
+                                "Burn Engine",
+                                "Mechanical",
+                                "Replaced Vin",
+                                "Burn",
+                                "Undercarriage",
+                                "Water/Flood",
+                                "Burn Interior",
+                                "Rollover",
+                            }
+                        ):
+                            recommendation_override_triggered = True
+
+            if preserve_manual_recommendation and not recommendation_override_triggered:
+                existing_vehicle.recommendation_status = previous_recommendation
+                existing_vehicle.recommendation_status_reasons = previous_reasons
+            elif recommendation_override_triggered:
+                existing_vehicle.recommendation_manually_set = False
 
             await db.flush()
 
-            await log_car_update(before_snapshot, existing_vehicle)
+            await log_car_update(
+                before_snapshot,
+                existing_vehicle,
+            )
 
             await db.commit()
 
-            return True, "success"
+            return True, "success", should_parse
 
-        # ========================
+        # =====================================================
         # CREATE NEW
-        # ========================
+        # =====================================================
+
         vehicle = CarModel(
             **vehicle_data.dict(
-                exclude={"photos", "photos_hd", "condition_assessments"}
+                exclude={
+                    "photos",
+                    "photos_hd",
+                    "condition_assessments",
+                }
             )
         )
 
         vehicle.is_manually_upserted = True
         vehicle.relevance = RelevanceStatus.ACTIVE
 
+        vehicle.is_checked = False
+        vehicle.attempts = 0
+
         db.add(vehicle)
+
         await db.flush()
 
         _apply_recommendation_rules(vehicle)
 
         if vehicle_data.condition_assessments:
-            for assessment in vehicle_data.condition_assessments:
-                if assessment.issue_description and assessment.type_of_damage:
+
+            for assessment in (
+                vehicle_data.condition_assessments
+            ):
+
+                if (
+                    assessment.issue_description
+                    and assessment.type_of_damage
+                ):
+
                     db.add(
                         ConditionAssessmentModel(
-                            type_of_damage=assessment.type_of_damage,
-                            issue_description=assessment.issue_description,
+                            type_of_damage=(
+                                assessment.type_of_damage
+                            ),
+                            issue_description=(
+                                assessment.issue_description
+                            ),
                             car_id=vehicle.id,
                         )
                     )
-                    _apply_damage_rules(vehicle, assessment.issue_description)
+
+                    _apply_damage_rules(
+                        vehicle,
+                        assessment.issue_description,
+                    )
 
         if vehicle_data.photos:
             db.add_all([
-                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=False)
+                PhotoModel(
+                    url=p.url,
+                    car_id=vehicle.id,
+                    is_hd=False,
+                )
                 for p in vehicle_data.photos
             ])
 
         if vehicle_data.photos_hd:
             db.add_all([
-                PhotoModel(url=p.url, car_id=vehicle.id, is_hd=True)
+                PhotoModel(
+                    url=p.url,
+                    car_id=vehicle.id,
+                    is_hd=True,
+                )
                 for p in vehicle_data.photos_hd
             ])
 
         await db.commit()
 
-        return True, "success"
+        return True, "success", True
 
     except IntegrityError as e:
         await db.rollback()
-        logger.exception("IntegrityError | vin=%s", vehicle_data.vin)
-        return False, str(e)
+
+        logger.exception(
+            "IntegrityError | vin=%s",
+            vehicle_data.vin,
+        )
+
+        return False, str(e), False
 
     except Exception as e:
         await db.rollback()
-        logger.exception("Unexpected error | vin=%s", vehicle_data.vin)
-        return False, str(e)
+
+        logger.exception(
+            "Unexpected error | vin=%s",
+            vehicle_data.vin,
+        )
+
+        return False, str(e), False

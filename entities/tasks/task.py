@@ -33,6 +33,7 @@ from models.admin import FilterModel, ROIModel
 from models.vehicle import (
     AutoCheckModel,
     CarModel,
+    CarStatus,
     CarSaleHistoryModel,
     CarInventoryInvestmentsModel,
     CarInventoryModel,
@@ -561,21 +562,36 @@ def parse_and_update_car(
     parsed_mileage = normalize_mileage_value(data.get("mileage"))
     parsed_accident_count = normalize_accident_count(data.get("accident_count"))
 
-    price_values = []
+    price_values_by_source = {}
     for key in ("jd", "d_max", "manheim"):
         parsed_price = parse_int_safe(data.get(key))
-        if parsed_price is not None:
-            price_values.append(parsed_price)
+        if parsed_price is not None and parsed_price > 0:
+            price_values_by_source[key] = parsed_price
 
-    avg_market_price = int(sum(price_values) / len(price_values)) if price_values else 0
+    from services.market_price import merge_market_prices
+
+    previous_sources = car_pre.market_price_sources
+    candidate_avg_market_price, merged_sources = merge_market_prices(
+        car_pre.avg_market_price, previous_sources, price_values_by_source,
+    )
+    market_refresh_is_complete = len(price_values_by_source) == 3
+    previous_avg_market_price = car_pre.avg_market_price
+    should_refresh_market = candidate_avg_market_price is not None and (
+        candidate_avg_market_price != previous_avg_market_price
+    )
+    calculation_market_price = (
+        candidate_avg_market_price
+        if should_refresh_market
+        else previous_avg_market_price
+    )
 
     with SessionLocal() as db:
         default_roi = _load_default_roi(db)
 
-        if default_roi and avg_market_price:
-            predicted_total_investments = avg_market_price / (1 + default_roi.roi / 100.0)
+        if default_roi and calculation_market_price:
+            predicted_total_investments = calculation_market_price / (1 + default_roi.roi / 100.0)
             predicted_profit_margin_percent = default_roi.profit_margin
-            predicted_profit_margin = avg_market_price * (default_roi.profit_margin / 100.0)
+            predicted_profit_margin = calculation_market_price * (default_roi.profit_margin / 100.0)
             predicted_roi = default_roi.roi
         else:
             predicted_total_investments = 0.0
@@ -639,6 +655,7 @@ def parse_and_update_car(
             if business_attempts == 0 and sale_history_rows and not car.sales_history:
                 if len(sale_history_rows) >= 4:
                     car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                    car.recommendation_manually_set = False
                     car.recommendation_status_reasons = add_reason_text(
                         car.recommendation_status_reasons,
                         sales_history_reason_to_add or ""
@@ -693,16 +710,41 @@ def parse_and_update_car(
             else:
                 car.has_correct_accidents = False
 
-            # market/roi/fees
-            car.avg_market_price = avg_market_price
-            car.predicted_total_investments = predicted_total_investments
-            car.predicted_profit_margin_percent = predicted_profit_margin_percent
-            car.predicted_profit_margin = predicted_profit_margin
-            car.auction_fee = auction_fee
-            car.predicted_roi = predicted_roi
-            car.suggested_bid = int(
-                (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
+            # Market-derived fields are one consistency unit. Do not replace an
+            # established price with a partial/empty upstream response, and do
+            # not overwrite a manual price saved while this task was running.
+            market_snapshot_is_current = (
+                car.avg_market_price == previous_avg_market_price
+                and car.market_price_sources == previous_sources
             )
+            if market_snapshot_is_current and merged_sources:
+                car.market_price_sources = merged_sources
+            if should_refresh_market and market_snapshot_is_current:
+                car.avg_market_price = candidate_avg_market_price
+                car.predicted_total_investments = predicted_total_investments
+                car.predicted_profit_margin_percent = predicted_profit_margin_percent
+                car.predicted_profit_margin = predicted_profit_margin
+                car.auction_fee = auction_fee
+                car.predicted_roi = predicted_roi
+                car.suggested_bid = int(
+                    (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
+                )
+            elif candidate_avg_market_price is None:
+                logger.warning(
+                    "VIN=%s returned no valid market prices; keeping established market fields",
+                    vin,
+                )
+            elif not market_refresh_is_complete and previous_avg_market_price is not None:
+                logger.warning(
+                    "VIN=%s returned partial market data (%s); keeping established market fields",
+                    vin,
+                    sorted(price_values_by_source),
+                )
+            elif not market_snapshot_is_current:
+                logger.info(
+                    "VIN=%s market price changed concurrently; parser result was not applied",
+                    vin,
+                )
 
             # autochek html
             if screenshot_url:
@@ -840,24 +882,37 @@ def update_car_bids() -> Dict[str, Any]:
 
                     # update bids/status
                     try:
+                        previous_current_bid = car.current_bid
                         car.current_bid = int(float(pre_bid))
                     except (ValueError, TypeError):
                         logger.debug("skip: invalid pre_bid=%r lot=%s", pre_bid, lot)
                         continue
 
-                    if car.suggested_bid is not None:
-                        if car.current_bid > car.suggested_bid:
+                    bid_limit = (
+                        car.actual_bid
+                        if car.actual_bid is not None
+                        else car.suggested_bid
+                    )
+                    if bid_limit is not None:
+                        if car.current_bid > bid_limit and (
+                            not car.recommendation_manually_set
+                            or car.current_bid != previous_current_bid
+                        ):
                             car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                            car.recommendation_manually_set = False
                             reasons = (car.recommendation_status_reasons or "")
                             if "suggested bid < current bid;" not in reasons:
                                 car.recommendation_status_reasons = (reasons + "suggested bid < current bid;").strip()
-                        else:
+                        elif car.current_bid <= bid_limit and not car.recommendation_manually_set:
                             # current bid does not exceed suggested
                             if car.recommendation_status_reasons:
                                 car.recommendation_status_reasons = car.recommendation_status_reasons.replace(
                                     "suggested bid < current bid;", ""
                                 )
-                            if not car.recommendation_status_reasons:
+                            if (
+                                not car.recommendation_status_reasons
+                                and not car.recommendation_manually_set
+                            ):
                                 car.recommendation_status = RecommendationStatus.RECOMMENDED
 
                     base = (car.sum_of_investments or 0) + (car.current_bid or 0)
@@ -1184,6 +1239,21 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
         existing_vehicle: CarModel,
         vehicle_info: CarCreateSchema,
     ) -> None:
+        preserve_manual_recommendation = bool(
+            existing_vehicle.recommendation_manually_set
+        )
+        previous_recommendation = existing_vehicle.recommendation_status
+        previous_reasons = existing_vehicle.recommendation_status_reasons
+        previous_fuel_type = existing_vehicle.fuel_type
+        previous_transmission = existing_vehicle.transmision
+        previous_current_bid = existing_vehicle.current_bid
+        previous_damage_issues = {
+            assessment.issue_description
+            for assessment in existing_vehicle.condition_assessments
+            if assessment.issue_description
+        }
+        recommendation_override_triggered = False
+
         # 1) scalar fields
         for field, value in vehicle_info.dict(
             exclude={"photos", "photos_hd", "sales_history", "condition_assessments"}
@@ -1192,12 +1262,16 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 setattr(existing_vehicle, field, value)
 
                 if field == "fuel_type" and value not in ["Gasoline", "Flexible Fuel", "Unknown"]:
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    _add_reason_if_missing(existing_vehicle, str(value))
+                    if not preserve_manual_recommendation or value != previous_fuel_type:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        _add_reason_if_missing(existing_vehicle, str(value))
+                        recommendation_override_triggered = True
 
                 if field == "transmision" and value != "Automatic":
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    _add_reason_if_missing(existing_vehicle, str(value))
+                    if not preserve_manual_recommendation or value != previous_transmission:
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        _add_reason_if_missing(existing_vehicle, str(value))
+                        recommendation_override_triggered = True
 
         # 2) photos — add only missing
         existing_photo_urls = {p.url for p in existing_vehicle.photos}
@@ -1249,22 +1323,33 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                     )
                 )
                 if a.issue_description in bad_issues:
-                    existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    _add_reason_if_missing(existing_vehicle, a.issue_description)
+                    if (
+                        not preserve_manual_recommendation
+                        or a.issue_description not in previous_damage_issues
+                    ):
+                        existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                        _add_reason_if_missing(existing_vehicle, a.issue_description)
+                        recommendation_override_triggered = True
 
         # 4) current bid > suggested bid
         if (
             vehicle_info.current_bid is not None
             and existing_vehicle.suggested_bid is not None
             and vehicle_info.current_bid > existing_vehicle.suggested_bid
+            and (
+                not preserve_manual_recommendation
+                or vehicle_info.current_bid != previous_current_bid
+            )
         ):
             existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
             _add_reason_if_missing(existing_vehicle, "suggested bid < current bid")
+            recommendation_override_triggered = True
 
         # 5) sales history — add only if not present in DB
         if not existing_vehicle.sales_history and vehicle_info.sales_history:
             if len(vehicle_info.sales_history) >= 4:
                 existing_vehicle.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
+                recommendation_override_triggered = True
                 _add_reason_if_missing(
                     existing_vehicle,
                     f"sales at auction in the last 3 years: {len(vehicle_info.sales_history)}",
@@ -1280,6 +1365,12 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
             if history_rows:
                 db.add_all(history_rows)
 
+        if preserve_manual_recommendation and not recommendation_override_triggered:
+            existing_vehicle.recommendation_status = previous_recommendation
+            existing_vehicle.recommendation_status_reasons = previous_reasons
+        elif recommendation_override_triggered:
+            existing_vehicle.recommendation_manually_set = False
+
         db.add(existing_vehicle)
 
     # -----------------------------------
@@ -1291,6 +1382,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
                 select(CarModel.id).where(
                     and_(
                         CarModel.relevance == RelevanceStatus.IRRELEVANT,
+                        CarModel.car_status != CarStatus.WON,
                         CarModel.date.is_not(None),
                         CarModel.date <= now_utc,
                     )
@@ -1396,6 +1488,7 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
             select(CarModel.vin).where(
                 and_(
                     CarModel.relevance == RelevanceStatus.ACTIVE,
+                    CarModel.car_status != CarStatus.WON,
                     CarModel.date.is_not(None),
                     CarModel.date <= now_utc,
                 )

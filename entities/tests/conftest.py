@@ -336,6 +336,17 @@ def patch_task_sessionlocal(monkeypatch, db_session_sync):
     """
     Patch task_module.SessionLocal to return the test sync session.
     """
+    execute = db_session_sync.execute
+
+    def sqlite_execute(statement, *args, **kwargs):
+        # SQLite cannot run PostgreSQL timeout commands. These tests cover
+        # business logic; row-lock semantics need separate PostgreSQL tests.
+        if str(statement).startswith("SET LOCAL "):
+            return None
+        return execute(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session_sync, "execute", sqlite_execute)
+
     class _ContextManager:
         def __enter__(self): return db_session_sync
         def __exit__(self, exc_type, exc, tb): pass

@@ -5,7 +5,7 @@ import pytest
 from sqlalchemy import text
 
 import api.v1.routers.bidding_hub as bidding_hub_router
-from models.vehicle import HistoryModel
+from models.vehicle import CarStatus, HistoryModel
 
 pytestmark = pytest.mark.anyio
 
@@ -28,7 +28,7 @@ async def test_delete_vehicle_success_returns_204(client, db_session, monkeypatc
     Deleting an existing vehicle returns 204 and creates a history record.
     """
     async def fake_update_vehicle_status(db, car_id, status):
-        return SimpleNamespace(id=car_id)
+        return SimpleNamespace(id=car_id), CarStatus.BIDDING.value
 
     monkeypatch.setattr(bidding_hub_router, "update_vehicle_status", fake_update_vehicle_status, raising=True)
     response = await client.delete("/api/v1/bidding_hub/delete/123")
@@ -46,7 +46,7 @@ async def test_delete_vehicle_not_found_returns_404(client, monkeypatch, overrid
     Deleting a non-existing vehicle returns 404.
     """
     async def fake_update_vehicle_status_none(db, car_id, status):
-        return None
+        return None, CarStatus.BIDDING.value
 
     monkeypatch.setattr(bidding_hub_router, "update_vehicle_status", fake_update_vehicle_status_none, raising=True)
     response = await client.delete("/api/v1/bidding_hub/delete/999999")
@@ -54,16 +54,12 @@ async def test_delete_vehicle_not_found_returns_404(client, monkeypatch, overrid
     assert "Vehicle not found" in response.text
 
 
-async def test_update_actual_bid_vehicle_not_found_returns_404(client, monkeypatch, override_bidding_hub_user):
+async def test_update_actual_bid_vehicle_not_found_returns_404(client, override_bidding_hub_user):
     """
     Posting actual-bid for a non-existing vehicle returns 404.
     """
-    async def fake_get_vehicle_by_id_none(db, car_id):
-        return None
-
-    monkeypatch.setattr(bidding_hub_router, "get_vehicle_by_id", fake_get_vehicle_by_id_none, raising=True)
     request_payload = {"actual_bid": 5000, "roi": 20, "profit_margin": 10, "comment": "test"}
-    response = await client.post("/api/v1/bidding_hub/actual-bid/1", json=request_payload)
+    response = await client.post("/api/v1/bidding_hub/actual-bid/999999", json=request_payload)
     assert response.status_code == 404
     assert "Vehicle not found" in response.text
 

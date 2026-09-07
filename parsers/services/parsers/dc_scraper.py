@@ -7,6 +7,7 @@ import os
 import random
 import re
 import time
+from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
 import httpx
@@ -511,8 +512,7 @@ class DealerCenterScraper:
 
     # ----------------------- parsing & API helpers ---------------------
 
-    @staticmethod
-    def _parse_history(html_data: str, fallback_odometer: Optional[int]) -> dict:
+    def _parse_history(self, html_data: str, fallback_odometer: Optional[int]) -> dict:
         """
         Extract owners, odometer and accident count from the AutoCheck HTML.
         """
@@ -535,17 +535,56 @@ class DealerCenterScraper:
             odo_val = fallback_odometer
 
         # accidents
-        acc_cnt = 0
+        acc_cnt = None
+        accident_section = soup.select_one("#accident")
+        if accident_section and re.search(
+            r"\bno accidents?(?:\s+(?:or|and|/|&)?\s*damage)?\s+(?:reported|found)",
+            accident_section.get_text(" ", strip=True), re.IGNORECASE,
+        ):
+            acc_cnt = 0
+
         try:
-            tables = soup.find_all("table", class_="table table-striped")
+            tables = soup.find_all(
+                "table",
+                class_="table table-striped",
+            )
+
             for table in tables:
-                if "Damage Type" in table.get_text():
-                    rows = table.find_all("tr")
-                    damage_rows = [row for row in rows if len(row.find_all("td")) >= 3]
-                    acc_cnt = len(damage_rows)
-                    break
+                if "Damage Type" not in table.get_text():
+                    continue
+
+                accident_dates = set()
+                incomplete = False
+
+                for row in table.find_all("tr"):
+                    cells = row.find_all("td")
+
+                    if len(cells) < 3:
+                        continue
+
+                    damage_date = cells[0].get_text(
+                        " ",
+                        strip=True,
+                    )
+
+                    damage_type = cells[1].get_text(" ", strip=True).lower()
+                    if damage_type not in {"collision", "accident"}:
+                        # Damage (e.g. vandalism) is not necessarily an accident.
+                        continue
+                    try:
+                        accident_dates.add(datetime.strptime(damage_date, "%m/%d/%Y").date())
+                    except ValueError:
+                        incomplete = True
+
+                acc_cnt = None if incomplete else len(accident_dates)
+                break
+
         except Exception as e:
-            logging.warning(f"Failed to extract accidents: {e}, defaulting to 0")
+            logging.warning(
+                "Failed to extract accidents for vin=%s: %s",
+                self.vin,
+                e,
+            )
 
         return {
             "owners": owners_val,

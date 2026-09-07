@@ -11,10 +11,10 @@ from sqlalchemy.orm import selectinload
 
 from core.config import Settings
 from core.dependencies import get_current_user
-from crud.vehicle import get_bidding_hub_vehicles, get_vehicle_by_id, update_vehicle_status
+from crud.vehicle import get_bidding_hub_vehicles, update_vehicle_status
 from db.session import get_db
 from models.user import UserModel
-from models.vehicle import CarStatus, FeeModel, HistoryModel
+from models.vehicle import CarModel, CarStatus, FeeModel, HistoryModel
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
@@ -163,7 +163,7 @@ async def delete_vehicle(
     logger.info(f"Deleting vehicle with car_id={car_id} from bidding hub for user_id={current_user.id}", extra=extra)
 
     try:
-        vehicle = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
+        vehicle, _ = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
         if not vehicle:
             logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
@@ -202,9 +202,18 @@ async def update_actual_bid(
     )
 
     try:
-        vehicle = await get_vehicle_by_id(db, car_id)
+        vehicle = (
+            await db.execute(
+                select(CarModel)
+                .where(CarModel.id == car_id)
+                .with_for_update()
+            )
+        ).scalars().first()
         if not vehicle:
             raise HTTPException(status_code=404, detail="Vehicle not found")
+
+        if data.actual_bid is None or data.actual_bid < 0:
+            raise HTTPException(status_code=400, detail="Actual bid must be a non-negative number")
 
         fees = (
             await db.execute(
