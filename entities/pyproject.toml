@@ -36,6 +36,18 @@ dependencies = [
     "bcrypt (>=4.3.0,<5.0.0)",
 ]
 
+[tool.poetry.group.scraping]
+optional = true
+
+[tool.poetry.group.scraping.dependencies]
+beautifulsoup4 = ">=4.13.4,<5.0.0"
+playwright = ">=1.52.0,<2.0.0"
+webdriver-manager = ">=4.0.2,<5.0.0"
+pillow = ">=11.2.1,<12.0.0"
+pytesseract = ">=0.3.13,<0.4.0"
+cairosvg = ">=2.8.2,<3.0.0"
+httpx = {version = ">=0.28.1,<0.29.0", extras = ["socks"]}
+
 [tool.ruff]
 line-length = 119
 target-version = "py312"
@@ -44,6 +56,10 @@ target-version = "py312"
 select = ["I"]
 fixable = ["I"]
 unfixable = ["F401", "F841"]
+
+[tool.ruff.lint.per-file-ignores]
+# Published Alembic history must not be rewritten for import-only lint changes.
+"db/migrations/versions/*.py" = ["I001"]
 
 [build-system]
 requires = ["poetry-core>=2.0.0,<3.0.0"]

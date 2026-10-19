@@ -7,37 +7,44 @@ from datetime import date
 from typing import Any, Dict, List, Optional
 
 import httpx
+from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
-from celery.exceptions import CeleryError
 
 from core.celery_config import app as celery_app
 from core.config import Settings
-from core.dependencies import get_current_user, get_settings, get_token
+from core.dependencies import (
+    get_current_user,
+    get_settings,
+    get_token,
+    get_vehicle_data_source,
+    get_vehicle_enrichment_publisher,
+)
 from crud.vehicle import (
     add_part_to_vehicle,
-    bulk_save_vehicles,
     delete_part,
     get_filtered_vehicles,
     get_parts_by_vehicle_id,
     get_vehicle_by_id,
     get_vehicle_by_vin,
-    save_vehicle_with_photos,
+    is_vehicle_sellable,
     update_cars_relevance,
     update_part,
     update_vehicle_status,
-    is_vehicle_sellable,
-    upsert_vehicle
 )
 from db.session import get_db
+from domain.vehicle_ingestion import VehicleEnrichmentPublisher
+from domain.vehicle_source import VehicleDataSource
+from exceptions.vehicle_ingestion import VehicleBatchImportError, VehicleUpsertError
+from exceptions.vehicle_source import InvalidVehicleSourceData, SavedVehicleNotFound, VehicleSourceUnavailable
+from integrations.parsing import ParsingClient
 from models.admin import ROIModel
 from models.user import UserModel
 from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus
 from schemas.vehicle import (
-    CarUpsertSchema,
     CarBaseSchema,
     CarBulkCreateSchema,
     CarCostsUpdateRequestSchema,
@@ -46,17 +53,20 @@ from schemas.vehicle import (
     CarFilterOptionsSchema,
     CarListResponseSchema,
     CarUpdateSchema,
+    CarUpsertSchema,
     PartRequestScheme,
     PartResponseScheme,
     UpdateCarStatusSchema,
 )
+from services.single_vehicle_ingestion import ingest_vehicle
 from services.vehicle import (
     car_to_dict,
     prepare_car_detail_response,
     prepare_response,
-    scrape_and_save_sales_history,
-    scrape_and_save_vehicle,
 )
+from services.vehicle_ingestion import bulk_save_vehicles
+from services.vehicle_snapshot import save_vehicle_snapshot
+from services.vehicle_upsert import upsert_vehicle
 
 # from tasks.task import parse_and_update_car
 
@@ -304,6 +314,7 @@ async def get_cars(
     db: AsyncSession = Depends(get_db),
     settings: Settings = Depends(get_settings),
     current_user: UserModel = Depends(get_current_user),
+    vehicle_source: VehicleDataSource = Depends(get_vehicle_data_source),
 ) -> CarListResponseSchema:
     """
     Retrieve a paginated list of cars based on filters.
@@ -387,8 +398,14 @@ async def get_cars(
             return CarListResponseSchema(cars=[validated_vehicle], page_links={}, last=True)
 
         logger.info(f"Vehicle with VIN {vin} not found in DB, attempting to scrape", extra=extra)
-        await scrape_and_save_vehicle(vin, db, settings)
-        await db.commit()
+        try:
+            await ingest_vehicle(vin, db, vehicle_source)
+        except VehicleSourceUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {exc}") from exc
+        except InvalidVehicleSourceData as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid data from parser: {exc}") from exc
+        except SavedVehicleNotFound as exc:
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
         vehicle = await get_vehicle_by_vin(db, vin, current_user.id if current_user else None)
         if not vehicle:
@@ -887,6 +904,7 @@ async def bulk_create_cars(
     db: AsyncSession = Depends(get_db),
     token: str = Depends(get_token),
     settings: Settings = Depends(get_settings),
+    publisher: VehicleEnrichmentPublisher = Depends(get_vehicle_enrichment_publisher),
 ):
     request_id = "N/A"
     extra = {"request_id": request_id, "user_id": "N/A"}
@@ -894,17 +912,7 @@ async def bulk_create_cars(
     logger.info(f"Starting bulk creation of {len(data.vehicles)} vehicles", extra=extra)
 
     try:
-        result = await bulk_save_vehicles(db, data)
-
-        await db.commit()
-
-        # celery після commit
-        for task_payload in result["celery_tasks"]:
-            celery_app.send_task(
-                "tasks.task.parse_and_update_car",
-                kwargs=task_payload,
-                queue="car_parsing_queue",
-            )
+        result = await bulk_save_vehicles(db, data, publisher)
 
         return {
             "message": "Cars processed",
@@ -912,8 +920,7 @@ async def bulk_create_cars(
             "updated": result["updated_count"],
         }
 
-    except Exception as e:
-        await db.rollback()
+    except VehicleBatchImportError as e:
         logger.exception(f"Bulk error: {e}", extra=extra)
         raise HTTPException(500, "Bulk error")
 
@@ -979,8 +986,8 @@ async def update_car_info(
 
     # 2) Тягнемо дані з парсера по VIN
     try:
-        async with httpx.AsyncClient(timeout=10.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}) as client:
-            resp = await client.get(f"http://parsers:8001/api/v1/apicar/{vin}")
+        async with ParsingClient(timeout=10.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}) as client:
+            resp = await client.get(f"/api/v1/apicar/{vin}")
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as e:
@@ -1005,9 +1012,8 @@ async def update_car_info(
         raise HTTPException(status_code=422, detail=f"Invalid data from parser: {e.errors()}")
 
     # 4) Зберігаю/оновлюю
-    saved = await save_vehicle_with_photos(dto, "update", db)
-    await db.commit()
-    # Для режиму update НЕ трактуємо "вже існує" як помилку; if saved is False — все одно йдемо далі
+    await save_vehicle_snapshot(dto, "update", db)
+    # Preserve the existing response policy: return the readable vehicle after save.
 
     # 5) Повертаю свіже авто по VIN
     result = await db.execute(
@@ -1064,71 +1070,10 @@ async def upsert(
     vehicle_data: CarUpsertSchema,
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
+    publisher: VehicleEnrichmentPublisher = Depends(get_vehicle_enrichment_publisher),
 ):
-    res, message, should_parse = await upsert_vehicle(
-        vehicle_data=vehicle_data,
-        db=db,
-    )
-
-    if not res:
-        raise HTTPException(
-            status_code=500,
-            detail=message,
-        )
-
-    task_id = None
-
-    if should_parse:
-        try:
-            logger.info(
-                "Trying to send Celery task "
-                "parse_and_update_car | vin=%s",
-                vehicle_data.vin,
-            )
-
-            task_result = celery_app.send_task(
-                "tasks.task.parse_and_update_car",
-                kwargs={
-                    "vin": vehicle_data.vin,
-                    "car_name": vehicle_data.vehicle,
-                    "car_engine": vehicle_data.engine_title,
-                    "mileage": vehicle_data.mileage,
-                    "car_make": vehicle_data.make,
-                    "car_model": vehicle_data.model,
-                    "car_year": vehicle_data.year,
-                    "car_transmison": vehicle_data.transmision,
-                },
-                queue="car_parsing_queue",
-            )
-
-            task_id = getattr(
-                task_result,
-                "id",
-                None,
-            )
-
-            logger.info(
-                "Celery task sent successfully | "
-                "vin=%s task_id=%s",
-                vehicle_data.vin,
-                task_id,
-            )
-
-        except Exception:
-            logger.exception(
-                "Celery send failed but vehicle saved | vin=%s",
-                vehicle_data.vin,
-            )
-
-    else:
-        logger.info(
-            "Celery parsing skipped | "
-            "vin=%s already checked and "
-            "parser fields unchanged",
-            vehicle_data.vin,
-        )
-
-    return {
-        "message": "vehicle saved",
-        "task_id": task_id,
-    }
+    try:
+        task_id = await upsert_vehicle(db, vehicle_data, publisher)
+    except VehicleUpsertError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    return {"message": "vehicle saved", "task_id": task_id}

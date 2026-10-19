@@ -2,12 +2,11 @@ import asyncio
 from logging.config import fileConfig
 
 from alembic import context
-from asyncpg import Connection
-from sqlalchemy import pool
+from sqlalchemy import Connection, pool
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from core.dependencies import Settings, get_settings
-from db.session import POSTGRESQL_DATABASE_URL
+from core.config import settings
+from db.config import DatabaseConfig
 from models import Base
 
 # this is the Alembic Config object, which provides
@@ -21,11 +20,8 @@ fileConfig(config.config_file_name)  # type: ignore
 # add your model's MetaData object here
 target_metadata = Base.metadata
 
-settings = Settings()
-
-
 def get_url():
-    return POSTGRESQL_DATABASE_URL
+    return DatabaseConfig.from_settings(settings).url.render_as_string(hide_password=False)
 
 
 def run_migrations_offline():

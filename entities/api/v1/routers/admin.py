@@ -17,12 +17,13 @@ from sqlalchemy.future import select
 from core.celery_config import app as celery_app
 from core.dependencies import get_current_user, get_settings, get_token
 from db.session import get_db
+from integrations.parsing import ParsingClient
 from models.admin import FilterModel, ROIModel
-from models.vehicle import CarModel, CarStatus, FeeModel, RelevanceStatus
 from models.filter_kickoff_queue import (
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
 )
+from models.vehicle import CarModel, CarStatus, FeeModel, RelevanceStatus
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -32,14 +33,14 @@ from schemas.admin import (
     ROIListResponseSchema,
     ROIResponseSchema,
 )
+from services.filter_kickoff_queue import enqueue_filter_kickoff
 from services.lock import (
     acquire_kickoff_lock,
-    release_kickoff_lock,
-    is_kickoff_busy,
     generate_lock_token,
+    is_kickoff_busy,
+    release_kickoff_lock,
 )
-from services.vehicle import build_car_filter_query, scrape_and_save_sales_history
-from services.filter_kickoff_queue import enqueue_filter_kickoff
+from services.vehicle import build_car_filter_query
 
 # from tasks.task import parse_and_update_car
 
@@ -603,12 +604,12 @@ async def proxy_upload(
     For fixed IAAI fees we store range 0..OPEN_CAP (not NULL..NULL).
     """
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
+        async with ParsingClient(timeout=60) as client:
             files = {
                 "high_volume": (high_volume.filename, await high_volume.read(), high_volume.content_type),
                 "internet_bid": (internet_bid.filename, await internet_bid.read(), internet_bid.content_type),
             }
-            resp = await client.post("http://parsers:8001/api/v1/parsers/scrape/iaai/fees", files=files)
+            resp = await client.post("/api/v1/parsers/scrape/iaai/fees", files=files)
 
         data = resp.json()
         fees_data = data.get("fees", {})
@@ -693,5 +694,5 @@ async def proxy_upload(
 
 @router.post("/load-db")
 async def load_db():
-    async with httpx.AsyncClient(timeout=30) as client:
-        await client.post("http://parsers:8001/startup")
+    async with ParsingClient(timeout=30) as client:
+        await client.post("/startup")

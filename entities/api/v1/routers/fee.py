@@ -1,14 +1,14 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_current_user
 from db.session import get_db
-from models.vehicle import FeeModel
 from models.user import UserModel
-from schemas.vehicle import FeeCreate, FeeUpdate, FeeRead
+from models.vehicle import FeeModel
+from schemas.vehicle import FeeCreate, FeeRead, FeeUpdate
 
 router = APIRouter(prefix="/fees")
 

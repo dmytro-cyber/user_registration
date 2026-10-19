@@ -1,52 +1,39 @@
-FROM python:3.12.3-slim
+FROM python:3.12.3-slim AS runtime
 
-# Setting environment variables for Python
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV PIP_NO_CACHE_DIR=off
-ENV ALEMBIC_CONFIG=/usr/entities/alembic/alembic.ini
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    ALEMBIC_CONFIG=/usr/entities/alembic/alembic.ini
 
-# Installing dependencies for Python
-RUN apt update && apt install -y \
-    gcc \
-    libpq-dev \
-    netcat-openbsd \
-    postgresql-client \
-    dos2unix \
-    && apt clean \
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev netcat-openbsd postgresql-client dos2unix \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Poetry
-RUN python -m pip install --upgrade pip && \
-    pip install poetry
-
-# Copy dependency files
-COPY ./entities/poetry.lock /usr/entities/poetry/poetry.lock
-COPY ./entities/pyproject.toml /usr/entities/poetry/pyproject.toml
+RUN python -m pip install --upgrade pip && pip install poetry
+COPY ./entities/poetry.lock ./entities/pyproject.toml /usr/entities/poetry/
 COPY ./entities/alembic.ini /usr/entities/alembic/alembic.ini
-# COPY ./car_data.csv /usr/entities/car_data.csv
-
-# Configure Poetry to avoid creating a virtual environment
-RUN poetry config virtualenvs.create false
-
-# Selecting a working directory
 WORKDIR /usr/entities/poetry
+RUN poetry config virtualenvs.create false \
+    && poetry install --no-root --only main
 
-# Install dependencies with Poetry
-RUN poetry lock
-RUN poetry install --no-root --only main
+WORKDIR /usr/entities/fastapi
+COPY ./entities .
+COPY ./commands /commands
+RUN dos2unix /commands/*.sh && chmod +x /commands/*.sh
 
-# Selecting a working directory
+# Browser/OCR dependencies belong only to the serialized scraping worker.
+FROM runtime AS scraping
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr libcairo2 chromium chromium-driver xvfb xauth \
+    && rm -rf /var/lib/apt/lists/*
+WORKDIR /usr/entities/poetry
+RUN poetry install --no-root --with scraping \
+    && playwright install --with-deps chromium
+ENV CHROMEDRIVER_PATH=/usr/bin/chromedriver \
+    CHROME_BINARY=/usr/bin/chromium \
+    DEALERCENTER_CREDENTIALS_FILE=/var/lib/entities-scraping/credentials.json
+RUN mkdir -p /var/lib/entities-scraping
 WORKDIR /usr/entities/fastapi
 
-# Copy the source code
-COPY ./entities .
-
-# Copy commands
-COPY ./commands /commands
-
-# Ensure Unix-style line endings for scripts
-RUN dos2unix /commands/*.sh
-
-# Add execute bit to commands files
-RUN chmod +x /commands/*.sh
+# Default target remains suitable for the API, ingestion and ordinary workers.
+FROM runtime AS api

@@ -9,19 +9,22 @@ from api.v1.routers.admin import router as admin_router
 from api.v1.routers.analytic import router as analytics_router
 from api.v1.routers.auth import router as auth_router
 from api.v1.routers.bidding_hub import router as bidding_hub_router
+from api.v1.routers.fee import router as fee_router
 from api.v1.routers.inventory import router as inventory_router
+from api.v1.routers.parsing import apicar_router, startup_router
+from api.v1.routers.parsing import router as parsing_router
 from api.v1.routers.user import router as user_router
 from api.v1.routers.vehicle import router as vehicle_router
-from api.v1.routers.fee import router as fee_router
 from core.celery_config import app as celery_app
 from core.setup import create_roles, import_us_zips_from_csv, match_and_update_locations
-import logging
+from db.session import database_lifespan
 
 # from tasks.task import update_car_fees
 
 app = FastAPI(
     title="Cars&Beyond API",
     description="Cars&Beyond API for managing vehicles, users, and bidding",
+    lifespan=database_lifespan,
 )
 
 @app.exception_handler(IntegrityError)
@@ -80,6 +83,9 @@ app.include_router(bidding_hub_router, prefix="/api/v1", tags=["Bidding Hub"])
 app.include_router(inventory_router, prefix="/api/v1", tags=["Inventory"])
 app.include_router(analytics_router, prefix="/api/v1", tags=["Analytics"])
 app.include_router(fee_router, prefix="/api/v1", tags=["Fees"])
+app.include_router(parsing_router, prefix="/api/v1")
+app.include_router(apicar_router, prefix="/api/v1")
+app.include_router(startup_router)
 
 def configure_logging():
     logging.getLogger("uvicorn").setLevel(logging.INFO)

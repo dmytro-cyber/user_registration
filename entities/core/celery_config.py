@@ -1,14 +1,32 @@
-from celery.signals import worker_process_init
+import os
+
+from celery.signals import worker_process_init, worker_process_shutdown, worker_shutdown
+
 
 @worker_process_init.connect
-def _gevent_patch_in_child(**_):
-    from gevent import monkey
-    monkey.patch_all()
+def _initialize_worker_process(**_):
+    if os.getenv("CELERY_GEVENT") == "1":
+        from gevent import monkey
+        monkey.patch_all()
+    from db.sync_session import dispose_database
+
+    dispose_database(close=False)
+
+
+@worker_process_shutdown.connect
+@worker_shutdown.connect
+def _dispose_worker_database(**_):
+    from db.sync_session import dispose_database
+
+    dispose_database()
 
 from celery import Celery
 from celery.schedules import crontab
 
-app = Celery("tasks", broker="redis://redis:6379/1", backend="redis://redis:6379/1")
+from core.celery_settings import scope_broker_settings
+
+app = Celery("tasks", broker=os.getenv("ENTITIES_BROKER_URL", "redis://redis:6379/1"),
+             backend=os.getenv("ENTITIES_RESULT_BACKEND", "redis://redis:6379/1"))
 
 app.conf.timezone = "America/Chicago"
 
@@ -62,3 +80,4 @@ app.conf.beat_schedule = {
 }
 
 app.autodiscover_tasks(["tasks.task"])
+scope_broker_settings(app)

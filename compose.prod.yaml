@@ -35,6 +35,8 @@ services:
     container_name: backend_cars_and_beyond
     command: ["/bin/bash", "/commands/run_entities_server_dev.sh"]
     env_file:
+      - path: ./parsers/.env
+        required: false
       - ./entities/.env
     environment:
       - LOG_LEVEL=debug
@@ -42,6 +44,7 @@ services:
       - WATCHFILES_FORCE_POLLING=true
     ports:
       - "8000:8000"
+      - "8001:8000" # Legacy parsers host port, served by the same API.
     volumes:
       - ./entities:/usr/entities/fastapi
     networks:
@@ -60,37 +63,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  parsers:
-    build:
-      context: .
-      dockerfile: parsers/Dockerfile
-    container_name: parser_cars_and_beyond
-    command: ["/bin/bash", "/commands/run_parsers_server_dev.sh"]
-    env_file:
-      - ./parsers/.env
-    environment:
-      - LOG_LEVEL=debug
-      - PYTHONPATH=/usr/parsers/fastapi
-      - WATCHFILES_FORCE_POLLING=true
-    ports:
-      - "8001:8001"
-    volumes:
-      - ./parsers:/usr/parsers/fastapi
-    networks:
-      - cars_and_beyond_network
-    dns:
-      - 8.8.8.8
-    mem_limit: 5g
-    cpus: 2.7
-    restart: always
-    depends_on:
-      migrator:
-        condition: service_completed_successfully
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
 
   migrator:
     build:
@@ -134,11 +106,14 @@ services:
         "--prefetch-multiplier=1"
       ]
     env_file:
+      - path: ./parsers/.env
+        required: false
       - ./entities/.env
     environment:
+      - CELERY_GEVENT=1
       - PYTHONPATH=/usr/entities/fastapi
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - ENTITIES_BROKER_URL=redis://redis:6379/1
+      - ENTITIES_RESULT_BACKEND=redis://redis:6379/1
     depends_on:
       redis:
         condition: service_healthy
@@ -162,29 +137,78 @@ services:
   celery_worker:
     build:
       context: .
-      dockerfile: parsers/Dockerfile
+      dockerfile: entities/Dockerfile
     container_name: celery_worker_cars_and_beyond
     command:
       [
         "celery",
-        "-A", "tasks.tasks.app",
+        "-A", "core.integration_celery.app",
         "worker",
+        "-P", "solo",
+        "-Q", "celery",
         "--loglevel=info",
         "--prefetch-multiplier=1"
       ]
     env_file:
-      - ./parsers/.env
+      - path: ./parsers/.env
+        required: false
+      - ./entities/.env
     environment:
-      - PYTHONPATH=/usr/parsers/fastapi
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/usr/entities/fastapi
+      - INTEGRATION_BROKER_URL=redis://redis:6379/0
+      - INTEGRATION_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
     volumes:
-      - ./parsers:/usr/parsers/fastapi
+      - ./entities:/usr/entities/fastapi
+    networks:
+      - cars_and_beyond_network
+    dns:
+      - 8.8.8.8
+    mem_limit: 4.5g
+    cpus: 2.1
+    restart: always
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  scraping_worker:
+    build:
+      context: .
+      dockerfile: entities/Dockerfile
+      target: scraping
+    container_name: scraping_worker_cars_and_beyond
+    command:
+      [
+        "celery",
+        "-A", "core.integration_celery.app",
+        "worker",
+        "-P", "solo",
+        "-Q", "scraping",
+        "--loglevel=info",
+        "--prefetch-multiplier=1"
+      ]
+    env_file:
+      - ./entities/.env
+      - path: ./parsers/.env
+        required: false
+    environment:
+      - PYTHONPATH=/usr/entities/fastapi
+      - INTEGRATION_BROKER_URL=redis://redis:6379/0
+      - INTEGRATION_RESULT_BACKEND=redis://redis:6379/0
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrator:
+        condition: service_completed_successfully
+    volumes:
+      - ./entities:/usr/entities/fastapi
+      - scraping_state:/var/lib/entities-scraping
     networks:
       - cars_and_beyond_network
     dns:
@@ -201,22 +225,25 @@ services:
   celery_beat:
     build:
       context: .
-      dockerfile: parsers/Dockerfile
+      dockerfile: entities/Dockerfile
     container_name: celery_beat_cars_and_beyond
-    command: ["celery", "-A", "tasks.tasks.app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "core.integration_celery.app", "beat", "--loglevel=info", "--schedule=/var/lib/celery/integrations-schedule"]
     env_file:
-      - ./parsers/.env
+      - path: ./parsers/.env
+        required: false
+      - ./entities/.env
     environment:
-      - PYTHONPATH=/usr/parsers/fastapi
-      - CELERY_BROKER_URL=redis://redis:6379/0
-      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/usr/entities/fastapi
+      - INTEGRATION_BROKER_URL=redis://redis:6379/0
+      - INTEGRATION_RESULT_BACKEND=redis://redis:6379/0
     depends_on:
       redis:
         condition: service_healthy
       migrator:
         condition: service_completed_successfully
     volumes:
-      - ./parsers:/usr/parsers/fastapi
+      - ./entities:/usr/entities/fastapi
+      - celery_beat_state:/var/lib/celery
     networks:
       - cars_and_beyond_network
     dns:
@@ -235,13 +262,13 @@ services:
       context: .
       dockerfile: entities/Dockerfile
     container_name: celery_beat_entities_cars_and_beyond
-    command: ["celery", "-A", "core.celery_config.app", "beat", "--loglevel=info"]
+    command: ["celery", "-A", "core.celery_config.app", "beat", "--loglevel=info", "--schedule=/var/lib/celery/entities-schedule"]
     env_file:
       - ./entities/.env
     environment:
       - PYTHONPATH=/usr/entities/fastapi
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - ENTITIES_BROKER_URL=redis://redis:6379/1
+      - ENTITIES_RESULT_BACKEND=redis://redis:6379/1
     depends_on:
       redis:
         condition: service_healthy
@@ -249,6 +276,7 @@ services:
         condition: service_completed_successfully
     volumes:
       - ./entities:/usr/entities/fastapi
+      - celery_beat_state:/var/lib/celery
     networks:
       - cars_and_beyond_network
     dns:
@@ -301,6 +329,10 @@ services:
       - ./certbot/www:/var/www/certbot
 
 volumes:
+  celery_beat_state:
+    driver: local
+  scraping_state:
+    driver: local
   redis_cars_and_beyond_data:
     driver: local
 

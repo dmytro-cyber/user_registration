@@ -5,8 +5,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.vehicle import (
     CarInventoryInvestmentsModel,
-    CarInventoryModel,
     CarInventoryInvestmentsType,
+    CarInventoryModel,
 )
 
 logger = logging.getLogger(__name__)

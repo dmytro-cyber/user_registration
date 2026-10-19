@@ -13,8 +13,9 @@ from core.config import Settings
 from core.dependencies import get_current_user
 from crud.vehicle import get_bidding_hub_vehicles, update_vehicle_status
 from db.session import get_db
+from exceptions.bidding import BidVehicleNotFoundError, InvalidActualBidError
 from models.user import UserModel
-from models.vehicle import CarModel, CarStatus, FeeModel, HistoryModel
+from models.vehicle import CarModel, CarStatus, HistoryModel
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
@@ -23,6 +24,7 @@ from schemas.vehicle import (
     CarBiddinHubResponseSchema,
     UpdateActualBidSchema,
 )
+from services.bidding_hub import update_actual_bid as update_actual_bid_service
 
 # Configure logging for production environment
 logger = logging.getLogger("bidding_hub_router")
@@ -202,70 +204,19 @@ async def update_actual_bid(
     )
 
     try:
-        vehicle = (
-            await db.execute(
-                select(CarModel)
-                .where(CarModel.id == car_id)
-                .with_for_update()
-            )
-        ).scalars().first()
-        if not vehicle:
-            raise HTTPException(status_code=404, detail="Vehicle not found")
-
-        if data.actual_bid is None or data.actual_bid < 0:
-            raise HTTPException(status_code=400, detail="Actual bid must be a non-negative number")
-
-        fees = (
-            await db.execute(
-                select(FeeModel).where(
-                    FeeModel.auction.ilike(vehicle.auction),
-                    FeeModel.price_from <= data.actual_bid,
-                    FeeModel.price_to >= data.actual_bid,
-                )
-            )
-        ).scalars().all()
-
-
-        total_fees = 0.0
-        bid_amount = float(data.actual_bid)
-        for fee in fees:
-            total_fees += (float(fee.amount) / 100.0) * bid_amount if fee.percent else float(fee.amount)
-        vehicle.auction_fee = total_fees
-        total_investments = bid_amount + vehicle.sum_of_investments
-
-        if vehicle.avg_market_price is not None and total_investments > 0:
-            profit_margin = float(vehicle.avg_market_price) - total_investments
-            roi = (profit_margin / total_investments) * 100
-
-            vehicle.profit_margin = profit_margin
-            vehicle.roi = roi
-        else:
-            vehicle.profit_margin = None
-            vehicle.roi = None
-
-        db.add(HistoryModel(
-            car_id=car_id,
-            action=f"Updated actual bid from {vehicle.actual_bid} to {data.actual_bid}",
-            user_id=current_user.id,
-            comment=data.comment,
-        ))
-
-        vehicle.actual_bid = data.actual_bid
-        db.add(vehicle)
-
-        await db.commit()
+        await update_actual_bid_service(
+            db, car_id=car_id, actual_bid=data.actual_bid, user_id=current_user.id, comment=data.comment,
+        )
 
         logger.info("Successfully updated current bid for car_id=%s", car_id, extra=extra)
         return {"message": "Current bid updated successfully"}
 
-    except HTTPException:
-        raise
+    except BidVehicleNotFoundError:
+        raise HTTPException(status_code=404, detail="Vehicle not found")
+    except InvalidActualBidError:
+        raise HTTPException(status_code=400, detail="Actual bid must be a non-negative number")
     except Exception as e:
         logger.error("Error updating current bid for car_id=%s: %s", car_id, e, extra=extra)
-        try:
-            await db.rollback()
-        except Exception:
-            pass
         raise HTTPException(status_code=500, detail="Error updating current bid")
 
 

@@ -1,8 +1,7 @@
+import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
-import json
-
 
 AUDIT_DIR = Path("audit_logs")
 AUDIT_DIR.mkdir(exist_ok=True)

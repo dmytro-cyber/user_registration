@@ -23,6 +23,12 @@ class BaseAppSettings(BaseModel):
 
 
 class Settings(BaseAppSettings):
+    DB_POOL_SIZE: int = Field(default_factory=lambda: int(os.getenv("DB_POOL_SIZE", "50")), ge=1, validate_default=True)
+    DB_MAX_OVERFLOW: int = Field(default_factory=lambda: int(os.getenv("DB_MAX_OVERFLOW", "10")), ge=0, validate_default=True)
+    DB_POOL_TIMEOUT: float = Field(default_factory=lambda: float(os.getenv("DB_POOL_TIMEOUT", "30")), gt=0, validate_default=True)
+    DB_POOL_RECYCLE: int = Field(default_factory=lambda: int(os.getenv("DB_POOL_RECYCLE", "1800")), ge=-1, validate_default=True)
+    DB_ECHO_SQL: bool = Field(default_factory=lambda: os.getenv("DB_ECHO_SQL", "false"), validate_default=True)
+
     if os.getenv("ENVIRON") == "prod":
         POSTGRES_USER: str = os.getenv("POSTGRES_DB_USER_PROD")
         POSTGRES_PASSWORD: str = os.getenv("POSTGRES_DB_PASSWORD_PROD")

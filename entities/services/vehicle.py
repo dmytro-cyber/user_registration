@@ -1,26 +1,14 @@
 from logging import getLogger
-from typing import Any, Dict, List
+from typing import List
 
-import httpx
 from fastapi import HTTPException
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.config import Settings
-from crud.vehicle import (
-    get_vehicle_by_id,
-    get_vehicle_by_vin,
-    save_sale_history,
-    save_vehicle,
-    save_vehicle_with_photos,
-)
 from models.vehicle import CarModel
 from schemas.vehicle import (
     CarBaseSchema,
-    CarCreateSchema,
     CarDetailResponseSchema,
     CarListResponseSchema,
     ConditionAssessmentResponseSchema,
-    PartResponseScheme,
     SalesHistoryBaseSchema,
 )
 
@@ -60,37 +48,6 @@ def car_to_dict(vehicle: "CarModel") -> dict:
         "recommendation_status_reasons": vehicle.recommendation_status_reasons,
         "photos": [getattr(p, "url", None) for p in photos],
     }
-
-
-async def scrape_and_save_vehicle(vin: str, db: AsyncSession, settings: Settings) -> CarBaseSchema:
-    """Scrape vehicle data by VIN and save it to the database."""
-    try:
-        async with httpx.AsyncClient(
-            timeout=10.0,
-            headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
-        ) as httpx_client:
-            response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
-            response.raise_for_status()
-            result = CarCreateSchema.model_validate(response.json())
-    except httpx.HTTPError as e:
-        logger.warning(f"Failed to scrape data for VIN {vin}: {str(e)}")
-        raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")
-    except Exception as e:
-        logger.error(f"Failed to validate scraped data for VIN {vin}: {str(e)}")
-        raise HTTPException(status_code=422, detail=f"Invalid data from parser: {str(e)}")
-
-    # The boolean returned here means "needs enrichment parsing", not
-    # "insert succeeded". Verify persistence by reading the VIN after the
-    # transactional save instead of treating False as a duplicate/failure.
-    await save_vehicle_with_photos(result, "initial", db)
-
-    vehicle = await get_vehicle_by_vin(db, vin, 1)
-    if not vehicle:
-        logger.error(f"Failed to retrieve saved vehicle with VIN {vin}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve saved vehicle")
-
-    vehicle_data = car_to_dict(vehicle)
-    return CarBaseSchema.model_validate(vehicle_data)
 
 
 async def prepare_response(
@@ -171,24 +128,6 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
             "current_bid": car.current_bid,
         },
     )
-
-
-async def scrape_and_save_sales_history(vin: str, db: AsyncSession, settings: Settings) -> CarModel:
-    """Scrape sales history for a car and save it."""
-    async with httpx.AsyncClient(timeout=10.0, headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}) as httpx_client:
-        try:
-            response = await httpx_client.get(f"http://parsers:8001/api/v1/apicar/get/{vin}")
-            response.raise_for_status()
-            result = CarCreateSchema.model_validate(response.json())
-            logger.info(f"Successfully scraped sales history data {result.sales_history}")
-            car = await get_vehicle_by_vin(db, vin, 1)  # Ensure the vehicle exists before saving sales history
-            await save_sale_history(result.sales_history, car.id, db)
-            await db.commit()
-
-            return car
-        except httpx.HTTPError as e:
-            logger.warning(f"Failed to scrape data for VIN {vin}: {str(e)}")
-            raise HTTPException(status_code=503, detail=f"Failed to fetch data from parser: {str(e)}")
 
 
 def build_car_filter_query(filter_obj):

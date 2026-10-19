@@ -6,10 +6,10 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from models.filter_kickoff_queue import (
+    FILTER_KICKOFF_INTERVAL,
+    FILTER_QUEUE_ENQUEUE_LOCK_KEY,
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
-    FILTER_KICKOFF_INTERVAL,
-    FILTER_QUEUE_ENQUEUE_LOCK_KEY
 )
 
 

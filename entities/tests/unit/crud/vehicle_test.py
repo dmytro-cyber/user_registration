@@ -1,22 +1,21 @@
 import asyncio
 from datetime import datetime, timedelta
+from unittest.mock import Mock
 
 import pytest
 from sqlalchemy import desc, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from crud.vehicle import (
-    bulk_save_vehicles,
     get_filtered_vehicles,
-    save_vehicle_with_photos,
     update_cars_relevance,
     update_vehicle_status,
 )
 from models import Base
 from models.admin import FilterModel
 from models.vehicle import (
-    CarModel,
     CarInventoryModel,
+    CarModel,
     CarSaleHistoryModel,
     CarStatus,
     ConditionAssessmentModel,
@@ -32,6 +31,8 @@ from schemas.vehicle import (
     PhotoSchema,
     SalesHistoryBaseSchema,
 )
+from services.vehicle_ingestion import bulk_save_vehicles
+from services.vehicle_snapshot import save_vehicle_snapshot
 
 pytestmark = pytest.mark.anyio
 
@@ -436,8 +437,9 @@ async def test_create_vehicle_active_by_filter_and_flags(db_session):
         ],
     )
 
-    should_parse = await save_vehicle_with_photos(data, "initial", db_session)
-    assert should_parse is True
+    should_parse = await save_vehicle_snapshot(data, "initial", db_session)
+    assert should_parse.saved is True
+    assert should_parse.needs_enrichment is True
 
     car = await fetch_car(db_session, "VIN-ACTIVE-001")
     assert car.relevance == RelevanceStatus.ACTIVE
@@ -459,8 +461,9 @@ async def test_create_vehicle_active_by_filter_and_flags(db_session):
 
 async def test_create_vehicle_irrelevant_without_filter(db_session):
     data = make_schema(vin="VIN-IRREL-001")
-    should_parse = await save_vehicle_with_photos(data, "initial", db_session)
-    assert should_parse is False
+    should_parse = await save_vehicle_snapshot(data, "initial", db_session)
+    assert should_parse.saved is True
+    assert should_parse.needs_enrichment is False
     car = await fetch_car(db_session, "VIN-IRREL-001")
     assert car.relevance == RelevanceStatus.IRRELEVANT
 
@@ -477,8 +480,9 @@ async def test_create_vehicle_sales_history_many_sets_not_recommended(db_session
     ]
     data = make_schema(vin="VIN-SALES-4", sales_history=many_sales)
 
-    should_parse = await save_vehicle_with_photos(data, "initial", db_session)
-    assert should_parse is True
+    should_parse = await save_vehicle_snapshot(data, "initial", db_session)
+    assert should_parse.saved is True
+    assert should_parse.needs_enrichment is True
 
     car = await fetch_car(db_session, "VIN-SALES-4")
     assert car.recommendation_status == RecommendationStatus.NOT_RECOMMENDED
@@ -518,8 +522,9 @@ async def test_update_existing_active_triggers_to_parse_and_updates(db_session):
         sales_history=[SalesHistoryBaseSchema(date="2024-03-01T00:00:00", price=12000.0, auction="Copart", lot=9, source="Z")],
     )
 
-    should_parse = await save_vehicle_with_photos(data, "update", db_session)
-    assert should_parse is True
+    should_parse = await save_vehicle_snapshot(data, "update", db_session)
+    assert should_parse.saved is True
+    assert should_parse.needs_enrichment is True
 
     updated = await fetch_car(db_session, vin)
     assert updated.recommendation_status == RecommendationStatus.NOT_RECOMMENDED
@@ -570,8 +575,9 @@ async def test_update_existing_archival_becomes_active_when_filter_matches(db_se
         mileage=95_000,
     )
 
-    to_parse = await save_vehicle_with_photos(data, "update", db_session)
-    assert to_parse is True
+    to_parse = await save_vehicle_snapshot(data, "update", db_session)
+    assert to_parse.saved is True
+    assert to_parse.needs_enrichment is True
 
     db_session.expire_all()
     updated = (await db_session.execute(select(CarModel).where(CarModel.vin == vin))).scalar_one()
@@ -582,7 +588,7 @@ async def test_update_existing_archival_becomes_active_when_filter_matches(db_se
     assert updated.is_checked is False
 
 
-async def test_integrity_error_on_duplicate_vin_returns_false(db_session, monkeypatch):
+async def test_duplicate_vin_reports_failed_save(db_session, monkeypatch):
     vin = "VIN-DUP-001"
     first = CarModel(
         vin=vin,
@@ -599,17 +605,17 @@ async def test_integrity_error_on_duplicate_vin_returns_false(db_session, monkey
     db_session.add(first)
     await db_session.commit()
 
-    from crud import vehicle as vehicle_module
+    from crud import vehicle_snapshot as vehicle_module
 
     async def fake_get_vehicle_by_vin(db, vin_value):
         return None
 
-    monkeypatch.setattr(vehicle_module, "get_vehicle_by_vin", fake_get_vehicle_by_vin, raising=True)
+    monkeypatch.setattr(vehicle_module, "get_vehicle_by_vin_for_upsert", fake_get_vehicle_by_vin, raising=True)
 
     data = make_schema(vin=vin)
 
-    ok = await save_vehicle_with_photos(data, "initial", db_session)
-    assert ok is False
+    ok = await save_vehicle_snapshot(data, "initial", db_session)
+    assert ok.saved is False
 
 
 async def test_existing_sales_history_not_duplicated(db_session):
@@ -677,8 +683,9 @@ async def test_existing_sales_history_not_duplicated(db_session):
         ],
     )
 
-    to_parse = await save_vehicle_with_photos(payload, "update", db_session)
-    assert to_parse is False  # ACTIVE + is_checked=True => не тригеримо парс
+    to_parse = await save_vehicle_snapshot(payload, "update", db_session)
+    assert to_parse.saved is True
+    assert to_parse.needs_enrichment is False  # ACTIVE + is_checked=True => не тригеримо парс
 
     rows = await db_session.execute(
         select(CarSaleHistoryModel).where(CarSaleHistoryModel.car_id == car.id)
@@ -710,10 +717,11 @@ async def test_manual_recommendation_survives_auction_sync(db_session):
     await db_session.commit()
 
     payload = make_schema(vin=vin, current_bid=3_000)
-    should_parse = await save_vehicle_with_photos(payload, "update", db_session)
+    should_parse = await save_vehicle_snapshot(payload, "update", db_session)
     updated = await fetch_car(db_session, vin)
 
-    assert should_parse is False
+    assert should_parse.saved is True
+    assert should_parse.needs_enrichment is False
     assert updated.recommendation_status == RecommendationStatus.RECOMMENDED
     assert updated.recommendation_status_reasons == "manual review;"
     assert updated.avg_market_price == 18_500
@@ -787,9 +795,11 @@ async def test_bulk_preserves_manual_vehicle_damage_and_financials(db_session):
         car_id=car.id, type_of_damage="damage_pr", issue_description="REAR END",
     ))
     await db_session.commit()
+    publisher = Mock()
     result = await bulk_save_vehicles(db_session, CarBulkCreateSchema(
         ivent="update", vehicles=[make_schema(vin=car.vin, current_bid=6000)],
-    ))
+    ), publisher)
+    publisher.publish.assert_not_called()
     assert result["updated_count"] == 1
     await db_session.refresh(car)
     assert car.car_status == CarStatus.WON
@@ -803,7 +813,7 @@ async def test_bulk_preserves_manual_vehicle_damage_and_financials(db_session):
 
 
 async def test_investment_update_and_delete_recalculate_parent(db_session):
-    from crud.inventory import create_car_investment, update_car_investment, delete_car_investment
+    from crud.inventory import create_car_investment, delete_car_investment, update_car_investment
     from models.vehicle import CarInventoryInvestmentsType
     from schemas.inventory import CarInventoryInvestmentsCreate, CarInventoryInvestmentsUpdate
 

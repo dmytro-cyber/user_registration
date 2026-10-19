@@ -178,6 +178,7 @@ car_data.csv
 cert.pem
 key.pem
 cookies.txt
+credentials.json
 test.db
 screenshots
 .idea

@@ -8,6 +8,7 @@ from sqlalchemy.orm import selectinload
 
 from core.dependencies import get_current_user
 from crud.inventory import (
+    add_final_sale_price,
     create_car_inventory,
     create_car_investment,
     create_part_inventory,
@@ -27,7 +28,6 @@ from crud.inventory import (
     update_part_inventory,
     update_part_status,
     upload_invoice,
-    add_final_sale_price,
 )
 from db.session import get_db
 from models.user import UserModel
@@ -38,6 +38,7 @@ from schemas.inventory import (
     CarInventoryInvestmentsCreate,
     CarInventoryInvestmentsResponse,
     CarInventoryInvestmentsUpdate,
+    CarInventoryPriceCreate,
     CarInventoryResponse,
     CarInventoryUpdate,
     CarInventoryUpdateStatus,
@@ -47,7 +48,6 @@ from schemas.inventory import (
     PartInventoryResponse,
     PartInventoryStatusUpdate,
     PartInventoryUpdate,
-    CarInventoryPriceCreate,
 )
 from schemas.user import UserResponseSchema
 from schemas.vehicle import (

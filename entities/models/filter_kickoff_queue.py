@@ -8,7 +8,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from models import Base
 
-
 FILTER_KICKOFF_INTERVAL = timedelta(minutes=90)
 
 FILTER_QUEUE_ENQUEUE_LOCK_KEY = 910001

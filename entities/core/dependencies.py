@@ -6,10 +6,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 from sqlalchemy.orm import selectinload
 
-from db.session import get_db
 from core.config import Settings
 from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
+from db.session import get_db
+from domain.vehicle_ingestion import VehicleEnrichmentPublisher
+from domain.vehicle_source import VehicleDataSource
 from models.user import UserModel
 from storages import S3StorageClient, S3StorageInterface
 
@@ -19,6 +21,19 @@ logger = logging.getLogger(__name__)
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_vehicle_data_source() -> VehicleDataSource:
+    from integrations.apicar.vehicle_source import ApicarVehicleDataSource
+
+    return ApicarVehicleDataSource()
+
+
+def get_vehicle_enrichment_publisher() -> VehicleEnrichmentPublisher:
+    from core.celery_config import app as celery_app
+    from integrations.vehicle_tasks import CeleryVehicleEnrichmentPublisher
+
+    return CeleryVehicleEnrichmentPublisher(celery_app)
 
 
 def get_token(request: Request) -> str:

@@ -5,60 +5,56 @@ import asyncio
 #     monkey.patch_all()
 import logging
 import os
+import re
 import time
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
-import re
-from datetime import datetime
-from io import BytesIO
-from typing import Any, Dict, Optional
 
-from celery.exceptions import MaxRetriesExceededError
-from sqlalchemy import select
-from sqlalchemy.orm import selectinload
 import anyio
 import httpx
 import redis
-from sqlalchemy import and_, create_engine, delete, func, or_, select, text
-from sqlalchemy.exc import IntegrityError, OperationalError
-from sqlalchemy.orm import Session, selectinload, sessionmaker
 import requests
+from celery.exceptions import MaxRetriesExceededError
+from sqlalchemy import and_, delete, func, or_, select, text
+from sqlalchemy.exc import IntegrityError, OperationalError
+from sqlalchemy.orm import Session, selectinload
 
 from core.celery_config import app
 from core.config import settings
-from db.session import POSTGRESQL_DATABASE_URL
+from db.sync_session import SessionLocal
+from integrations.parsing import SyncParsingClient
 from models.admin import FilterModel, ROIModel
+from models.filter_kickoff_queue import (
+    FILTER_QUEUE_DISPATCH_LOCK_KEY,
+    FilterKickoffQueueModel,
+    FilterKickoffQueueStatus,
+)
+from models.user import user_likes
 from models.vehicle import (
     AutoCheckModel,
-    CarModel,
-    CarStatus,
-    CarSaleHistoryModel,
     CarInventoryInvestmentsModel,
     CarInventoryModel,
-    HistoryModel,
-    PartModel,
+    CarModel,
+    CarSaleHistoryModel,
+    CarStatus,
     ConditionAssessmentModel,
     FeeModel,
+    HistoryModel,
+    PartModel,
     PhotoModel,
     RecommendationStatus,
     RelevanceStatus,
 )
-from models.filter_kickoff_queue import (
-    FilterKickoffQueueModel,
-    FilterKickoffQueueStatus,
-    FILTER_QUEUE_DISPATCH_LOCK_KEY
-)
-from models.user import user_likes
+from schemas.vehicle import CarCreateSchema
 from services.email_sync import send_email_sync
 from services.lock import (
     acquire_kickoff_lock,
-    release_kickoff_lock,
-    is_kickoff_busy,
     generate_lock_token,
+    is_kickoff_busy,
+    release_kickoff_lock,
 )
-from schemas.vehicle import CarCreateSchema
 from storages import S3StorageClient
 
 # =========================
@@ -82,24 +78,8 @@ for name in (
 
 
 # =========================
-# DB (sync) — psycopg2
+# DB sessions are provided by the shared synchronous database factory.
 # =========================
-if "+asyncpg" in POSTGRESQL_DATABASE_URL:
-    SYNC_DB_URL = POSTGRESQL_DATABASE_URL.replace("+asyncpg", "+psycopg2")
-else:
-    SYNC_DB_URL = POSTGRESQL_DATABASE_URL
-
-ENGINE = create_engine(
-    SYNC_DB_URL,
-    pool_size=50,
-    max_overflow=10,
-    pool_timeout=30,
-    echo=False,
-    future=True,
-    pool_pre_ping=True,
-    pool_recycle=1800,
-)
-SessionLocal = sessionmaker(bind=ENGINE, class_=Session, autoflush=False, autocommit=False, future=True)
 
 
 # =========================
@@ -113,7 +93,7 @@ def http_get_with_retries(
 ) -> httpx.Response:
     delay = 0.5
     last_exc: Optional[Exception] = None
-    with httpx.Client(timeout=timeout) as client:
+    with SyncParsingClient(timeout=timeout) as client:
         for attempt in range(1, max_retries + 1):
             try:
                 r = client.get(url, headers=headers)
@@ -198,7 +178,7 @@ def http_post_with_retries(
 ) -> httpx.Response:
     delay = 0.5
     last_exc: Optional[Exception] = None
-    with httpx.Client(timeout=timeout) as client:
+    with SyncParsingClient(timeout=timeout) as client:
         for attempt in range(1, max_retries + 1):
             try:
                 r = client.post(url, json=json, headers=headers)
@@ -373,7 +353,7 @@ def parse_and_update_car(
 
     def build_parse_url() -> str:
         return (
-            "http://parsers:8001/api/v1/parsers/scrape/dc"
+            "/api/v1/parsers/scrape/dc"
             f"?car_vin={vin}"
             f"&car_mileage={mileage if mileage is not None else ''}"
             f"&car_name={car_name or ''}"
@@ -407,7 +387,7 @@ def parse_and_update_car(
 
     if business_attempts == 0:
         try:
-            hist_url = f"http://parsers:8001/api/v1/apicar/get/{vin}"
+            hist_url = f"/api/v1/apicar/get/{vin}"
             headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
             hist_resp = http_get_with_retries(hist_url, headers=headers, timeout=30.0)
             hist_resp.raise_for_status()
@@ -832,7 +812,7 @@ def update_car_bids() -> Dict[str, Any]:
 
             # call the parser
             resp = http_post_with_retries(
-                url="http://parsers:8001/api/v1/parsers/scrape/current_bid",
+                url="/api/v1/parsers/scrape/current_bid",
                 json={"items": [{"id": c["id"], "source": c["auction"], "lot": c["lot"]} for c in cars]},
                 headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
                 timeout=900.0,
@@ -996,8 +976,8 @@ def update_car_fees() -> Dict[str, Any]:
     logger.info("update_car_fees: start")
     with SessionLocal() as db:
         try:
-            with httpx.Client(timeout=60) as client:
-                r = client.get("http://parsers:8001/api/v1/parsers/scrape/fees")
+            with SyncParsingClient(timeout=60) as client:
+                r = client.get("/api/v1/parsers/scrape/fees")
                 r.raise_for_status()
                 payload = r.json()
 
@@ -1501,8 +1481,8 @@ def parse_and_update_cars_with_expired_auction_date() -> Dict[str, Any]:
             stats["checked"] += 1
 
             try:
-                resp = httpx.get(
-                    f"http://parsers:8001/api/v1/apicar/{vin}",
+                resp = SyncParsingClient(timeout=30).get(
+                    f"/api/v1/apicar/{vin}",
                     timeout=30.0,
                 )
             except Exception as e:

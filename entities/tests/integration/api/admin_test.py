@@ -13,7 +13,7 @@ pytestmark = pytest.mark.anyio
 
 
 @pytest.mark.integration
-async def test_create_filter_success(client: AsyncClient, db_session: AsyncSession, patch_admin_module, as_admin):
+async def test_create_filter_success(client: AsyncClient, db_session: AsyncSession, patch_filter_enqueue, as_admin):
     """
     Creating a filter as admin returns 201 and persists the record.
     """
@@ -34,12 +34,13 @@ async def test_create_filter_success(client: AsyncClient, db_session: AsyncSessi
         select(FilterModel).where(FilterModel.id == response_json["id"])
     )).scalars().first()
     assert stored_filter is not None
+    patch_filter_enqueue.assert_awaited_once_with(db=db_session, filter_id=stored_filter.id)
 
 
 @pytest.mark.integration
-async def test_create_filter_lock_conflict(client: AsyncClient, patch_admin_module_lock_busy, as_admin):
+async def test_update_filter_lock_conflict(client: AsyncClient, patch_admin_module_lock_busy, as_admin):
     """
-    Creating a filter while kickoff lock is held returns 409.
+    Updating a filter while kickoff lock is held returns 409.
     """
     payload = {
         "make": "Ford",
@@ -48,13 +49,13 @@ async def test_create_filter_lock_conflict(client: AsyncClient, patch_admin_modu
         "odometer_min": 0,
         "odometer_max": 100000,
     }
-    response = await client.post("/api/v1/admin/filters", json=payload)
+    response = await client.patch("/api/v1/admin/filters/999999", json=payload)
     assert response.status_code == status.HTTP_409_CONFLICT
     assert "Previous kickoff task is still running" in response.text
 
 
 @pytest.mark.integration
-async def test_get_filters_list(client: AsyncClient, db_session: AsyncSession, patch_admin_module):
+async def test_get_filters_list(client: AsyncClient, db_session: AsyncSession):
     """
     Fetching filters returns the list containing the inserted item.
     """
@@ -99,7 +100,6 @@ async def test_update_filter_and_relevance(client: AsyncClient, db_session: Asyn
     """
     from api.v1.routers import admin as admin_router_mod
     monkeypatch.setattr(admin_router_mod, "is_kickoff_busy", lambda: False, raising=True)
-    monkeypatch.setattr(admin_router_mod, "set_kickoff_lock", lambda _id: None, raising=True)
     monkeypatch.setattr(
         admin_router_mod.celery_app, "send_task", lambda *a, **k: SimpleNamespace(id="fake-task-id"), raising=True
     )
@@ -193,7 +193,7 @@ async def test_load_db(client: AsyncClient, monkeypatch):
             return _Resp()
 
     monkeypatch.setattr(admin_router_mod, "httpx", httpx, raising=False)
-    monkeypatch.setattr(admin_router_mod.httpx, "AsyncClient", _CtxAsyncClient, raising=True)
+    monkeypatch.setattr(admin_router_mod, "ParsingClient", _CtxAsyncClient, raising=True)
 
     response = await client.post("/api/v1/admin/load-db")
     assert response.status_code in (200, 202, 204)

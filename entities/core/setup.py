@@ -13,7 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from db.session import SessionLocal
+from db.session import session_scope
 from models import CarModel, UserModel, UserRoleEnum, UserRoleModel, USZipModel
 from models.user import UserRoleEnum, UserRoleModel
 from models.vehicle import CarModel, PartModel
@@ -84,7 +84,7 @@ async def import_us_zips_from_csv(
     created, updated = 0, 0
     iaai_updates, copart_updates = 0, 0
 
-    async with SessionLocal() as session:
+    async with session_scope() as session:
         # 1) CSV upsert of ZIP base data
         with open(csv_path, newline="", encoding="utf-8") as csvfile:
             reader = csv.DictReader(csvfile)
@@ -161,7 +161,7 @@ async def import_us_zips_from_csv(
 
 
 async def create_roles():
-    async with SessionLocal() as session:
+    async with session_scope() as session:
         result_roles = await session.execute(select(UserRoleModel))
         existing_roles = {role.name.value for role in result_roles.scalars().all()}
 
@@ -250,7 +250,7 @@ def similar(a, b):
 
 
 async def match_and_update_location(location: str, auction: str):
-    async with SessionLocal() as db:
+    async with session_scope() as db:
         lat, lon = get_location_coordinates(location)
         if not lat or not lon:
             return
@@ -272,7 +272,7 @@ async def match_and_update_location(location: str, auction: str):
 
 
 async def match_and_update_locations():
-    async with SessionLocal() as db:
+    async with session_scope() as db:
         stmt = (
             select(CarModel.location, CarModel.auction)
             .distinct()

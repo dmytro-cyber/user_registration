@@ -4,6 +4,8 @@ Base = declarative_base()
 
 from .admin import FilterModel as FilterModel
 from .admin import ROIModel as ROIModel
+from .filter_kickoff_queue import FilterKickoffQueueModel as FilterKickoffQueueModel
+from .filter_kickoff_queue import FilterKickoffQueueStatus as FilterKickoffQueueStatus
 from .user import UserModel as UserModel
 from .user import UserRoleEnum as UserRoleEnum
 from .user import UserRoleModel as UserRoleModel
@@ -22,5 +24,3 @@ from .vehicle import PartModel as PartModel
 from .vehicle import PhotoModel as PhotoModel
 from .vehicle import RelevanceStatus as RelevanceStatus
 from .vehicle import USZipModel as USZipModel
-from .filter_kickoff_queue import FilterKickoffQueueModel as FilterKickoffQueueModel
-from .filter_kickoff_queue import FilterKickoffQueueStatus as FilterKickoffQueueStatus

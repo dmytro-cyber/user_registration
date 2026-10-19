@@ -145,7 +145,7 @@ async def test_get_cars_by_vin_not_found_then_scrape_ok(
     """
     vin_value = gen_vin("SCRPVIN")
 
-    async def fake_scrape_and_save_vehicle(vin_arg, db, settings):
+    async def fake_ingest_vehicle(vin_arg, db, source):
         assert vin_arg == vin_value
         obj = CarModel(
             vin=vin_value,
@@ -162,11 +162,12 @@ async def test_get_cars_by_vin_not_found_then_scrape_ok(
             relevance=RelevanceStatus.ACTIVE,
         )
         db.add(obj)
+        await db.commit()
         return {"vin": vin_value}
 
     from api.v1.routers import vehicle
 
-    monkeypatch.setattr(vehicle, "scrape_and_save_vehicle", fake_scrape_and_save_vehicle, raising=True)
+    monkeypatch.setattr(vehicle, "ingest_vehicle", fake_ingest_vehicle, raising=True)
     await db_session.rollback()
 
     response = await client.get(f"{API_PREFIX}/?vin={vin_value}")
@@ -336,27 +337,23 @@ async def test_get_car_detail_404(client, db_session, test_user, use_test_user):
 
 
 @pytest.mark.anyio
-async def test_update_car_info_ok(client, db_session, test_user, use_test_user, create_car, monkeypatch):
-    """
-    Parser 200 response results in 200 or framework-level validation error; accept both.
-    """
-    car_row = await create_car(vin="INFOOK00000000000")
+async def test_update_car_info_persists_before_legacy_response_validation_error(
+    client, db_session, test_user, use_test_user, create_car, monkeypatch,
+):
+    from pydantic import ValidationError
+
     from api.v1.routers import vehicle
 
-    monkeypatch.setattr(vehicle, "httpx", httpx, raising=False)
-    monkeypatch.setattr(vehicle.httpx, "AsyncClient", _DummyOKClient, raising=True)
-
-    try:
-        response = await client.post(f"{API_PREFIX}/update-car-info/{car_row.id}")
-        assert response.status_code in (200, 500)
-        if response.status_code == 200:
-            payload = response.json()
-            assert len(payload["cars"]) == 1
-            assert payload["cars"][0]["vin"] == car_row.vin
-    except Exception as exc:
-        from pydantic_core import ValidationError
-        assert isinstance(exc, ValidationError)
-
+    car_row = await create_car(vin="INFOOK00000000000")
+    car_id = car_row.id
+    monkeypatch.setattr(vehicle, "ParsingClient", _DummyOKClient)
+    # The legacy response constructor omits required `last`; preserve this behavior.
+    with pytest.raises(ValidationError) as error:
+        await client.post(f"{API_PREFIX}/update-car-info/{car_id}")
+    assert error.value.errors()[0]["loc"] == ("last",)
+    updated = (await db_session.execute(select(CarModel).where(CarModel.id == car_id))).scalar_one()
+    assert updated.vehicle == "2018 Honda Accord"
+    assert updated.mileage == 50000
 
 @pytest.mark.anyio
 async def test_update_car_info_parser_404(client, db_session, test_user, use_test_user, create_car, monkeypatch):
@@ -379,9 +376,33 @@ async def test_update_car_info_network_error(client, db_session, test_user, use_
     """
     car_row = await create_car(vin="INFNET00000000000")
 
-    monkeypatch.setattr(vehicles_router, "httpx", httpx, raising=False)
-    monkeypatch.setattr(vehicles_router.httpx, "AsyncClient", _DummyNetErrClient, raising=True)
+    from api.v1.routers import vehicle
+    monkeypatch.setattr(vehicle, "ParsingClient", _DummyNetErrClient, raising=True)
 
     response = await client.post(f"{API_PREFIX}/update-car-info/{car_row.id}")
     assert response.status_code == 503
     assert "Cannot reach parser service" in response.json()["detail"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broker_failure", [False, True])
+async def test_upsert_response_preserves_task_id_and_broker_failure_policy(
+    client, db_session, use_test_user, monkeypatch, broker_failure,
+):
+    from core.celery_config import app as celery_app
+
+    publications = []
+
+    def publish(name, *, kwargs, queue):
+        publications.append((name, kwargs, queue))
+        if broker_failure:
+            raise RuntimeError("broker unavailable")
+        return SimpleNamespace(id="upsert-task")
+
+    monkeypatch.setattr(celery_app, "send_task", publish)
+    response = await client.post(f"{API_PREFIX}/upsert", json={"vin": "UPSERT-API", "vehicle": "Test vehicle"})
+    assert response.status_code == 200
+    assert response.json() == {"message": "vehicle saved", "task_id": None if broker_failure else "upsert-task"}
+    assert publications[0][0] == "tasks.task.parse_and_update_car"
+    assert publications[0][2] == "car_parsing_queue"
+    assert (await db_session.execute(select(CarModel.vin))).scalar_one() == "UPSERT-API"
