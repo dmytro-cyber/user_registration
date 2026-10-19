@@ -63,6 +63,8 @@ Single-VIN lookup uses the injected `VehicleDataSource` interface and `services/
 
 Recommendation decisions for bulk imports, individual snapshots and manual upserts live in `domain/vehicle_recommendations.py`. They use immutable facts/state and retain each workflow's current fuel normalization, bid limit, manual override and reason formatting rules. `services/vehicle_recommendations.py` maps ORM/schema values to these domain inputs and applies the resulting state.
 
+`tasks.task.update_car_bids` delegates to `services/vehicle_bids.py`, which owns the refresh transaction. `crud/vehicle_bids.py` selects candidates and locks matching rows with `SKIP LOCKED`; domain functions handle bid identities, recommendation changes and profit/ROI calculations. The injected current-bid source retains the existing parser request, retry policy and payload handling.
+
 Database engines are created lazily through `db/factories.py`, using the shared `DatabaseConfig`. API and async jobs use `session_scope`: outstanding transactions are rolled back and sessions are closed, while application services retain ownership of commit. API shutdown and the integration worker's event-loop shutdown release their async pools. Sync workers own a separate lazy pool and discard inherited pools after fork without closing parent connections.
 
 Pool defaults remain 50 connections plus 10 overflow per process, a 30-second acquisition timeout and 1800-second recycle. Configure `DB_POOL_SIZE`, `DB_MAX_OVERFLOW`, `DB_POOL_TIMEOUT` and `DB_POOL_RECYCLE` in the environment. SQL echo defaults to off (`DB_ECHO_SQL=false`); statement parameters are hidden. Alembic uses the shared URL builder and resolves revision paths relative to `alembic.ini`.

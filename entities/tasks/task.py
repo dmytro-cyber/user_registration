@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session, selectinload
 from core.celery_config import app
 from core.config import settings
 from db.sync_session import SessionLocal
+from integrations.current_bids import ParsingCurrentBidSource
 from integrations.parsing import SyncParsingClient
 from models.admin import FilterModel, ROIModel
 from models.filter_kickoff_queue import (
@@ -55,6 +56,7 @@ from services.lock import (
     is_kickoff_busy,
     release_kickoff_lock,
 )
+from services.vehicle_bids import refresh_vehicle_bids
 from storages import S3StorageClient
 
 # =========================
@@ -772,148 +774,14 @@ def parse_and_update_car(
             raise
 
 
-def _norm_site(val) -> str:
-    s = str(val or "").strip().lower()
-    if s in {"1", "copart", "copart.com"}:
-        return "copart"
-    if s in {"2", "iaai", "iaa", "iaai.com"}:
-        return "iaai"
-    return s
-
 @app.task(name="tasks.task.update_car_bids")
 def update_car_bids() -> Dict[str, Any]:
-    """
-    Pull current bids from the parser and update active vehicles.
-    Match by (lot + auction) case-insensitively; if not found — fallback by lot only.
-    """
     logger.info("update_car_bids: start")
-    updated = 0
-
     with SessionLocal() as db:
-        try:
-            # take active vehicles with valid lot/auction
-            rows = db.execute(
-                select(CarModel.id, CarModel.lot, CarModel.auction)
-                .where(
-                    and_(
-                        CarModel.relevance == RelevanceStatus.ACTIVE,
-                        CarModel.lot.isnot(None),
-                        CarModel.auction.isnot(None),
-                        or_(
-                            CarModel.date.isnot(None),
-                            func.lower(CarModel.auction_name) == "buynow",
-                        )
-                    )
-                )
-            ).all()
-            cars = [{"id": r.id, "lot": r.lot, "auction": r.auction} for r in rows]
-            if not cars:
-                return {"status": "success", "updated_cars": 0}
+        result = refresh_vehicle_bids(db, ParsingCurrentBidSource(http_post_with_retries, settings.PARSERS_AUTH_TOKEN))
+    logger.info("update_car_bids: updated=%s", result["updated_cars"])
+    return result
 
-            # call the parser
-            resp = http_post_with_retries(
-                url="/api/v1/parsers/scrape/current_bid",
-                json={"items": [{"id": c["id"], "source": c["auction"], "lot": c["lot"]} for c in cars]},
-                headers={"X-Auth-Token": settings.PARSERS_AUTH_TOKEN},
-                timeout=900.0,
-            )
-            payload = resp.json()
-            bids = payload.get("bids", []) if isinstance(payload, dict) else payload
-
-            for item in bids:
-                try:
-                    # lot_id like "68271795-1" -> take the left part
-                    lot_raw = str(item.get("lot_id") or "").split("-")[0].strip()
-                    if not lot_raw.isdigit():
-                        logger.debug("skip: bad lot_id=%r", item.get("lot_id"))
-                        continue
-                    lot = int(lot_raw)
-
-                    site = _norm_site(item.get("site"))
-                    pre_bid = item.get("pre_bid")
-                    if pre_bid is None and pre_bid != 0:
-                        logger.debug("skip: no pre_bid for lot=%s site=%s", lot, site)
-                        continue
-
-                    # 1) match by lot + auction (case-insensitive)
-                    stmt = (
-                        select(CarModel)
-                        .where(
-                            and_(
-                                CarModel.lot == lot,
-                                func.lower(func.coalesce(CarModel.auction, "")) == site,
-                            )
-                        )
-                        .with_for_update(skip_locked=True)
-                    )
-                    car = db.execute(stmt).scalars().first()
-
-                    # 2) fallback — by lot only (in case of auction name discrepancies in DB)
-                    if not car:
-                        # stmt2 = (
-                        #     select(CarModel)
-                        #     .where(CarModel.lot == lot)
-                        #     .with_for_update(skip_locked=True)
-                        # )
-                        # car = db.execute(stmt2).scalars().first()
-                        # if not car:
-                        #     logger.debug("not found: lot=%s site=%s", lot, site)
-                        continue
-
-                    # update bids/status
-                    try:
-                        previous_current_bid = car.current_bid
-                        car.current_bid = int(float(pre_bid))
-                    except (ValueError, TypeError):
-                        logger.debug("skip: invalid pre_bid=%r lot=%s", pre_bid, lot)
-                        continue
-
-                    bid_limit = (
-                        car.actual_bid
-                        if car.actual_bid is not None
-                        else car.suggested_bid
-                    )
-                    if bid_limit is not None:
-                        if car.current_bid > bid_limit and (
-                            not car.recommendation_manually_set
-                            or car.current_bid != previous_current_bid
-                        ):
-                            car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                            car.recommendation_manually_set = False
-                            reasons = (car.recommendation_status_reasons or "")
-                            if "suggested bid < current bid;" not in reasons:
-                                car.recommendation_status_reasons = (reasons + "suggested bid < current bid;").strip()
-                        elif car.current_bid <= bid_limit and not car.recommendation_manually_set:
-                            # current bid does not exceed suggested
-                            if car.recommendation_status_reasons:
-                                car.recommendation_status_reasons = car.recommendation_status_reasons.replace(
-                                    "suggested bid < current bid;", ""
-                                )
-                            if (
-                                not car.recommendation_status_reasons
-                                and not car.recommendation_manually_set
-                            ):
-                                car.recommendation_status = RecommendationStatus.RECOMMENDED
-
-                    base = (car.sum_of_investments or 0) + (car.current_bid or 0)
-                    if car.avg_market_price is not None and base > 0:
-                        car.predicted_profit_margin = float(car.avg_market_price) - float(base)
-                        car.predicted_roi = (car.predicted_profit_margin / base) * 100.0
-
-                    updated += 1
-
-                except Exception as e:
-                    logger.info("update_car_bids: skipped lot=%r due to: %s", item.get("lot_id"), e)
-                    continue
-
-            db.commit()
-            logger.info("update_car_bids: updated=%s", updated)
-            return {"status": "success", "updated_cars": updated}
-
-        except Exception:
-            db.rollback()
-            logger.exception("update_car_bids failed")
-            raise
 
 def _coerce_amount_and_percent(v) -> tuple[float, bool]:
     """Accept number or {'amount': num, 'percent': bool}. Return (amount, is_percent)."""
