@@ -5,10 +5,8 @@ import asyncio
 #     monkey.patch_all()
 import logging
 import os
-import re
 import time
 from datetime import datetime, timedelta, timezone
-from io import BytesIO
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -17,28 +15,17 @@ import httpx
 import redis
 import requests
 from celery.exceptions import MaxRetriesExceededError
-from sqlalchemy import delete, func, or_, select, text
-from sqlalchemy.exc import OperationalError
-from sqlalchemy.orm import Session, selectinload
 
 from core.celery_config import app
 from core.config import settings
 from db.sync_session import SessionLocal
+from exceptions.vehicle_enrichment import EnrichmentLockConflict
 from integrations.copart_fees import ParsingCopartFeeSource
 from integrations.current_bids import ParsingCurrentBidSource
 from integrations.expired_vehicles import ParsingExpiredVehicleSource
 from integrations.parsing import SyncParsingClient
+from integrations.vehicle_enrichment import ParsingVehicleEnrichmentSource, S3EnrichmentReportStorage
 from integrations.vehicle_tasks import CeleryFilterKickoffPublisher, CeleryTaskVehicleEnrichmentPublisher
-from models.admin import ROIModel
-from models.vehicle import (
-    AutoCheckModel,
-    CarModel,
-    CarSaleHistoryModel,
-    FeeModel,
-    RecommendationStatus,
-    RelevanceStatus,
-)
-from schemas.vehicle import CarCreateSchema
 from services.email_sync import send_email_sync
 from services.expired_vehicle_refresh import refresh_expired_vehicles
 from services.fee_import import refresh_copart_fees
@@ -51,6 +38,7 @@ from services.lock import (
     release_kickoff_lock,
 )
 from services.vehicle_bids import refresh_vehicle_bids
+from services.vehicle_enrichment_workflow import enrich_vehicle
 from storages import S3StorageClient
 
 # =========================
@@ -139,17 +127,6 @@ def is_temporary_payload_error(error_text: str) -> bool:
     return any(marker in text for marker in transient_markers)
 
 
-def is_lock_conflict_error(exc: Exception) -> bool:
-    text = str(exc).lower()
-
-    markers = (
-        "could not obtain lock on row",
-        "lock timeout",
-        "canceling statement due to lock timeout",
-        "could not obtain lock",
-        "nowait",
-    )
-    return any(marker in text for marker in markers)
 
 
 def retry_on_lock(self, exc: Exception, vin: str) -> None:
@@ -209,41 +186,6 @@ def run_async(func: Callable[..., Any], *args, **kwargs) -> Union[Any, asyncio.T
 # =========================
 # Core helpers (pure sync)
 # =========================
-def _load_default_roi(db: Session) -> Optional[ROIModel]:
-    return db.execute(select(ROIModel).order_by(ROIModel.created_at.desc()).limit(1)).scalars().first()
-
-
-def _load_fees(db: Session, auction: Optional[str], investment: float) -> List[FeeModel]:
-    return db.execute(
-        select(FeeModel).where(
-            FeeModel.auction == auction,
-            FeeModel.price_from <= investment,
-            FeeModel.price_to >= investment,
-        )
-    ).scalars().all()
-
-
-def _apply_fees(investment: float, fees: List[FeeModel]) -> float:
-    fee_total = 0.0
-    for fee in fees:
-        if fee.percent:
-            fee_total += (fee.amount / 100.0) * investment
-        else:
-            fee_total += float(fee.amount)
-    return fee_total
-
-
-def normalize_mileage(v):
-    if v is None:
-        return None
-    if isinstance(v, str):
-        v = v.replace(",", "").strip()
-        if not v:
-            return None
-    try:
-        return int(v)
-    except Exception:
-        return None
 
 
 # # =========================
@@ -278,494 +220,36 @@ def parse_and_update_car(
     6. Lock row only for final DB write using FOR UPDATE NOWAIT.
     """
 
-    logger.info("parse_and_update_car started for VIN=%s", vin)
+    request = {
+        "vin": vin,
+        "car_name": car_name,
+        "car_engine": car_engine,
+        "mileage": mileage,
+        "car_make": car_make,
+        "car_model": car_model,
+        "car_year": car_year,
+        "car_transmison": car_transmison,
+    }
+    source = ParsingVehicleEnrichmentSource(http_get_with_retries, settings.PARSERS_AUTH_TOKEN)
 
-    # ---------------------------------------------------------
-    # helpers
-    # ---------------------------------------------------------
-    def add_reason_text(current: Optional[str], text: str) -> str:
-        if not text:
-            return current or ""
-        reason = text if text.endswith(";") else f"{text};"
-        current = current or ""
-        if reason not in current:
-            current += reason
-        return current
-
-    def remove_reason_text(current: Optional[str], text: str) -> str:
-        if not text or not current:
-            return current or ""
-        reason = text if text.endswith(";") else f"{text};"
-        current = current.replace(reason, "")
-        return current.strip()
-
-    def parse_int_safe(value: Any) -> Optional[int]:
-        if value is None:
-            return None
-
-        if isinstance(value, bool):
-            return int(value)
-
-        if isinstance(value, int):
-            return value
-
-        if isinstance(value, float):
-            return int(value)
-
-        if isinstance(value, str):
-            cleaned = value.strip()
-            if not cleaned:
-                return None
-            cleaned = cleaned.replace(",", "").replace(" ", "")
-            match = re.search(r"-?\d+", cleaned)
-            if match:
-                try:
-                    return int(match.group(0))
-                except Exception:
-                    return None
-
-        return None
-
-    def normalize_owners(value: Any) -> Optional[int]:
-        parsed = parse_int_safe(value)
-        if parsed is None:
-            return None
-        return parsed if parsed >= 0 else None
-
-    def normalize_accident_count(value: Any) -> Optional[int]:
-        parsed = parse_int_safe(value)
-        if parsed is None:
-            return None
-        return parsed if parsed >= 0 else None
-
-    def normalize_mileage_value(value: Any) -> Optional[int]:
-        try:
-            normalized = normalize_mileage(value)
-            if normalized is None:
-                return None
-            return int(normalized)
-        except Exception:
-            return None
-
-    def build_parse_url() -> str:
-        return (
-            "/api/v1/parsers/scrape/dc"
-            f"?car_vin={vin}"
-            f"&car_mileage={mileage if mileage is not None else ''}"
-            f"&car_name={car_name or ''}"
-            f"&car_engine={car_engine or ''}"
-            f"&car_make={car_make or ''}"
-            f"&car_model={car_model or ''}"
-            f"&car_year={car_year if car_year is not None else ''}"
-            f"&car_transmison={car_transmison or ''}"
-            f"&only_history=false"
+    def report_storage() -> S3EnrichmentReportStorage:
+        return S3EnrichmentReportStorage(
+            S3StorageClient,
+            endpoint_url=settings.S3_STORAGE_ENDPOINT,
+            access_key=settings.S3_STORAGE_ACCESS_KEY,
+            secret_key=settings.S3_STORAGE_SECRET_KEY,
+            bucket_name=settings.S3_BUCKET_NAME,
+            clock=datetime.utcnow,
         )
 
-    # ---------------------------------------------------------
-    # 1. Read current car state WITHOUT LOCK
-    # ---------------------------------------------------------
-    with SessionLocal() as db:
-        car_pre = db.execute(
-            select(CarModel).where(CarModel.vin == vin).limit(1)
-        ).scalars().first()
-
-        if not car_pre:
-            raise ValueError(f"Car with VIN {vin} not found")
-
-        business_attempts = car_pre.attempts or 0
-        current_car_id = car_pre.id
-
-    # ---------------------------------------------------------
-    # 2. Fetch sales history WITHOUT LOCK
-    # ---------------------------------------------------------
-    sale_history_rows = []
-    sales_history_reason_to_add = None
-
-    if business_attempts == 0:
-        try:
-            hist_url = f"/api/v1/apicar/get/{vin}"
-            headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-            hist_resp = http_get_with_retries(hist_url, headers=headers, timeout=30.0)
-            hist_resp.raise_for_status()
-
-            hist_json = hist_resp.json()
-            if hist_json is None:
-                logger.warning("Sales history response is None for vin=%s", vin)
-                sale_history_data = []
-            else:
-                hist_result = CarCreateSchema.model_validate(hist_json)
-                sale_history_data = hist_result.sales_history or []
-
-            logger.info(
-                "Sales history fetched for VIN=%s, items=%s",
-                vin,
-                len(sale_history_data),
-            )
-
-            if sale_history_data:
-                if len(sale_history_data) >= 4:
-                    sales_history_reason_to_add = (
-                        f"sales at auction in the last 3 years: {len(sale_history_data)};"
-                    )
-
-                for h in sale_history_data:
-                    history_payload = h.model_dump() if hasattr(h, "model_dump") else h.dict()
-                    if not history_payload.get("source"):
-                        history_payload["source"] = "Unknown"
-                    sale_history_rows.append(history_payload)
-
-        except Exception as e:
-            logger.warning("Sales history fetch failed for %s: %s", vin, e)
-
-    # ---------------------------------------------------------
-    # 3. Main parser call WITHOUT LOCK
-    # ---------------------------------------------------------
-    parse_url = build_parse_url()
-    headers = {"X-Auth-Token": settings.PARSERS_AUTH_TOKEN}
-
     try:
-        resp = http_get_with_retries(parse_url, headers=headers, timeout=300.0)
-        resp.raise_for_status()
-    except Exception as e:
-        logger.warning("HTTP parser error for VIN=%s: %s", vin, e)
-
-        with SessionLocal() as db:
-            try:
-                db.execute(text("SET LOCAL lock_timeout = '2s'"))
-                car = db.execute(
-                    select(CarModel)
-                    .where(CarModel.vin == vin)
-                    .with_for_update(nowait=True)
-                ).scalars().first()
-
-                if not car:
-                    return {"status": "not_found", "vin": vin}
-
-                car.recommendation_status_reasons = add_reason_text(
-                    car.recommendation_status_reasons,
-                    "upstream parser error;"
-                )
-                car.has_correct_vin = False
-                car.attempts = (car.attempts or 0) + 1
-
-                db.add(car)
-                db.commit()
-                return {"status": "exception", "vin": vin}
-
-            except OperationalError as lock_exc:
-                db.rollback()
-                logger.warning("VIN=%s is locked, skip after parser HTTP error: %s", vin, lock_exc)
-                return {"status": "locked_skip", "vin": vin}
-            except Exception:
-                db.rollback()
-                raise
-
-    try:
-        data = resp.json()
-    except Exception as e:
-        logger.warning("JSON decode failed for VIN=%s: %s", vin, e)
-
-        with SessionLocal() as db:
-            try:
-                db.execute(text("SET LOCAL lock_timeout = '2s'"))
-                car = db.execute(
-                    select(CarModel)
-                    .where(CarModel.vin == vin)
-                    .with_for_update(nowait=True)
-                ).scalars().first()
-
-                if not car:
-                    return {"status": "not_found", "vin": vin}
-
-                car.recommendation_status_reasons = add_reason_text(
-                    car.recommendation_status_reasons,
-                    "invalid parser json response;"
-                )
-                car.has_correct_vin = False
-                car.attempts = (car.attempts or 0) + 1
-
-                db.add(car)
-                db.commit()
-                return {"status": "exception", "vin": vin}
-
-            except OperationalError as lock_exc:
-                db.rollback()
-                logger.warning("VIN=%s is locked, skip after JSON error: %s", vin, lock_exc)
-                return {"status": "locked_skip", "vin": vin}
-            except Exception:
-                db.rollback()
-                raise
-
-    if data.get("error"):
-        error_text = str(data.get("error") or "").strip()
-        logger.warning("Payload parser error for VIN=%s: %s", vin, error_text)
-
-        with SessionLocal() as db:
-            try:
-                db.execute(text("SET LOCAL lock_timeout = '2s'"))
-                car = db.execute(
-                    select(CarModel)
-                    .where(CarModel.vin == vin)
-                    .with_for_update(nowait=True)
-                ).scalars().first()
-
-                if not car:
-                    return {"status": "not_found", "vin": vin}
-
-                car.recommendation_status_reasons = add_reason_text(
-                    car.recommendation_status_reasons,
-                    f"scraping error: {error_text};"
-                )
-                car.has_correct_vin = False
-                car.attempts = (car.attempts or 0) + 1
-
-                db.add(car)
-                db.commit()
-                return {"status": "exception", "vin": vin}
-
-            except OperationalError as lock_exc:
-                db.rollback()
-                logger.warning("VIN=%s is locked, skip after payload error: %s", vin, lock_exc)
-                return {"status": "locked_skip", "vin": vin}
-            except Exception:
-                db.rollback()
-                raise
-
-    # ---------------------------------------------------------
-    # 4. Prepare all computed values WITHOUT LOCK
-    # ---------------------------------------------------------
-    parsed_owners = normalize_owners(data.get("owners"))
-    parsed_mileage = normalize_mileage_value(data.get("mileage"))
-    parsed_accident_count = normalize_accident_count(data.get("accident_count"))
-
-    price_values_by_source = {}
-    for key in ("jd", "d_max", "manheim"):
-        parsed_price = parse_int_safe(data.get(key))
-        if parsed_price is not None and parsed_price > 0:
-            price_values_by_source[key] = parsed_price
-
-    from services.market_price import merge_market_prices
-
-    previous_sources = car_pre.market_price_sources
-    candidate_avg_market_price, merged_sources = merge_market_prices(
-        car_pre.avg_market_price, previous_sources, price_values_by_source,
-    )
-    market_refresh_is_complete = len(price_values_by_source) == 3
-    previous_avg_market_price = car_pre.avg_market_price
-    should_refresh_market = candidate_avg_market_price is not None and (
-        candidate_avg_market_price != previous_avg_market_price
-    )
-    calculation_market_price = (
-        candidate_avg_market_price
-        if should_refresh_market
-        else previous_avg_market_price
-    )
-
-    with SessionLocal() as db:
-        default_roi = _load_default_roi(db)
-
-        if default_roi and calculation_market_price:
-            predicted_total_investments = calculation_market_price / (1 + default_roi.roi / 100.0)
-            predicted_profit_margin_percent = default_roi.profit_margin
-            predicted_profit_margin = calculation_market_price * (default_roi.profit_margin / 100.0)
-            predicted_roi = default_roi.roi
-        else:
-            predicted_total_investments = 0.0
-            predicted_profit_margin_percent = 0.0
-            predicted_profit_margin = 0.0
-            predicted_roi = 0.0
-
-        current_auction = car_pre.auction
-        fees = _load_fees(db, current_auction, float(predicted_total_investments or 0.0))
-        auction_fee = _apply_fees(float(predicted_total_investments or 0.0), fees)
-
-    # ---------------------------------------------------------
-    # 5. Upload HTML to S3 WITHOUT LOCK
-    # ---------------------------------------------------------
-    screenshot_url = None
-    html_data = data.get("html_data")
-
-    if html_data:
+        return enrich_vehicle(SessionLocal, request, source, report_storage)
+    except EnrichmentLockConflict as exc:
         try:
-            s3_storage = S3StorageClient(
-                endpoint_url=settings.S3_STORAGE_ENDPOINT,
-                access_key=settings.S3_STORAGE_ACCESS_KEY,
-                secret_key=settings.S3_STORAGE_SECRET_KEY,
-                bucket_name=settings.S3_BUCKET_NAME,
-            )
-            file_key = (
-                f"auto_checks/{vin}/"
-                f"{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}_report.html"
-            )
-            s3_storage.upload_fileobj_sync(
-                file_key,
-                BytesIO(html_data.encode("utf-8")),
-            )
-            screenshot_url = (
-                f"{settings.S3_STORAGE_ENDPOINT}/"
-                f"{settings.S3_BUCKET_NAME}/"
-                f"{file_key}"
-            )
-        except Exception as e:
-            logger.warning("S3 upload failed for VIN=%s: %s", vin, e)
-
-    # ---------------------------------------------------------
-    # 6. Final SHORT locked DB write
-    # ---------------------------------------------------------
-    with SessionLocal() as db:
-        try:
-            db.execute(text("SET LOCAL lock_timeout = '2s'"))
-            db.execute(text("SET LOCAL statement_timeout = '15s'"))
-
-            car = db.execute(
-                select(CarModel)
-                .where(CarModel.vin == vin)
-                .options(selectinload(CarModel.condition_assessments))
-                .with_for_update(nowait=True)
-            ).scalars().first()
-
-            if not car:
-                raise ValueError(f"Car with VIN {vin} not found")
-
-            # if sales history still absent and we fetched it on first business attempt
-            if business_attempts == 0 and sale_history_rows and not car.sales_history:
-                if len(sale_history_rows) >= 4:
-                    car.recommendation_status = RecommendationStatus.NOT_RECOMMENDED
-                    car.recommendation_manually_set = False
-                    car.recommendation_status_reasons = add_reason_text(
-                        car.recommendation_status_reasons,
-                        sales_history_reason_to_add or ""
-                    )
-
-                for row in sale_history_rows:
-                    item = CarSaleHistoryModel(**row, car_id=car.id)
-                    db.add(item)
-
-            # reset parser-related errors
-            car.has_correct_vin = True
-            car.recommendation_status_reasons = remove_reason_text(
-                car.recommendation_status_reasons,
-                "upstream parser error;"
-            )
-            car.recommendation_status_reasons = remove_reason_text(
-                car.recommendation_status_reasons,
-                "invalid parser json response;"
-            )
-
-            # owners
-            if parsed_owners is not None:
-                car.owners = parsed_owners
-                car.has_correct_owners = True
-            else:
-                car.has_correct_owners = False
-
-            # mileage
-            expected_mileage = mileage if mileage is not None else car.mileage
-            if parsed_mileage is not None and expected_mileage is not None:
-                try:
-                    car.has_correct_mileage = int(expected_mileage) == int(parsed_mileage)
-                    if car.has_correct_mileage:
-                        car.recommendation_status_reasons = remove_reason_text(
-                            car.recommendation_status_reasons,
-                            "mileage mismatch;"
-                        )
-                    else:
-                        car.recommendation_status_reasons = add_reason_text(
-                            car.recommendation_status_reasons,
-                            f"mileage mismatch: expected {expected_mileage}, parsed {parsed_mileage};"
-                        )
-                except Exception:
-                    car.has_correct_mileage = False
-            else:
-                car.has_correct_mileage = False
-
-            # accidents
-            if parsed_accident_count is not None:
-                car.accident_count = parsed_accident_count
-                car.has_correct_accidents = True
-            else:
-                car.has_correct_accidents = False
-
-            # Market-derived fields are one consistency unit. Do not replace an
-            # established price with a partial/empty upstream response, and do
-            # not overwrite a manual price saved while this task was running.
-            market_snapshot_is_current = (
-                car.avg_market_price == previous_avg_market_price
-                and car.market_price_sources == previous_sources
-            )
-            if market_snapshot_is_current and merged_sources:
-                car.market_price_sources = merged_sources
-            if should_refresh_market and market_snapshot_is_current:
-                car.avg_market_price = candidate_avg_market_price
-                car.predicted_total_investments = predicted_total_investments
-                car.predicted_profit_margin_percent = predicted_profit_margin_percent
-                car.predicted_profit_margin = predicted_profit_margin
-                car.auction_fee = auction_fee
-                car.predicted_roi = predicted_roi
-                car.suggested_bid = int(
-                    (car.predicted_total_investments or 0.0) - (car.sum_of_investments or 0.0)
-                )
-            elif candidate_avg_market_price is None:
-                logger.warning(
-                    "VIN=%s returned no valid market prices; keeping established market fields",
-                    vin,
-                )
-            elif not market_refresh_is_complete and previous_avg_market_price is not None:
-                logger.warning(
-                    "VIN=%s returned partial market data (%s); keeping established market fields",
-                    vin,
-                    sorted(price_values_by_source),
-                )
-            elif not market_snapshot_is_current:
-                logger.info(
-                    "VIN=%s market price changed concurrently; parser result was not applied",
-                    vin,
-                )
-
-            # autochek html
-            if screenshot_url:
-                db.add(AutoCheckModel(car_id=car.id, screenshot_url=screenshot_url))
-
-            # recommendation baseline
-            if (
-                car.recommendation_status != RecommendationStatus.NOT_RECOMMENDED
-                and (not car.recommendation_status_reasons or car.recommendation_status_reasons == "")
-            ):
-                car.recommendation_status = RecommendationStatus.RECOMMENDED
-
-            car.is_checked = True
-            car.relevance = RelevanceStatus.ACTIVE
-            car.attempts = (car.attempts or 0) + 1
-
-            db.add(car)
-            db.commit()
-
-            logger.info(
-                "parse_and_update_car: updated VIN=%s | owners=%s mileage=%s accidents=%s attempts=%s",
-                vin,
-                car.has_correct_owners,
-                car.has_correct_mileage,
-                car.has_correct_accidents,
-                car.attempts,
-            )
-            return {"status": "success", "vin": vin}
-
-        except OperationalError as e:
-            db.rollback()
-
-            if is_lock_conflict_error(e):
-                try:
-                    retry_on_lock(self, e, vin)
-                except MaxRetriesExceededError:
-                    logger.warning("Max lock retries exceeded for VIN=%s", vin)
-                    return {"status": "locked_skip_after_retries", "vin": vin}
-
-            logger.error("OperationalError for VIN=%s: %s", vin, e, exc_info=True)
-            raise
-        except Exception as e:
-            db.rollback()
-            logger.error("parse_and_update_car failed for VIN %s: %s", vin, e, exc_info=True)
-            raise
+            retry_on_lock(self, exc.error, vin)
+        except MaxRetriesExceededError:
+            logger.warning("Max lock retries exceeded for VIN=%s", vin)
+            return {"status": "locked_skip_after_retries", "vin": vin}
 
 
 @app.task(name="tasks.task.update_car_bids")

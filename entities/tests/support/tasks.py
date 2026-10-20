@@ -74,9 +74,11 @@ def mock_roi_and_fees(monkeypatch):
     def load_fees(_db, _auction, _base): return {"stub": True}
     def apply_fees(base_amount, _fees): return round((base_amount or 0.0) * 0.05, 2)
 
-    monkeypatch.setattr(task_module, "_load_default_roi", load_default_roi)
-    monkeypatch.setattr(task_module, "_load_fees", load_fees)
-    monkeypatch.setattr(task_module, "_apply_fees", apply_fees)
+    from services import vehicle_enrichment_workflow
+
+    monkeypatch.setattr(vehicle_enrichment_workflow, "_load_default_roi", load_default_roi)
+    monkeypatch.setattr(vehicle_enrichment_workflow, "_load_fees", load_fees)
+    monkeypatch.setattr(vehicle_enrichment_workflow, "_apply_fees", apply_fees)
 
 
 @pytest.fixture(autouse=False)

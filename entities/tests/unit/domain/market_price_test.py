@@ -1,4 +1,4 @@
-from services.market_price import merge_market_prices
+from domain.market_price import merge_market_prices
 
 
 def test_partial_refresh_keeps_missing_sources():
