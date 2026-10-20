@@ -24,11 +24,12 @@ from sqlalchemy.orm import Session, selectinload
 from core.celery_config import app
 from core.config import settings
 from db.sync_session import SessionLocal
+from integrations.copart_fees import ParsingCopartFeeSource
 from integrations.current_bids import ParsingCurrentBidSource
 from integrations.parsing import SyncParsingClient
+from integrations.vehicle_tasks import CeleryFilterKickoffPublisher
 from models.admin import FilterModel, ROIModel
 from models.filter_kickoff_queue import (
-    FILTER_QUEUE_DISPATCH_LOCK_KEY,
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
 )
@@ -50,6 +51,8 @@ from models.vehicle import (
 )
 from schemas.vehicle import CarCreateSchema
 from services.email_sync import send_email_sync
+from services.fee_import import refresh_copart_fees
+from services.filter_kickoff_queue import dispatch_due_filter_kickoffs
 from services.lock import (
     acquire_kickoff_lock,
     generate_lock_token,
@@ -783,141 +786,13 @@ def update_car_bids() -> Dict[str, Any]:
     return result
 
 
-def _coerce_amount_and_percent(v) -> tuple[float, bool]:
-    """Accept number or {'amount': num, 'percent': bool}. Return (amount, is_percent)."""
-    if isinstance(v, dict):
-        amt = v.get("amount", 0.0)
-        pct = bool(v.get("percent", False))
-        return float(amt), pct
-    return float(v), False
-
-def _inner_range_map(maybe_wrapped: dict) -> dict:
-    """
-    Unwrap one level if the dict is a container with a single section key
-    like {'secured': {...}} or {'live_bid': {...}}. If already ranges -> return as is.
-    """
-    if not isinstance(maybe_wrapped, dict):
-        return {}
-    # If keys look like labels, not ranges, unwrap one layer
-    label_like = {"secured", "unsecured", "live_bid", "online", "onsite", "credit", "cash"}
-    keys = list(maybe_wrapped.keys())
-    if len(keys) == 1 and keys[0] in label_like and isinstance(maybe_wrapped[keys[0]], dict):
-        return maybe_wrapped[keys[0]]
-    return maybe_wrapped
-
-_MAX_PRICE = 1_000_000.0
-
-def _parse_range_key(k: str) -> tuple[float, float]:
-    """
-    Parse 'min-max', 'min+', '+min', single value, or empty.
-    - '8000.00+' -> (8000.0, _MAX_PRICE)
-    - '+15000'   -> (15000.0, _MAX_PRICE)
-    - '0.00-100.00' -> (0.0, 100.0)
-    - '' or None -> (0.0, _MAX_PRICE)
-    """
-    if not k:
-        return 0.0, _MAX_PRICE
-    s = k.strip()
-    # guard against accidental labels like 'secured'
-    if not any(ch.isdigit() for ch in s):
-        return 0.0, _MAX_PRICE
-    if "-" in s:
-        a, b = s.split("-", 1)
-        a = a.replace("$", "").replace(",", "").replace("+", "").strip()
-        b = b.replace("$", "").replace(",", "").replace("+", "").strip()
-        p_from = float(a or 0.0)
-        p_to = float(b) if b else _MAX_PRICE
-        return p_from, p_to
-    if s.endswith("+") or s.startswith("+"):
-        base = s.replace("$", "").replace(",", "").replace("+", "").strip()
-        p_from = float(base or 0.0)
-        return p_from, _MAX_PRICE
-    # single number
-    single = float(s.replace("$", "").replace(",", ""))
-    return single, single
-
 @app.task(name="tasks.task.update_fees")
 def update_car_fees() -> Dict[str, Any]:
-    """
-    Pull the fee table from the parser and update 'copart'.
-    """
     logger.info("update_car_fees: start")
     with SessionLocal() as db:
-        try:
-            with SyncParsingClient(timeout=60) as client:
-                r = client.get("/api/v1/parsers/scrape/fees")
-                r.raise_for_status()
-                payload = r.json()
-
-            fees_data = payload["fees"]["copart"]["fees"]
-
-            # Wipe old Copart fees
-            db.execute(delete(FeeModel).where(FeeModel.auction == "copart"))
-
-            # --- Bidding fees ---
-            bidding_section = fees_data.get("bidding_fees", {})
-            bidding_secured = bidding_section.get("secured", {})
-            bidding_ranges = _inner_range_map(_inner_range_map(bidding_secured))
-            for rng_key, raw in bidding_ranges.items():
-                amount, is_percent = _coerce_amount_and_percent(raw)
-                p_from, p_to = _parse_range_key(rng_key)
-                db.add(FeeModel(
-                    auction="copart",
-                    fee_type="bidding_fees",
-                    amount=amount,
-                    percent=is_percent,
-                    price_from=p_from,
-                    price_to=p_to,
-                ))
-
-            # --- Virtual bid fee ---
-            vbf_section = fees_data.get("virtual_bid_fee", {})
-            vbf_live = vbf_section.get("live_bid", {})
-            vbf_ranges = _inner_range_map(vbf_live)
-            for rng_key, raw in vbf_ranges.items():
-                amount, is_percent = _coerce_amount_and_percent(raw)
-                p_from, p_to = _parse_range_key(rng_key)
-                db.add(FeeModel(
-                    auction="copart",
-                    fee_type="virtual_bid_fee",
-                    amount=amount,
-                    percent=is_percent,
-                    price_from=p_from,
-                    price_to=p_to,
-                ))
-
-            # --- Gate fee ---
-            gate = fees_data.get("gate_fee", {})
-            if isinstance(gate, dict) and "amount" in gate:
-                db.add(FeeModel(
-                    auction="copart",
-                    fee_type="gate_fee",
-                    amount=float(gate["amount"]),
-                    percent=False,
-                    price_from=0.0,
-                    price_to=_MAX_PRICE,
-                ))
-
-            # --- Environmental fee ---
-            env = fees_data.get("environmental_fee", {})
-            if isinstance(env, dict) and "amount" in env:
-                db.add(FeeModel(
-                    auction="copart",
-                    fee_type="environmental_fee",
-                    amount=float(env["amount"]),
-                    percent=False,
-                    price_from=0.0,
-                    price_to=_MAX_PRICE,
-                ))
-
-            db.commit()
-            logger.info("update_car_fees: OK")
-            return {"status": "success"}
-
-        except Exception:
-            db.rollback()
-            logger.exception("update_car_fees failed")
-            raise
+        result = refresh_copart_fees(db, ParsingCopartFeeSource(SyncParsingClient))
+    logger.info("update_car_fees: OK")
+    return result
 
 
 @app.task(name="tasks.task.kickoff_parse_for_filter")
@@ -1475,61 +1350,8 @@ def send_daily_car_audit():
         return {"status": "error", "error": str(e)}
 
 
-DISPATCH_LOCK_KEY = 910002
-
-
 @app.task(name="tasks.task.dispatch_due_filter_kickoff_jobs")
 def dispatch_due_filter_kickoff_jobs() -> dict:
     now = datetime.now(timezone.utc)
-    dispatched = 0
-    failed = 0
-
     with SessionLocal() as session:
-        session.execute(
-            text("SELECT pg_advisory_xact_lock(:key)"),
-            {"key": FILTER_QUEUE_DISPATCH_LOCK_KEY},
-        )
-
-        stmt = (
-            select(FilterKickoffQueueModel)
-            .where(
-                FilterKickoffQueueModel.status == FilterKickoffQueueStatus.SCHEDULED,
-                FilterKickoffQueueModel.scheduled_at <= now,
-            )
-            .order_by(FilterKickoffQueueModel.scheduled_at.asc())
-            .with_for_update(skip_locked=True)
-        )
-
-        jobs = session.execute(stmt).scalars().all()
-
-        for job in jobs:
-            try:
-                async_result = app.send_task(
-                    "tasks.task.kickoff_parse_for_filter",
-                    kwargs={
-                        "filter_id": job.filter_id,
-                        "lock_token": str(job.id),
-                    },
-                    queue="car_parsing_queue",
-                )
-
-                job.status = FilterKickoffQueueStatus.DISPATCHED
-                job.dispatched_at = now
-                job.celery_task_id = async_result.id
-                job.attempts += 1
-                job.last_error = None
-                dispatched += 1
-
-            except Exception as exc:
-                job.status = FilterKickoffQueueStatus.FAILED
-                job.finished_at = now
-                job.last_error = str(exc)
-                failed += 1
-
-        session.commit()
-
-    return {
-        "status": "ok",
-        "dispatched": dispatched,
-        "failed": failed,
-    }
+        return dispatch_due_filter_kickoffs(session, CeleryFilterKickoffPublisher(app), now)

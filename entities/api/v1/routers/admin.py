@@ -1,9 +1,8 @@
 import logging
 import logging.handlers
 import os
-import re
 from datetime import datetime, timezone
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import httpx
 import redis
@@ -15,15 +14,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
 from core.celery_config import app as celery_app
-from core.dependencies import get_current_user, get_settings, get_token
+from core.dependencies import get_current_user, get_iaai_fee_source, get_settings, get_token
 from db.session import get_db
+from domain.iaai_fees import FeeImage, IaaiFeeSource
+from exceptions.fee_import import FeeSourceUnavailable
 from integrations.parsing import ParsingClient
 from models.admin import FilterModel, ROIModel
 from models.filter_kickoff_queue import (
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
 )
-from models.vehicle import CarModel, CarStatus, FeeModel, RelevanceStatus
+from models.vehicle import CarModel, CarStatus, RelevanceStatus
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -33,6 +34,7 @@ from schemas.admin import (
     ROIListResponseSchema,
     ROIResponseSchema,
 )
+from services.fee_import import refresh_iaai_fees
 from services.filter_kickoff_queue import enqueue_filter_kickoff
 from services.lock import (
     acquire_kickoff_lock,
@@ -542,150 +544,27 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
         )
 
 
-OPEN_CAP = 1_000_000.0
-
-
-def _parse_range_key(range_key: str) -> tuple[float | None, float | None]:
-    """'0.00-99.99' -> (0.0, 99.99); '15000.00+' -> (15000.0, 1e6)"""
-    k = (range_key or "").strip()
-    if "-" in k:
-        a, b = k.split("-", 1)
-        return float(a), float(b)
-    # A+
-    v = float(k.replace("+", ""))
-    return v, OPEN_CAP
-
-
-def _try_parse_amount(raw) -> Optional[Tuple[float, bool]]:
-    """
-    Convert raw amount into (value, is_percent). None якщо не парситься.
-    Підтримка:
-      - float/int
-      - "$500.00" / "500"
-      - "6%" / "6% of sale price"
-      - "FREE"/"NO FEE" -> (0.0, False)
-    """
-    if raw is None:
-        return None
-
-    if isinstance(raw, (int, float)):
-        return float(raw), False
-
-    s = str(raw).strip()
-    if not s or s.lower() == "none":
-        return None
-
-    # FREE / NO FEE
-    if re.fullmatch(r"(free|no\s*fee)", s, re.I):
-        return 0.0, False
-
-    # percent
-    m = re.search(r"(\d+(?:\.\d+)?)\s*%", s)
-    if m:
-        return float(m.group(1)), True
-
-    # dollars
-    s_num = s.replace("$", "").replace(",", "")
-    try:
-        return float(s_num), False
-    except ValueError:
-        logger.warning("Skipping unparsable amount value: %r", raw)
-        return None
-
-
 @router.post("/upload-iaai-fees")
 async def proxy_upload(
     high_volume: UploadFile = File(...),
     internet_bid: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
+    fee_source: IaaiFeeSource = Depends(get_iaai_fee_source),
 ):
     """
     Forward two images to parsers app, upsert IAAI fees into DB.
     For fixed IAAI fees we store range 0..OPEN_CAP (not NULL..NULL).
     """
     try:
-        async with ParsingClient(timeout=60) as client:
-            files = {
-                "high_volume": (high_volume.filename, await high_volume.read(), high_volume.content_type),
-                "internet_bid": (internet_bid.filename, await internet_bid.read(), internet_bid.content_type),
-            }
-            resp = await client.post("/api/v1/parsers/scrape/iaai/fees", files=files)
-
-        data = resp.json()
-        fees_data = data.get("fees", {})
-
-        # safe defaults
-        hv = fees_data.get("high_volume_buyer_fees", {"fees": {}}).get("fees", {}) or {}
-        ib = fees_data.get("internet_bid_buyer_fees", {"fees": {}}).get("fees", {}) or {}
-
-        service_fee = fees_data.get("service_fee", {"amount": 95.0})
-        environmental_fee = fees_data.get("environmental_fee", {"amount": 15.0})
-        title_handling_fee = fees_data.get("title_handling_fee", {"amount": 20.0})
-
-        # wipe old IAAI fees
-        await db.execute(delete(FeeModel).where(FeeModel.auction == "iaai"))
-        logger.info("Deleted all existing fees for auction 'iaai'")
-
-        # --- FIXED FEES as 0..OPEN_CAP (not NULL..NULL) ---
-        for ftype, payload in [
-            ("service_fee", service_fee),
-            ("environmental_fee", environmental_fee),
-            ("title_handling_fee", title_handling_fee),
-        ]:
-            parsed = _try_parse_amount(payload.get("amount"))
-            if not parsed:
-                logger.warning("Skipping fixed fee %s due to missing/invalid amount: %r", ftype, payload)
-                continue
-            amt, is_pct = parsed
-            db.add(
-                FeeModel(
-                    auction="iaai",
-                    fee_type=ftype,
-                    amount=amt,
-                    percent=is_pct,
-                    price_from=0.0,          # <-- 0 instead of None
-                    price_to=OPEN_CAP,       # <-- 1_000_000 instead of None
-                )
-            )
-            logger.info("Added fixed fee %s=%s percent=%s range=%s-%s", ftype, amt, is_pct, 0.0, OPEN_CAP)
-
-        # --- RANGE FEES (high volume + internet live bid) ---
-        for ftype, ranges in [
-            ("high_volume_buyer_fees", hv),
-            ("internet_bid_buyer_fees", ib),
-        ]:
-            for rng_key, raw_amount in (ranges or {}).items():
-                parsed = _try_parse_amount(raw_amount)
-                if not parsed:
-                    logger.warning("Skipping %s row due to missing/invalid amount: key=%r value=%r", ftype, rng_key, raw_amount)
-                    continue
-                try:
-                    p_from, p_to = _parse_range_key(rng_key)
-                except Exception:
-                    logger.warning("Skipping %s row due to invalid range key: %r", ftype, rng_key)
-                    continue
-
-                amt, is_pct = parsed
-                db.add(
-                    FeeModel(
-                        auction="iaai",
-                        fee_type=ftype,
-                        amount=amt,
-                        percent=is_pct,
-                        price_from=p_from,
-                        price_to=p_to,
-                    )
-                )
-
-        await db.commit()
-        logger.info("Committed new fees for auction 'iaai'")
-
+        high_volume_image = FeeImage(high_volume.filename, await high_volume.read(), high_volume.content_type)
+        internet_bid_image = FeeImage(internet_bid.filename, await internet_bid.read(), internet_bid.content_type)
+        result = await refresh_iaai_fees(db, fee_source, high_volume_image, internet_bid_image)
         return JSONResponse(
-            status_code=resp.status_code,
-            content={"message": "Forwarded successfully", "external_status": resp.status_code, "response": data},
+            status_code=result.status,
+            content={"message": "Forwarded successfully", "external_status": result.status, "response": result.data},
         )
 
-    except httpx.RequestError as e:
+    except (FeeSourceUnavailable, httpx.RequestError) as e:
         raise HTTPException(status_code=502, detail=f"Failed to contact external service: {str(e)}")
     except Exception as e:
         logger.exception("Unexpected error in proxy_upload")

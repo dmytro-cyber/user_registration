@@ -10,6 +10,7 @@ from core.config import Settings
 from core.security.interfaces import JWTAuthManagerInterface
 from core.security.token_manager import JWTAuthManager
 from db.session import get_db
+from domain.iaai_fees import IaaiFeeSource
 from domain.vehicle_ingestion import VehicleEnrichmentPublisher
 from domain.vehicle_source import VehicleDataSource
 from models.user import UserModel
@@ -21,6 +22,13 @@ logger = logging.getLogger(__name__)
 
 def get_settings() -> Settings:
     return Settings()
+
+
+def get_iaai_fee_source() -> IaaiFeeSource:
+    from integrations.iaai_fees import ParsingIaaiFeeSource
+    from integrations.parsing import ParsingClient
+
+    return ParsingIaaiFeeSource(ParsingClient)
 
 
 def get_vehicle_data_source() -> VehicleDataSource:

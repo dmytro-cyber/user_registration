@@ -4,7 +4,10 @@ from datetime import datetime, timezone
 
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
+from crud.filter_kickoff_queue import load_due_kickoffs
+from domain.filter_kickoff import FilterDispatchResult, FilterKickoffPublisher
 from models.filter_kickoff_queue import (
     FILTER_KICKOFF_INTERVAL,
     FILTER_QUEUE_ENQUEUE_LOCK_KEY,
@@ -54,3 +57,33 @@ async def enqueue_filter_kickoff(
     await db.flush()
 
     return queue_item
+
+
+def dispatch_due_filter_kickoffs(
+    db: Session,
+    publisher: FilterKickoffPublisher,
+    now: datetime,
+) -> FilterDispatchResult:
+    dispatched = 0
+    failed = 0
+    try:
+        jobs = load_due_kickoffs(db, now)
+        for job in jobs:
+            try:
+                publication = publisher.publish(job.filter_id, job.id)
+                job.status = FilterKickoffQueueStatus.DISPATCHED
+                job.dispatched_at = now
+                job.celery_task_id = publication.id
+                job.attempts += 1
+                job.last_error = None
+                dispatched += 1
+            except Exception as exc:
+                job.status = FilterKickoffQueueStatus.FAILED
+                job.finished_at = now
+                job.last_error = str(exc)
+                failed += 1
+        db.commit()
+        return {"status": "ok", "dispatched": dispatched, "failed": failed}
+    except Exception:
+        db.rollback()
+        raise

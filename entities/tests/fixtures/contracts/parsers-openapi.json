@@ -1,0 +1,562 @@
+{
+  "components": {
+    "schemas": {
+      "Body_parse_fees_api_v1_parsers_scrape_iaai_fees_post": {
+        "properties": {
+          "high_volume": {
+            "format": "binary",
+            "title": "High Volume",
+            "type": "string"
+          },
+          "internet_bid": {
+            "format": "binary",
+            "title": "Internet Bid",
+            "type": "string"
+          }
+        },
+        "required": [
+          "high_volume",
+          "internet_bid"
+        ],
+        "title": "Body_parse_fees_api_v1_parsers_scrape_iaai_fees_post",
+        "type": "object"
+      },
+      "DCResponseSchema": {
+        "properties": {
+          "accident_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accident Count"
+          },
+          "d_max": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "D Max"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "html_data": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Html Data"
+          },
+          "jd": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Jd"
+          },
+          "manheim": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Manheim"
+          },
+          "mileage": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mileage"
+          },
+          "owners": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Owners"
+          }
+        },
+        "title": "DCResponseSchema",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "UpdateCurrentBidListRequestSchema": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/UpdateCurrentBidRequestSchema"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "UpdateCurrentBidListRequestSchema",
+        "type": "object"
+      },
+      "UpdateCurrentBidListResponseSchema": {
+        "properties": {
+          "bids": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Bids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "bids"
+        ],
+        "title": "UpdateCurrentBidListResponseSchema",
+        "type": "object"
+      },
+      "UpdateCurrentBidRequestSchema": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "integer"
+          },
+          "lot": {
+            "title": "Lot",
+            "type": "integer"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "lot"
+        ],
+        "title": "UpdateCurrentBidRequestSchema",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "title": "My Async FastAPI Project",
+    "version": "0.1.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/v1/apicar/get/{car_vin}": {
+      "get": {
+        "description": "Get data from apicar",
+        "operationId": "get_sales_history_api_v1_apicar_get__car_vin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "car_vin",
+            "required": true,
+            "schema": {
+              "title": "Car Vin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sales History",
+        "tags": [
+          "apicar"
+        ]
+      }
+    },
+    "/api/v1/apicar/update/{car_vin}": {
+      "get": {
+        "description": "Get data from apicar",
+        "operationId": "get_update_api_v1_apicar_update__car_vin__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "car_vin",
+            "required": true,
+            "schema": {
+              "title": "Car Vin",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Update",
+        "tags": [
+          "apicar"
+        ]
+      }
+    },
+    "/api/v1/parsers/scrape/current_bid": {
+      "post": {
+        "description": "Scrape current bid data from Copart for a list of URLs.",
+        "operationId": "scrape_current_bid_api_v1_parsers_scrape_current_bid_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateCurrentBidListRequestSchema"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UpdateCurrentBidListResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scrape Current Bid",
+        "tags": [
+          "parsers"
+        ]
+      }
+    },
+    "/api/v1/parsers/scrape/dc": {
+      "get": {
+        "description": "Scrape data from Dealer Center",
+        "operationId": "scrape_dc_api_v1_parsers_scrape_dc_get",
+        "parameters": [
+          {
+            "description": "VIN of the car to scrape",
+            "in": "query",
+            "name": "car_vin",
+            "required": true,
+            "schema": {
+              "description": "VIN of the car to scrape",
+              "title": "Car Vin",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Name of the car (optional)",
+            "in": "query",
+            "name": "car_name",
+            "required": false,
+            "schema": {
+              "description": "Name of the car (optional)",
+              "title": "Car Name",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Engine type of the car (optional)",
+            "in": "query",
+            "name": "car_engine",
+            "required": false,
+            "schema": {
+              "description": "Engine type of the car (optional)",
+              "title": "Car Engine",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Mileage of the car (optional)",
+            "in": "query",
+            "name": "car_mileage",
+            "required": false,
+            "schema": {
+              "description": "Mileage of the car (optional)",
+              "title": "Car Mileage",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Make of the car",
+            "in": "query",
+            "name": "car_make",
+            "required": true,
+            "schema": {
+              "description": "Make of the car",
+              "title": "Car Make",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Model of the car",
+            "in": "query",
+            "name": "car_model",
+            "required": true,
+            "schema": {
+              "description": "Model of the car",
+              "title": "Car Model",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Year of the car",
+            "in": "query",
+            "name": "car_year",
+            "required": true,
+            "schema": {
+              "description": "Year of the car",
+              "title": "Car Year",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Transmission type of the car",
+            "in": "query",
+            "name": "car_transmison",
+            "required": true,
+            "schema": {
+              "description": "Transmission type of the car",
+              "title": "Car Transmison",
+              "type": "string"
+            }
+          },
+          {
+            "description": "If true, only scrape history data",
+            "in": "query",
+            "name": "only_history",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "If true, only scrape history data",
+              "title": "Only History",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DCResponseSchema"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Scrape Dc",
+        "tags": [
+          "parsers"
+        ]
+      }
+    },
+    "/api/v1/parsers/scrape/fees": {
+      "get": {
+        "description": "Scrape fees from Copart.",
+        "operationId": "scrape_fees_api_v1_parsers_scrape_fees_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Scrape Fees",
+        "tags": [
+          "parsers"
+        ]
+      }
+    },
+    "/api/v1/parsers/scrape/iaai/fees": {
+      "post": {
+        "description": "Parse fees from two uploaded images (SVG or PNG). Internet file -> use 'Live Bid' column.",
+        "operationId": "parse_fees_api_v1_parsers_scrape_iaai_fees_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_parse_fees_api_v1_parsers_scrape_iaai_fees_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Parse Fees",
+        "tags": [
+          "parsers"
+        ]
+      }
+    },
+    "/startup": {
+      "post": {
+        "operationId": "startup_startup_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Startup"
+      }
+    }
+  }
+}
