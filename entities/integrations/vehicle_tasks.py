@@ -32,3 +32,14 @@ class CeleryFilterKickoffPublisher:
             kwargs={"filter_id": filter_id, "lock_token": str(queue_item_id)},
             queue="car_parsing_queue",
         )
+
+
+class CeleryTaskVehicleEnrichmentPublisher:
+    """Use the registered task's delay routing for filter execution."""
+
+    def __init__(self, task) -> None:
+        self._task = task
+
+    def publish(self, payload: EnrichmentTaskPayload) -> str | None:
+        self._task.delay(**payload)
+        return None

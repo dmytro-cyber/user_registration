@@ -227,3 +227,39 @@ def recommend_for_bulk(
                 combined.append(reason)
         reasons = combined
     return RecommendationState(not bool(reasons), ";".join(reasons) + ";" if reasons else None)
+
+
+def recommend_after_expired_refresh(
+    state: RecommendationState,
+    previous: RecommendationFacts,
+    incoming: RecommendationFacts,
+) -> RecommendationState:
+    """Keep old decisions/reasons; only newly triggered rules override manual state."""
+    reasons = state.reasons
+    overridden = False
+
+    def reject(reason: str) -> None:
+        nonlocal reasons, overridden
+        overridden = True
+        if not reason:
+            return
+        marker = reason if reason.endswith(";") else reason + ";"
+        if marker not in (reasons or ""):
+            reasons = (reasons or "") + marker
+
+    if incoming.fuel_type is not None and incoming.fuel_type not in IMPORT_ALLOWED_FUELS:
+        if _new_reason(incoming.fuel_type, previous.fuel_type, state.manually_set):
+            reject(incoming.fuel_type)
+    if incoming.transmission is not None and incoming.transmission != "Automatic":
+        if _new_reason(incoming.transmission, previous.transmission, state.manually_set):
+            reject(incoming.transmission)
+    for issue in incoming.damage_issues:
+        if issue in SEVERE_DAMAGE_ISSUES and (not state.manually_set or issue not in previous.damage_issues):
+            reject(issue)
+    limit = incoming.suggested_bid if incoming.suggested_bid is not None else previous.suggested_bid
+    if incoming.current_bid is not None and limit is not None and incoming.current_bid > limit:
+        if _new_reason(incoming.current_bid, previous.current_bid, state.manually_set):
+            reject("suggested bid < current bid")
+    if previous.sales_count == 0 and incoming.sales_count >= 4:
+        reject(f"sales at auction in the last 3 years: {incoming.sales_count}")
+    return RecommendationState(False, reasons, False) if overridden else state
