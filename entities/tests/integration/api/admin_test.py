@@ -103,7 +103,6 @@ async def test_update_filter_and_relevance(client: AsyncClient, db_session: Asyn
     monkeypatch.setattr(
         admin_router_mod.celery_app, "send_task", lambda *a, **k: SimpleNamespace(id="fake-task-id"), raising=True
     )
-    monkeypatch.setattr(admin_router_mod, "build_car_filter_query", lambda _filter: [], raising=True)
 
     filter_obj = FilterModel(make="Kia", model="Soul", year_from=2016, year_to=2018, odometer_min=0, odometer_max=100000)
     db_session.add(filter_obj)
@@ -137,6 +136,7 @@ async def test_delete_filter_ok(client: AsyncClient, db_session: AsyncSession, a
 
     response = await client.delete(f"/api/v1/admin/filters/{filter_obj.id}")
     assert response.status_code == 204
+    assert response.content == b""
 
     deleted = (await db_session.execute(select(FilterModel).where(FilterModel.id == filter_obj.id))).scalars().first()
     assert deleted is None
@@ -197,3 +197,74 @@ async def test_load_db(client: AsyncClient, monkeypatch):
 
     response = await client.post("/api/v1/admin/load-db")
     assert response.status_code in (200, 202, 204)
+
+
+@pytest.mark.integration
+async def test_update_missing_filter_keeps_404_detail(client: AsyncClient, monkeypatch):
+    from api.v1.routers import admin as admin_router
+
+    monkeypatch.setattr(admin_router, "is_kickoff_busy", lambda: False)
+    response = await client.patch("/api/v1/admin/filters/999999", json={"year_to": 2020})
+    assert response.status_code == 404 and response.json() == {"detail": "Filter not found"}
+
+
+@pytest.mark.integration
+async def test_delete_missing_filter_as_admin_keeps_exact_404(client: AsyncClient, as_admin):
+    response = await client.delete("/api/v1/admin/filters/999999")
+    assert response.status_code == 404 and response.json() == {"detail": "Filter not found"}
+
+
+@pytest.mark.integration
+async def test_delete_filter_service_failure_keeps_exact_500(client: AsyncClient, as_admin, monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from api.v1.routers import admin as admin_router
+
+    monkeypatch.setattr(admin_router, "delete_filter_and_adjust", AsyncMock(side_effect=RuntimeError("failed")))
+    response = await client.delete("/api/v1/admin/filters/123")
+    assert response.status_code == 500 and response.json() == {"detail": "Error deleting filter"}
+
+
+@pytest.mark.integration
+async def test_calculate_roi_returns_transient_result_without_persisting(client: AsyncClient):
+    response = await client.get("/api/v1/admin/roi/calculate", params={"roi": 25.004})
+    assert response.status_code == 200
+    assert response.json() == {"roi": 25.0, "id": None, "profit_margin": 20.0, "created_at": None}
+    assert (await client.get("/api/v1/admin/roi")).status_code == 404
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("params", [{}, {"roi": -0.001}])
+async def test_calculate_roi_retains_legacy_500_for_missing_or_negative_value(client: AsyncClient, params):
+    response = await client.get("/api/v1/admin/roi/calculate", params=params)
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Error fetching latest ROI record"}
+
+
+@pytest.mark.integration
+async def test_create_negative_roi_keeps_400_before_rounding(client: AsyncClient):
+    response = await client.post("/api/v1/admin/roi", json={"roi": -0.001})
+    assert response.status_code == 400
+    assert response.json() == {"detail": "ROI must be greater than or equal to 0"}
+
+
+@pytest.mark.integration
+async def test_latest_roi_empty_keeps_404(client: AsyncClient):
+    response = await client.get("/api/v1/admin/roi/latest")
+    assert response.status_code == 404 and response.json() == {"detail": "ROI not found"}
+
+
+@pytest.mark.integration
+@pytest.mark.parametrize("method,path,service,detail", [
+    ("get", "/roi", "list_admin_roi", "Error fetching ROI records"),
+    ("get", "/roi/latest", "latest_admin_roi", "Error fetching latest ROI record"),
+    ("post", "/roi", "create_admin_roi", "Error creating ROI record"),
+])
+async def test_roi_service_failures_keep_http_details(client: AsyncClient, monkeypatch, method, path, service, detail):
+    from unittest.mock import AsyncMock
+
+    from api.v1.routers import admin as admin_router
+
+    monkeypatch.setattr(admin_router, service, AsyncMock(side_effect=RuntimeError("failed")))
+    response = await client.request(method, "/api/v1/admin" + path, **({"json": {"roi": 25}} if method == "post" else {}))
+    assert response.status_code == 500 and response.json() == {"detail": detail}

@@ -43,3 +43,17 @@ class CeleryTaskVehicleEnrichmentPublisher:
     def publish(self, payload: EnrichmentTaskPayload) -> str | None:
         self._task.delay(**payload)
         return None
+
+
+class CeleryFilterUpdateKickoffPublisher:
+    """Retain PATCH's direct kickoff with a numeric filter-id lock token."""
+
+    def __init__(self, client: "Celery") -> None:
+        self._client = client
+
+    def publish(self, filter_id: int) -> None:
+        self._client.send_task(
+            "tasks.task.kickoff_parse_for_filter",
+            kwargs={"filter_id": filter_id, "lock_token": filter_id},
+            queue="car_parsing_queue",
+        )

@@ -145,9 +145,10 @@ def as_admin():
 @pytest.fixture
 def patch_filter_enqueue(monkeypatch):
     """HTTP tests stub PostgreSQL queueing; the real queue has PostgreSQL tests."""
-    from api.v1.routers import admin as admin_router_module
     enqueue = AsyncMock()
-    monkeypatch.setattr(admin_router_module, "enqueue_filter_kickoff", enqueue)
+    from services import vehicle_filters
+
+    monkeypatch.setattr(vehicle_filters, "enqueue_filter_kickoff", enqueue)
     return enqueue
 
 

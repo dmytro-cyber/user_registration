@@ -1,6 +1,7 @@
 from sqlalchemy import Column, DateTime, Float, Integer, String, func
 from sqlalchemy.orm import validates
 
+from domain.roi import profit_margin_for_roi
 from models import Base
 
 
@@ -29,5 +30,5 @@ class ROIModel(Base):
     def validate_and_set_profit_margin(self, key, value):
         if value is not None:
             # Calculate profit_margin based on: PM = 100 - 10000 / (ROI + 100)
-            self.profit_margin = round(100 - (10000 / (value + 100)) if value + 100 != 0 else 0, 2)
+            self.profit_margin = profit_margin_for_roi(value)
         return value

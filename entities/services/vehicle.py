@@ -128,22 +128,3 @@ async def prepare_car_detail_response(car: CarModel) -> CarDetailResponseSchema:
             "current_bid": car.current_bid,
         },
     )
-
-
-def build_car_filter_query(filter_obj):
-    conditions = []
-
-    if filter_obj.make:
-        conditions.append(CarModel.make == filter_obj.make)
-    if filter_obj.model:
-        conditions.append(CarModel.model == filter_obj.model)
-    if filter_obj.year_from:
-        conditions.append(CarModel.year >= filter_obj.year_from)
-    if filter_obj.year_to:
-        conditions.append(CarModel.year <= filter_obj.year_to)
-    if filter_obj.odometer_min:
-        conditions.append(CarModel.mileage >= filter_obj.odometer_min)
-    if filter_obj.odometer_max:
-        conditions.append(CarModel.mileage <= filter_obj.odometer_max)
-
-    return conditions

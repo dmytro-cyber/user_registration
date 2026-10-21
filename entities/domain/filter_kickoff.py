@@ -15,3 +15,7 @@ class FilterDispatchResult(TypedDict):
     status: Literal["ok"]
     dispatched: int
     failed: int
+
+
+class FilterUpdateKickoffPublisher(Protocol):
+    def publish(self, filter_id: int) -> None: ...

@@ -9,7 +9,6 @@ import redis
 from celery.result import AsyncResult
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import and_, delete, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
 
@@ -17,14 +16,17 @@ from core.celery_config import app as celery_app
 from core.dependencies import get_current_user, get_iaai_fee_source, get_settings, get_token
 from db.session import get_db
 from domain.iaai_fees import FeeImage, IaaiFeeSource
+from domain.roi import calculate_admin_roi
 from exceptions.fee_import import FeeSourceUnavailable
+from exceptions.roi import NegativeROIError, ROIRecordNotFound
+from exceptions.vehicle_filters import VehicleFilterNotFound
 from integrations.parsing import ParsingClient
-from models.admin import FilterModel, ROIModel
+from integrations.vehicle_tasks import CeleryFilterUpdateKickoffPublisher
+from models.admin import FilterModel
 from models.filter_kickoff_queue import (
     FilterKickoffQueueModel,
     FilterKickoffQueueStatus,
 )
-from models.vehicle import CarModel, CarStatus, RelevanceStatus
 from schemas.admin import (
     FilterCreate,
     FilterResponse,
@@ -35,14 +37,14 @@ from schemas.admin import (
     ROIResponseSchema,
 )
 from services.fee_import import refresh_iaai_fees
-from services.filter_kickoff_queue import enqueue_filter_kickoff
 from services.lock import (
     acquire_kickoff_lock,
     generate_lock_token,
     is_kickoff_busy,
     release_kickoff_lock,
 )
-from services.vehicle import build_car_filter_query
+from services.roi import create_admin_roi, latest_admin_roi, list_admin_roi
+from services.vehicle_filters import create_filter_and_schedule, delete_filter_and_adjust, update_filter_and_schedule
 
 # from tasks.task import parse_and_update_car
 
@@ -119,39 +121,7 @@ async def create_filter(
     db: AsyncSession = Depends(get_db),
     settings=Depends(get_settings),
 ):
-    db_filter = FilterModel(**filter.dict(exclude_unset=True))
-    db_filter.updated_at = datetime.now()
-    db.add(db_filter)
-    await db.flush()
-
-    conditions = [
-        CarModel.make == db_filter.make,
-        CarModel.year >= (db_filter.year_from or 0),
-        CarModel.year <= (db_filter.year_to or 3000),
-        CarModel.mileage >= (db_filter.odometer_min or 0),
-        CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
-    ]
-
-    if db_filter.model is not None:
-        conditions.append(CarModel.model == db_filter.model)
-
-    bulk_update_stmt = (
-        update(CarModel)
-        .where(and_(*conditions))
-        .values(relevance=RelevanceStatus.ACTIVE)
-        .execution_options(synchronize_session=False)
-    )
-    await db.execute(bulk_update_stmt)
-
-    await enqueue_filter_kickoff(
-        db=db,
-        filter_id=db_filter.id,
-    )
-
-    await db.commit()
-    await db.refresh(db_filter)
-
-    return db_filter
+    return await create_filter_and_schedule(db, filter)
 
 
 # Get all filters
@@ -241,63 +211,11 @@ async def update_filter_and_relevance(
             detail="Previous kickoff task is still running. Please wait until it finishes.",
         )
 
-    result = await db.execute(select(FilterModel).where(FilterModel.id == filter_id))
-    db_filter = result.scalar_one_or_none()
-    if db_filter is None:
+    try:
+        return await update_filter_and_schedule(db, filter_id, payload, CeleryFilterUpdateKickoffPublisher(celery_app))
+    except VehicleFilterNotFound:
         raise HTTPException(status_code=404, detail="Filter not found")
 
-    old_filter_query = build_car_filter_query(db_filter)
-    old_ids_stmt = select(CarModel.id).where(*old_filter_query)
-    old_car_ids = {row[0] for row in (await db.execute(old_ids_stmt)).all()}
-
-    for key, value in payload.dict(exclude_unset=True).items():
-        setattr(db_filter, key, value)
-    await db.commit()
-    await db.refresh(db_filter)
-
-    new_filter_query = build_car_filter_query(db_filter)
-    new_ids_stmt = select(CarModel.id).where(*new_filter_query)
-    new_car_ids = {row[0] for row in (await db.execute(new_ids_stmt)).all()}
-
-    to_activate = new_car_ids - old_car_ids
-    to_irrelevant = old_car_ids - new_car_ids
-
-    if to_activate:
-        await db.execute(
-            update(CarModel)
-            .where(CarModel.id.in_(to_activate), CarModel.relevance == RelevanceStatus.IRRELEVANT)
-            .values(relevance=RelevanceStatus.ACTIVE)
-        )
-
-    if to_irrelevant:
-        await db.execute(
-            update(CarModel)
-            .where(
-                CarModel.id.in_(to_irrelevant),
-                CarModel.relevance == RelevanceStatus.ACTIVE,
-                CarModel.car_status != CarStatus.WON,
-            )
-            .values(relevance=RelevanceStatus.IRRELEVANT)
-        )
-        await db.execute(
-            delete(CarModel)
-            .where(
-                CarModel.id.in_(to_irrelevant),
-                CarModel.relevance == RelevanceStatus.ARCHIVAL,
-                CarModel.car_status != CarStatus.WON,
-            )
-        )
-
-    await db.commit()
-
-
-    celery_app.send_task(
-        "tasks.task.kickoff_parse_for_filter",
-        kwargs={"filter_id": db_filter.id, "lock_token": db_filter.id},
-        queue="car_parsing_queue",
-    )
-
-    return {"detail": "Filter updated, relevance adjusted, kickoff scheduled"}
 
 
 # Delete a filter
@@ -319,60 +237,17 @@ async def delete_filter(
     logger.info(f"Deleting filter with id={filter_id} by user_id={current_user.id}", extra=extra)
 
     try:
-        result = await db.execute(select(FilterModel).filter(FilterModel.id == filter_id))
-        db_filter = result.scalars().first()
-
-        if not db_filter:
-            logger.warning(f"Filter with id={filter_id} not found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filter not found")
-
-        base_filter = and_(
-            CarModel.make == db_filter.make,
-            CarModel.model == db_filter.model,
-            CarModel.year >= (db_filter.year_from or 0),
-            CarModel.year <= (db_filter.year_to or 3000),
-            CarModel.mileage >= (db_filter.odometer_min or 0),
-            CarModel.mileage <= (db_filter.odometer_max or 10_000_000),
-        )
-
-        archived_query = select(CarModel.id).where(
-            and_(
-                base_filter,
-                CarModel.relevance == RelevanceStatus.ARCHIVAL,
-                CarModel.car_status != CarStatus.WON,
-            )
-        )
-        archived_ids = (await db.execute(archived_query)).scalars().all()
-
-        if archived_ids:
-            await db.execute(delete(CarModel).where(
-                CarModel.id.in_(archived_ids), CarModel.car_status != CarStatus.WON,
-            ))
-
-        active_query = select(CarModel.id).where(
-            and_(
-                base_filter,
-                CarModel.relevance == RelevanceStatus.ACTIVE,
-                CarModel.car_status != CarStatus.WON,
-            )
-        )
-        active_ids = (await db.execute(active_query)).scalars().all()
-
-        if active_ids:
-            await db.execute(
-                update(CarModel)
-                .where(CarModel.id.in_(active_ids), CarModel.car_status != CarStatus.WON)
-                .values(relevance=RelevanceStatus.IRRELEVANT)
-            )
-
-        await db.delete(db_filter)
-        await db.commit()
-
+        result = await delete_filter_and_adjust(db, filter_id)
         logger.info(
-            f"Filter {filter_id} deleted. Cars affected: {len(archived_ids)} archived removed, {len(active_ids)} marked irrelevant",
+            f"Filter {filter_id} deleted. Cars affected: {result.archived_removed} archived removed, {result.active_marked_irrelevant} marked irrelevant",
             extra=extra,
         )
 
+    except VehicleFilterNotFound:
+        logger.warning(f"Filter with id={filter_id} not found", extra=extra)
+        error = HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Filter not found")
+        logger.error(f"Failed to delete filter with id={filter_id}: {str(error)}", extra=extra)
+        raise error
     except HTTPException as e:
         logger.error(f"Failed to delete filter with id={filter_id}: {str(e)}", extra=extra)
         raise
@@ -404,13 +279,12 @@ async def get_roi(db: AsyncSession = Depends(get_db)) -> ROIListResponseSchema:
     logger.info("Fetching all ROI records", extra=extra)
 
     try:
-        result = await db.execute(select(ROIModel).order_by(ROIModel.id.desc()))
-        roi = result.scalars().all()
-        if not roi:
-            logger.warning("No ROI records found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI not found")
+        roi = await list_admin_roi(db)
         logger.info(f"Retrieved {len(roi)} ROI records", extra=extra)
         return ROIListResponseSchema(roi=[ROIResponseSchema.model_validate(roi_item) for roi_item in roi])
+    except ROIRecordNotFound:
+        logger.warning("No ROI records found", extra=extra)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI not found")
     except HTTPException as e:
         logger.error(f"Failed to fetch ROI records: {str(e)}", extra=extra)
         raise
@@ -445,14 +319,7 @@ async def calculate_roi(
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info(f"Calculating ROI with roi={roi}", extra=extra)
     try:
-        if roi < 0:
-            logger.warning(f"Invalid ROI value: {roi} (must be >= 0)", extra=extra)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
-            )
-        roi = round(roi, 2)
-        roi_model = ROIModel(roi=roi)
-        roi_model.validate_and_set_profit_margin("roi", roi)
+        roi_model = calculate_admin_roi(roi)
         logger.info(f"Calculated profit margin: {roi_model.profit_margin}", extra=extra)
         return roi_model
     except Exception as e:
@@ -482,13 +349,12 @@ async def get_latest_roi(db: AsyncSession = Depends(get_db)) -> ROIResponseSchem
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info("Fetching the latest ROI record", extra=extra)
     try:
-        result = await db.execute(select(ROIModel).order_by(ROIModel.id.desc()).limit(1))
-        roi = result.scalars().first()
-        if not roi:
-            logger.warning("No ROI records found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI not found")
+        roi = await latest_admin_roi(db)
         logger.info(f"Latest ROI record retrieved successfully with id={roi.id}", extra=extra)
         return roi
+    except ROIRecordNotFound:
+        logger.warning("No ROI records found", extra=extra)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ROI not found")
     except HTTPException as e:
         logger.error(f"Failed to fetch latest ROI record: {str(e)}", extra=extra)
         raise
@@ -521,18 +387,12 @@ async def create_roi(roi: ROICreateSchema, db: AsyncSession = Depends(get_db)) -
     logger.info(f"Creating new ROI record with roi={roi.roi}", extra=extra)
 
     try:
-        if roi.roi < 0:
-            logger.warning(f"Invalid ROI value: {roi.roi} (must be >= 0)", extra=extra)
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="ROI must be greater than or equal to 0"
-            )
-        roi.roi = round(roi.roi, 2)
-        db_roi = ROIModel(**roi.dict(exclude_unset=True))
-        db.add(db_roi)
-        await db.commit()
-        await db.refresh(db_roi)
+        db_roi = await create_admin_roi(db, roi.roi)
         logger.info(f"ROI record created successfully with id={db_roi.id}", extra=extra)
         return db_roi
+    except NegativeROIError as exc:
+        logger.warning(f"Invalid ROI value: {roi.roi} (must be >= 0)", extra=extra)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     except HTTPException as e:
         logger.error(f"Failed to create ROI record: {str(e)}", extra=extra)
         raise
