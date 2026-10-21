@@ -1,9 +1,8 @@
 from datetime import datetime
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import select
 
 import api.v1.routers.bidding_hub as bidding_hub_router
 from models.vehicle import CarModel, CarStatus, FeeModel, HistoryModel
@@ -11,48 +10,28 @@ from models.vehicle import CarModel, CarStatus, FeeModel, HistoryModel
 pytestmark = pytest.mark.anyio
 
 
-async def test_get_bidding_hub_empty_returns_404(client, monkeypatch, override_bidding_hub_user):
-    """
-    Empty dataset returns 404 with a descriptive message.
-    """
-    async def fake_get_bidding_hub_vehicles(db, page, page_size, current_user, sort_by, sort_order):
-        return [], 0, 0
-
-    monkeypatch.setattr(bidding_hub_router, "get_bidding_hub_vehicles", fake_get_bidding_hub_vehicles, raising=True)
+async def test_get_bidding_hub_empty_returns_404(client, override_bidding_hub_user):
     response = await client.get("/api/v1/bidding_hub/?page=1&page_size=10")
     assert response.status_code == 404
-    assert "No vehicles found in the bidding hub" in response.text
+    assert response.json() == {"detail": "No vehicles found in the bidding hub"}
 
 
-async def test_delete_vehicle_success_returns_204(client, db_session, monkeypatch, override_bidding_hub_user, sqlite_fk_off):
-    """
-    Deleting an existing vehicle returns 204 and creates a history record.
-    """
-    async def fake_update_vehicle_status(db, car_id, status):
-        return SimpleNamespace(id=car_id), CarStatus.BIDDING.value
-
-    monkeypatch.setattr(bidding_hub_router, "update_vehicle_status", fake_update_vehicle_status, raising=True)
-    response = await client.delete("/api/v1/bidding_hub/delete/123")
-    assert response.status_code == 204
-
-    history_rows = (await db_session.execute(text(
-        "SELECT action, user_id FROM history WHERE car_id = 123"
-    ))).fetchall()
-    assert history_rows, "History row not inserted"
-    assert history_rows[0][0] == "Deleted vehicle from Bidding Hub"
+async def test_delete_vehicle_success_returns_204(client, db_session, create_car, test_user, use_test_user):
+    car = await create_car()
+    car.car_status = CarStatus.BIDDING
+    await db_session.commit()
+    response = await client.delete(f"/api/v1/bidding_hub/delete/{car.id}")
+    assert response.status_code == 204 and response.content == b""
+    await db_session.refresh(car)
+    assert car.car_status == CarStatus.DELETED_FROM_BIDDING_HUB
+    histories = (await db_session.execute(select(HistoryModel).where(HistoryModel.car_id == car.id))).scalars().all()
+    assert len(histories) == 1
+    assert histories[0].action == "Deleted vehicle from Bidding Hub" and histories[0].user_id == test_user.id
 
 
-async def test_delete_vehicle_not_found_returns_404(client, monkeypatch, override_bidding_hub_user):
-    """
-    Deleting a non-existing vehicle returns 404.
-    """
-    async def fake_update_vehicle_status_none(db, car_id, status):
-        return None, CarStatus.BIDDING.value
-
-    monkeypatch.setattr(bidding_hub_router, "update_vehicle_status", fake_update_vehicle_status_none, raising=True)
+async def test_delete_vehicle_not_found_returns_404(client, override_bidding_hub_user):
     response = await client.delete("/api/v1/bidding_hub/delete/999999")
-    assert response.status_code == 404
-    assert "Vehicle not found" in response.text
+    assert response.status_code == 404 and response.json() == {"detail": "Vehicle not found"}
 
 
 async def test_update_actual_bid_vehicle_not_found_returns_404(client, override_bidding_hub_user):
@@ -194,7 +173,7 @@ async def test_get_bidding_hub_history_404_when_empty(client, override_bidding_h
 
 async def test_get_bidding_hub_history_success(client, db_session, test_user, override_bidding_hub_user, sqlite_fk_off):
     """
-    When a single history row exists, the endpoint responds successfully or returns 500 on internal failure.
+    When a single history row exists, the endpoint returns the serialized user.
     """
     car_id = 42
     db_session.add(
@@ -209,7 +188,7 @@ async def test_get_bidding_hub_history_success(client, db_session, test_user, ov
     await db_session.commit()
 
     response = await client.get(f"/api/v1/bidding_hub/history/{car_id}")
-    assert response.status_code in (200, 500), response.text
+    assert response.status_code == 200, response.text
     if response.status_code == 200:
         response_json = response.json()
         assert "history" in response_json and len(response_json["history"]) == 1
@@ -218,3 +197,81 @@ async def test_get_bidding_hub_history_success(client, db_session, test_user, ov
         assert history_item["comment"] == "hello"
         assert history_item["user"] is not None
         assert history_item["user"]["email"] == test_user.email
+
+
+@pytest.mark.parametrize("integrity", [False, True])
+async def test_delete_vehicle_service_failure_keeps_500(client, monkeypatch, override_bidding_hub_user, integrity):
+    from unittest.mock import AsyncMock
+
+    from sqlalchemy.exc import IntegrityError
+
+    error = IntegrityError("INSERT", {}, RuntimeError("failed")) if integrity else RuntimeError("failed")
+    monkeypatch.setattr(bidding_hub_router, "remove_vehicle_from_hub_service", AsyncMock(side_effect=error))
+    response = await client.delete("/api/v1/bidding_hub/delete/123")
+    assert response.status_code == 500 and response.json() == {"detail": "Error deleting vehicle"}
+
+
+async def test_history_order_null_user_and_vehicle_scope(client, db_session, create_car, use_test_user):
+    car = await create_car()
+    other = await create_car(vin="HISTORY-OTHER")
+    db_session.add_all([
+        HistoryModel(car_id=car.id, action="older", created_at=datetime(2020, 1, 1)),
+        HistoryModel(car_id=car.id, action="newer", comment="note", created_at=datetime(2021, 1, 1)),
+        HistoryModel(car_id=other.id, action="excluded"),
+    ])
+    await db_session.commit()
+    response = await client.get(f"/api/v1/bidding_hub/history/{car.id}")
+    assert response.status_code == 200, response.text
+    rows = response.json()["history"]
+    assert [row["action"] for row in rows] == ["newer", "older"]
+    assert all(row["user"] is None for row in rows)
+    assert rows[0]["comment"] == "note" and rows[1]["comment"] is None
+
+
+async def test_history_incomplete_user_keeps_500(client, db_session, create_car, test_user, use_test_user):
+    car = await create_car()
+    test_user.first_name = None
+    db_session.add(HistoryModel(car_id=car.id, action="incomplete", user_id=test_user.id))
+    await db_session.commit()
+    response = await client.get(f"/api/v1/bidding_hub/history/{car.id}")
+    assert response.status_code == 500 and response.json() == {"detail": "Error fetching bidding history"}
+
+
+async def test_history_query_failure_keeps_500(client, monkeypatch, override_bidding_hub_user):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(bidding_hub_router, "get_vehicle_bidding_history", AsyncMock(side_effect=RuntimeError("failed")))
+    response = await client.get("/api/v1/bidding_hub/history/123")
+    assert response.status_code == 500 and response.json() == {"detail": "Error fetching bidding history"}
+
+
+@pytest.mark.parametrize("query", ["page=0", "page_size=101", "sort_order=wrong"])
+async def test_bidding_list_invalid_query_keeps_422(client, override_bidding_hub_user, query):
+    response = await client.get(f"/api/v1/bidding_hub/?{query}")
+    assert response.status_code == 422
+
+
+async def test_bidding_list_unknown_sort_keeps_exact_400(client, override_bidding_hub_user):
+    response = await client.get("/api/v1/bidding_hub/?sort_by=currnent_bid")
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Sorting by currnent_bid not alowed"}
+
+
+async def test_bidding_list_success_and_out_of_range(client, db_session, create_car, use_test_user):
+    car = await create_car()
+    car.car_status = CarStatus.WON
+    await db_session.commit()
+    response = await client.get("/api/v1/bidding_hub/?sort_by=vehicle")
+    assert response.status_code == 200, response.text
+    assert response.json()["total_count"] == response.json()["total_pages"] == 1
+    assert response.json()["vehicles"][0]["id"] == car.id
+    response = await client.get("/api/v1/bidding_hub/?page=2")
+    assert response.status_code == 404 and response.json() == {"detail": "No vehicles found in the bidding hub"}
+
+
+async def test_bidding_list_failure_keeps_500(client, monkeypatch, override_bidding_hub_user):
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(bidding_hub_router, "list_bidding_hub", AsyncMock(side_effect=RuntimeError("failed")))
+    response = await client.get("/api/v1/bidding_hub/")
+    assert response.status_code == 500 and response.json() == {"detail": "Error fetching bidding hub vehicles"}

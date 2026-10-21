@@ -65,9 +65,23 @@ Recommendation decisions for bulk imports, individual snapshots and manual upser
 
 `tasks.task.update_car_bids` delegates to `services/vehicle_bids.py`, which owns the refresh transaction. `crud/vehicle_bids.py` selects candidates and locks matching rows with `SKIP LOCKED`; domain functions handle bid identities, recommendation changes and profit/ROI calculations. The injected current-bid source retains the existing parser request, retry policy and payload handling.
 
+Bidding-hub removal delegates to `services/bidding_hub.py`. CRUD retains the blocking row lock and status flush; the service commits the soft-removal status and history together. The vehicle, relevance and existing inventory remain intact, including removal of a `WON` vehicle. Repeated DELETE still logs another history entry, and failures retain the existing 404/500 responses.
+
+Bidding-hub history reads also delegate to this service. CRUD loads history with users and roles in descending creation order; the service builds the response without committing or rolling back the read transaction. Empty history retains its 404, and incomplete user data retains the existing 500 response.
+
+The bidding-hub list uses the same service and its dedicated CRUD module for pagination and sorting. The caller owns the read session. Existing status filtering, latest-author user sorting, response mapping and 400/404/500 responses are preserved, including 404 for a page beyond the available results.
+
+Vehicle filter options use `services/vehicle_filter_options.py` and `crud/vehicle_filter_options.py`. The service groups makes/models and builds ranges from database values; the public route retains its existing schema. Options use active vehicles, while damage descriptions still include all assessments. Zero range bounds retain the existing null response.
+
+Vehicle like toggling uses `services/vehicle_likes.py` to commit the current user's association change and roll back unexpected failures. `crud/vehicle_likes.py` loads the vehicle and the user's likes and changes the relationship without committing. The existing route, authentication, `Liked`/`Unliked` responses and missing-car 404 are preserved.
+
+Vehicle cost updates use `services/vehicle_costs.py` for commit/refresh and persistence-error rollback, with row locking and ORM changes in `crud/vehicle_costs.py`. Partial updates retain explicit nulls, zero and negative values. Suggested bids use the existing investment sum, and a failed refresh after commit still leaves the update persisted.
+
 `tasks.task.update_fees` delegates Copart tariff replacement to `services/fee_import.py`. The source adapter preserves the existing scraping call; `domain/fee_import.py` converts ranges, percentages and fixed fees, and `crud/fee_import.py` replaces exact `copart` rows inside the service transaction. Conversion or commit failure rolls back the replacement. A valid empty table retains the previous behavior of clearing Copart tariffs.
 
 IAAI upload uses an injected image source, its separate conversion policy in `domain/iaai_fees.py`, and the same service/CRUD boundaries for async persistence. The router retains multipart inputs, forwarded response/status and 502/500 error mapping. Its legacy JSON error response policy is preserved: upstream 400/500 JSON may still replace IAAI tariffs with default fees before that status is forwarded.
+
+Manual `/fees` operations use `services/fees.py` for transaction handling and `crud/fees.py` for reads/writes. The router retains authentication, response schemas and missing-fee 404s; database integrity errors reach the existing global 409 handler. PUT still requires its existing nullable fields and updates only explicitly supplied values. Amount precision, range handling and post-commit refresh behavior are retained.
 
 Scheduled filter dispatch delegates to `services/filter_kickoff_queue.py`. Its sync repository acquires the existing advisory transaction lock and selects due scheduled jobs with `SKIP LOCKED`; an injected publisher retains the kickoff task name, queue and kwargs. Publication still precedes commit, so a commit failure can leave an already published job scheduled for a later retry.
 

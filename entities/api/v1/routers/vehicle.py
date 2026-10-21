@@ -2,14 +2,13 @@ import asyncio
 import logging
 import logging.handlers
 import os
-from collections import defaultdict
 from datetime import date
 from typing import Any, Dict, List, Optional
 
 import httpx
 from celery.exceptions import CeleryError
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from sqlalchemy import distinct, func, select
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -38,12 +37,14 @@ from crud.vehicle import (
 from db.session import get_db
 from domain.vehicle_ingestion import VehicleEnrichmentPublisher
 from domain.vehicle_source import VehicleDataSource
+from exceptions.vehicle_costs import CostVehicleNotFoundError, EmptyVehicleCostsError, VehicleCostsPersistenceError
 from exceptions.vehicle_ingestion import VehicleBatchImportError, VehicleUpsertError
+from exceptions.vehicle_likes import LikedVehicleNotFoundError
 from exceptions.vehicle_source import InvalidVehicleSourceData, SavedVehicleNotFound, VehicleSourceUnavailable
 from integrations.parsing import ParsingClient
 from models.admin import ROIModel
 from models.user import UserModel
-from models.vehicle import AutoCheckModel, CarModel, ConditionAssessmentModel, FeeModel, HistoryModel, RelevanceStatus
+from models.vehicle import AutoCheckModel, CarModel, FeeModel, HistoryModel
 from schemas.vehicle import (
     CarBaseSchema,
     CarBulkCreateSchema,
@@ -64,7 +65,10 @@ from services.vehicle import (
     prepare_car_detail_response,
     prepare_response,
 )
+from services.vehicle_costs import update_vehicle_costs
+from services.vehicle_filter_options import get_vehicle_filter_options
 from services.vehicle_ingestion import bulk_save_vehicles
+from services.vehicle_likes import toggle_vehicle_like
 from services.vehicle_snapshot import save_vehicle_snapshot
 from services.vehicle_upsert import upsert_vehicle
 
@@ -166,103 +170,7 @@ async def get_car_filter_options(db: AsyncSession = Depends(get_db)) -> CarFilte
     extra = {"request_id": request_id, "user_id": "N/A"}
     logger.info("Fetching filter options for cars", extra=extra)
 
-    active_filter = CarModel.relevance == RelevanceStatus.ACTIVE
-
-    auction_query = select(distinct(CarModel.auction)).where(CarModel.auction.isnot(None), active_filter)
-    auctions = [row[0] for row in (await db.execute(auction_query)).fetchall()]
-
-    condition_assesstments_query = select(
-        distinct(ConditionAssessmentModel.issue_description)
-    ).where(ConditionAssessmentModel.issue_description.isnot(None))
-    condition_assesstments = [row[0] for row in (await db.execute(condition_assesstments_query)).fetchall()]
-
-    auction_name_query = select(distinct(CarModel.auction_name)).where(
-        CarModel.auction_name.isnot(None), active_filter
-    )
-    auction_names = [row[0] for row in (await db.execute(auction_name_query)).fetchall()]
-
-    query = select(CarModel.make, CarModel.model).where(
-        CarModel.make.isnot(None), CarModel.model.isnot(None), active_filter
-    ).distinct()
-    make_model_map = defaultdict(list)
-    for make, model in (await db.execute(query)).fetchall():
-        make_model_map[make].append(model)
-    make_model_map = dict(make_model_map)
-
-    transmission_query = select(distinct(CarModel.transmision)).where(
-        CarModel.transmision.isnot(None), active_filter
-    )
-    transmissions = [row[0] for row in (await db.execute(transmission_query)).fetchall()]
-
-    body_style_query = select(distinct(CarModel.body_style)).where(
-        CarModel.body_style.isnot(None), active_filter
-    )
-    body_styles = [row[0] for row in (await db.execute(body_style_query)).fetchall()]
-
-    vehicle_type_query = select(distinct(CarModel.vehicle_type)).where(
-        CarModel.vehicle_type.isnot(None), active_filter
-    )
-    vehicle_types = [row[0] for row in (await db.execute(vehicle_type_query)).fetchall()]
-
-    fuel_type_query = select(distinct(CarModel.fuel_type)).where(
-        CarModel.fuel_type.isnot(None), active_filter
-    )
-    fuel_types = [row[0] for row in (await db.execute(fuel_type_query)).fetchall()]
-
-    drive_type_query = select(distinct(CarModel.drive_type)).where(
-        CarModel.drive_type.isnot(None), active_filter
-    )
-    drive_types = [row[0] for row in (await db.execute(drive_type_query)).fetchall()]
-
-    condition_query = select(distinct(CarModel.condition)).where(
-        CarModel.condition.isnot(None), active_filter
-    )
-    conditions = [row[0] for row in (await db.execute(condition_query)).fetchall()]
-
-    engine_cylinder_query = select(distinct(CarModel.engine_cylinder)).where(
-        CarModel.engine_cylinder.isnot(None), active_filter
-    )
-    engine_cylinders = [row[0] for row in (await db.execute(engine_cylinder_query)).fetchall()]
-
-    location_query = select(distinct(CarModel.location)).where(
-        CarModel.location.isnot(None), active_filter
-    )
-    locations = [row[0] for row in (await db.execute(location_query)).fetchall()]
-
-    year_range_query = select(func.min(CarModel.year), func.max(CarModel.year)).where(active_filter)
-    year_min, year_max = (await db.execute(year_range_query)).fetchone()
-    year_range = {"min": year_min, "max": year_max} if year_min and year_max else None
-
-    mileage_range_query = select(func.min(CarModel.mileage), func.max(CarModel.mileage)).where(active_filter)
-    mileage_min, mileage_max = (await db.execute(mileage_range_query)).fetchone()
-    mileage_range = {"min": mileage_min, "max": mileage_max} if mileage_min and mileage_max else None
-
-    accident_range_query = select(func.min(CarModel.accident_count), func.max(CarModel.accident_count)).where(active_filter)
-    accident_count_min, accident_count_max = (await db.execute(accident_range_query)).fetchone()
-    accident_count_range = {"min": accident_count_min, "max": accident_count_max} if accident_count_min and accident_count_max else None
-
-    owners_range_query = select(func.min(CarModel.owners), func.max(CarModel.owners)).where(active_filter)
-    owners_min, owners_max = (await db.execute(owners_range_query)).fetchone()
-    owners_range = {"min": owners_min, "max": owners_max} if owners_min and owners_max else None
-
-    return CarFilterOptionsSchema(
-        auctions=auctions,
-        auction_names=auction_names,
-        makes_and_models=make_model_map,
-        locations=locations,
-        years=year_range,
-        mileage_range=mileage_range,
-        accident_count_range=accident_count_range,
-        owners_range=owners_range,
-        condition_assesstments=condition_assesstments,
-        body_styles=body_styles,
-        vehicle_types=vehicle_types,
-        transmissions=transmissions,
-        drive_types=drive_types,
-        engine_cylinders=engine_cylinders,
-        fuel_types=fuel_types,
-        conditions=conditions,
-    )
+    return await get_vehicle_filter_options(db)
 
 
 @router.get(
@@ -697,39 +605,14 @@ async def update_car_costs(car_id: int, car_data: CarCostsUpdateRequestSchema, d
     """
     logger.debug("Updating car costs for ID %s with data: %s", car_id, car_data.dict(exclude_unset=True))
 
-    db_car = (
-        await db.execute(
-            select(CarModel)
-            .where(CarModel.id == car_id)
-            .with_for_update()
-        )
-    ).scalars().first()
-    if not db_car:
-        raise HTTPException(status_code=404, detail=f"Car with ID {car_id} not found")
-
-    update_data = car_data.dict(exclude_unset=True)
-    if not update_data:
-        raise HTTPException(status_code=400, detail="No valid fields provided for update")
-
-    # Update fields
-    for key, value in update_data.items():
-        setattr(db_car, key, value)
-    if db_car.predicted_total_investments is not None:
-        db_car.suggested_bid = db_car.predicted_total_investments - db_car.sum_of_investments
-
     try:
-        await db.commit()
-        await db.refresh(db_car)
-        return {
-            "id": db_car.id,
-            "maintenance": db_car.maintenance,
-            "transportation": db_car.transportation,
-            "labor": db_car.labor,
-            "suggested_bid": db_car.suggested_bid,
-        }
-    except Exception as e:
-        await db.rollback()
-        logger.error("Error updating car costs for ID %s: %s", car_id, str(e))
+        return await update_vehicle_costs(db, car_id=car_id, fields=car_data.model_dump(exclude_unset=True))
+    except CostVehicleNotFoundError:
+        raise HTTPException(status_code=404, detail=f"Car with ID {car_id} not found")
+    except EmptyVehicleCostsError:
+        raise HTTPException(status_code=400, detail="No valid fields provided for update")
+    except VehicleCostsPersistenceError as e:
+        logger.error("Error updating car costs for ID %s: %s", car_id, str(e.__cause__))
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -949,25 +832,12 @@ async def toggle_like(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ):
-    car_result = await db.execute(select(CarModel).where(CarModel.id == car_id))
-    car = car_result.scalar_one_or_none()
-
-    if not car:
+    try:
+        liked = await toggle_vehicle_like(db, car_id=car_id, user_id=current_user.id)
+    except LikedVehicleNotFoundError:
         raise HTTPException(status_code=404, detail="Car not found")
+    return {"detail": "Liked" if liked else "Unliked"}
 
-    user_result = await db.execute(
-        select(UserModel).options(selectinload(UserModel.liked_cars)).where(UserModel.id == current_user.id)
-    )
-    user = user_result.scalar_one()
-
-    if car in user.liked_cars:
-        user.liked_cars.remove(car)
-        await db.commit()
-        return {"detail": "Unliked"}
-    else:
-        user.liked_cars.append(car)
-        await db.commit()
-        return {"detail": "Liked"}
 
 @router.post("/update-car-info/{vehicle_id}", response_model=CarListResponseSchema)
 async def update_car_info(

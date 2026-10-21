@@ -1,14 +1,14 @@
 from typing import List
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.dependencies import get_current_user
 from db.session import get_db
+from exceptions.fees import FeeNotFound
 from models.user import UserModel
-from models.vehicle import FeeModel
 from schemas.vehicle import FeeCreate, FeeRead, FeeUpdate
+from services.fees import create_manual_fee, delete_manual_fee, list_manual_fees, update_manual_fee
 
 router = APIRouter(prefix="/fees")
 
@@ -19,11 +19,7 @@ async def create_fee(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    fee = FeeModel(**payload.model_dump())
-    db.add(fee)
-    await db.commit()
-    await db.refresh(fee)
-    return fee
+    return await create_manual_fee(db, payload)
 
 
 @router.get("/", response_model=List[FeeRead])
@@ -31,8 +27,7 @@ async def list_fees(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    result = await db.execute(select(FeeModel))
-    return result.scalars().all()
+    return await list_manual_fees(db)
 
 
 @router.put("/{fee_id}", response_model=FeeRead)
@@ -42,16 +37,10 @@ async def update_fee(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    fee = await db.get(FeeModel, fee_id)
-    if not fee:
+    try:
+        return await update_manual_fee(db, fee_id, payload)
+    except FeeNotFound:
         raise HTTPException(status_code=404, detail="Fee not found")
-
-    for field, value in payload.model_dump(exclude_unset=True).items():
-        setattr(fee, field, value)
-
-    await db.commit()
-    await db.refresh(fee)
-    return fee
 
 
 @router.delete("/{fee_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -60,10 +49,8 @@ async def delete_fee(
     db: AsyncSession = Depends(get_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    fee = await db.get(FeeModel, fee_id)
-    if not fee:
+    try:
+        await delete_manual_fee(db, fee_id)
+    except FeeNotFound:
         raise HTTPException(status_code=404, detail="Fee not found")
-
-    await db.delete(fee)
-    await db.commit()
     return None

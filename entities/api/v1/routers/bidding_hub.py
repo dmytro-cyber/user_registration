@@ -1,29 +1,26 @@
-import asyncio
 import logging
 import logging.handlers
-import os
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from core.config import Settings
 from core.dependencies import get_current_user
-from crud.vehicle import get_bidding_hub_vehicles, update_vehicle_status
 from db.session import get_db
-from exceptions.bidding import BidVehicleNotFoundError, InvalidActualBidError
-from models.user import UserModel
-from models.vehicle import CarModel, CarStatus, HistoryModel
-from schemas.user import UserResponseSchema
+from exceptions.bidding import (
+    BiddingHistoryNotFoundError,
+    BidVehicleNotFoundError,
+    EmptyBiddingHubError,
+    InvalidActualBidError,
+    InvalidBiddingHubSortError,
+)
 from schemas.vehicle import (
     BiddingHubHistoryListResponseSchema,
-    BiddingHubHistorySchema,
     CarBiddinHubListResponseSchema,
-    CarBiddinHubResponseSchema,
     UpdateActualBidSchema,
 )
+from services.bidding_hub import get_vehicle_bidding_history, list_bidding_hub
+from services.bidding_hub import remove_vehicle_from_hub as remove_vehicle_from_hub_service
 from services.bidding_hub import update_actual_bid as update_actual_bid_service
 
 # Configure logging for production environment
@@ -112,21 +109,17 @@ async def get_bidding_hub(
     )
 
     try:
-        vehicles, total_count, total_pages = await get_bidding_hub_vehicles(
-            db, page=page, page_size=page_size, current_user=current_user, sort_by=sort_by, sort_order=sort_order
+        response = await list_bidding_hub(
+            db, page=page, page_size=page_size, sort_by=sort_by, sort_order=sort_order,
         )
-        print(vehicles)
-        if not vehicles:
-            logger.info("No vehicles found in the bidding hub", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No vehicles found in the bidding hub")
         logger.info(
-            f"Found {len(vehicles)} vehicles, total_count={total_count}, total_pages={total_pages}", extra=extra
+            f"Found {len(response.vehicles)} vehicles, total_count={response.total_count}, total_pages={response.total_pages}", extra=extra
         )
-        return CarBiddinHubListResponseSchema(
-            vehicles=[CarBiddinHubResponseSchema.from_orm(vehicle) for vehicle in vehicles],
-            total_count=total_count,
-            total_pages=total_pages,
-        )
+        return response
+    except EmptyBiddingHubError:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No vehicles found in the bidding hub")
+    except InvalidBiddingHubSortError:
+        raise HTTPException(status_code=400, detail=f"Sorting by {sort_by} not alowed")
     except HTTPException as e:
         logger.error(f"Failed to fetch bidding hub vehicles: {str(e)}", extra=extra)
         raise
@@ -165,24 +158,16 @@ async def delete_vehicle(
     logger.info(f"Deleting vehicle with car_id={car_id} from bidding hub for user_id={current_user.id}", extra=extra)
 
     try:
-        vehicle, _ = await update_vehicle_status(db, car_id, CarStatus.DELETED_FROM_BIDDING_HUB)
-        if not vehicle:
-            logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
-        hub_history = HistoryModel(
-            car_id=car_id,
-            action="Deleted vehicle from Bidding Hub",
-            user_id=current_user.id,
-        )
-        db.add(hub_history)
-        await db.commit()
+        await remove_vehicle_from_hub_service(db, car_id=car_id, user_id=current_user.id)
         logger.info(f"Successfully deleted vehicle with car_id={car_id} and logged history", extra=extra)
+    except BidVehicleNotFoundError:
+        logger.error(f"Vehicle with car_id={car_id} not found", extra=extra)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found")
     except HTTPException as e:
         logger.error(f"Failed to delete vehicle with car_id={car_id}: {str(e)}", extra=extra)
         raise
     except Exception as e:
         logger.error(f"Unexpected error while deleting vehicle with car_id={car_id}: {str(e)}", extra=extra)
-        await db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error deleting vehicle",
@@ -250,43 +235,12 @@ async def get_bidding_hub_history(
     logger.info(f"Fetching bidding history for car_id={car_id} by user_id={current_user.id}", extra=extra)
 
     try:
-        stmt = (
-            select(HistoryModel)
-            .where(HistoryModel.car_id == car_id)
-            .options(selectinload(HistoryModel.user).selectinload(UserModel.role))
-            .order_by(HistoryModel.created_at.desc())
-        )
-        result = await db.execute(stmt)
-        history_list = result.scalars().all()
-        if not history_list:
-            logger.info(f"No bidding history found for car_id={car_id}", extra=extra)
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle"
-            )
-        logger.info(f"Found {len(history_list)} history records for car_id={car_id}", extra=extra)
-        return BiddingHubHistoryListResponseSchema(
-            history=[
-                BiddingHubHistorySchema(
-                    id=item.id,
-                    action=item.action,
-                    user=(
-                        UserResponseSchema(
-                            email=item.user.email,
-                            first_name=item.user.first_name,
-                            last_name=item.user.last_name,
-                            phone_number=item.user.phone_number,
-                            date_of_birth=item.user.date_of_birth,
-                            role=item.user.role.name if item.user.role else None,
-                        )
-                        if item.user
-                        else None
-                    ),
-                    comment=item.comment,
-                    created_at=item.created_at,
-                )
-                for item in history_list
-            ]
-        )
+        response = await get_vehicle_bidding_history(db, car_id=car_id)
+        logger.info(f"Found {len(response.history)} history records for car_id={car_id}", extra=extra)
+        return response
+    except BiddingHistoryNotFoundError:
+        logger.info(f"No bidding history found for car_id={car_id}", extra=extra)
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No bidding history found for this vehicle")
     except HTTPException as e:
         logger.error(f"Failed to fetch bidding history for car_id={car_id}: {str(e)}", extra=extra)
         raise
